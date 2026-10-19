@@ -12,14 +12,71 @@ from __future__ import annotations
 
 import html
 import json
+import logging
 import os
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Optional
 
 from app.ai_providers.base import AIProvider, AIProviderError
 from app.config.settings import Settings
 from app.core.conversation import Conversation
-from app.memory.persistent import PersistentMemory
+from app.memory.persistent import PersistentMemory, PersistentMemoryError
+
+logger = logging.getLogger("miles.web")
+if not logger.handlers:
+    # Handler neutre : l'application reste libre de configurer la
+    # journalisation. Évite la sortie "No handlers could be found" et
+    # n'écrit rien sur stderr par défaut.
+    logger.addHandler(logging.NullHandler())
+
+REDACTED = "[REDACTED]"
+
+# Motifs de secrets qui ne doivent jamais quitter le processus.
+_SECRET_PATTERNS = (
+    # Clés de type "sk-..." (fournisseur IA distant).
+    re.compile(r"sk-[A-Za-z0-9_\-]{4,}"),
+    # En-têtes d'authentification "Bearer ..." / "Basic ...".
+    re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._\-]{4,}"),
+    # Paires "cle=valeur" pour les noms de secrets connus.
+    re.compile(
+        r"(?i)\b(?:api[_-]?key|apikey|token|secret|password|passwd|pwd"
+        r"|credential|private[_-]?key|access[_-]?key)\b"
+        r"\s*[:=]\s*[\"']?[^\s\"',;]+"
+    ),
+    # Valeurs isolées de type "password: monmotdepasse".
+    re.compile(
+        r"(?i)\b(?:password|passwd|pwd|secret|token|api[_-]?key)\b"
+        r"\s*[:=]\s*[\"']?[^\s\"',;]{4,}"
+    ),
+)
+
+
+def sanitize_text(text: object) -> str:
+    """Remplacer les secrets potentiels d'un message par un marqueur.
+
+    Appliqué avant toute écriture dans les journaux internes. Le texte
+    d'origine n'est jamais renvoyé au client HTTP.
+    """
+    sanitized = str(text)
+    for pattern in _SECRET_PATTERNS:
+        sanitized = pattern.sub(REDACTED, sanitized)
+    return sanitized
+
+
+def public_provider_error(exc: Exception) -> str:
+    """Retourner un message public sûr pour une erreur de fournisseur.
+
+    Le message d'origine n'est jamais transmis : il peut contenir une clé
+    d'API, un jeton ou une URL interne. Seule une classification contrôlée
+    est exposée au client.
+    """
+    detail = str(exc).lower()
+    if "invalide" in detail:
+        return "Erreur du fournisseur IA : réponse invalide du fournisseur."
+    if "indisponible" in detail:
+        return "Erreur du fournisseur IA : fournisseur indisponible."
+    return "Erreur du fournisseur IA : échec de la communication avec le fournisseur."
 
 
 class WebApp:
@@ -78,14 +135,27 @@ class WebApp:
             response = self.provider.chat(context)
         except AIProviderError as exc:
             # La conversation est conservée : le message utilisateur reste.
+            # Le détail technique reste interne et assaini de tout secret.
+            logger.error(
+                "Échec de l'appel au fournisseur IA : %s", sanitize_text(exc)
+            )
             return {
-                "error": f"Erreur du fournisseur IA : {exc}",
+                "error": public_provider_error(exc),
                 "provider": self.settings.provider,
                 "context_preserved": True,
             }
         except Exception as exc:  # noqa: BLE001 — ne pas faire tomber le serveur
+            # Aucune trace brute n'est journalisée : la trace d'appels
+            # contiendrait le message d'origine de l'exception, donc
+            # potentiellement un secret de format inconnu. Seul le nom de
+            # la classe et le message assaini sont conservés.
+            logger.error(
+                "Erreur interne lors de l'appel au fournisseur IA (%s) : %s",
+                type(exc).__name__,
+                sanitize_text(exc),
+            )
             return {
-                "error": f"Erreur inattendue : {exc}",
+                "error": "Erreur interne du service.",
                 "provider": self.settings.provider,
                 "context_preserved": True,
             }
@@ -121,8 +191,20 @@ class WebApp:
         try:
             mem_id = self.memory.add_memory(content)
             return {"id": mem_id, "content": content}
-        except Exception as exc:  # noqa: BLE001 — ne pas faire tomber le serveur
+        except PersistentMemoryError as exc:
+            # Message produit par MILES lui-même (texte fixe) : ne contient
+            # aucune valeur sensible, il peut être renvoyé au client.
+            logger.error(
+                "Refus d'enregistrement d'un souvenir : %s", sanitize_text(exc)
+            )
             return {"error": str(exc)}
+        except Exception as exc:  # noqa: BLE001 — ne pas faire tomber le serveur
+            logger.error(
+                "Erreur interne lors de l'enregistrement d'un souvenir (%s) : %s",
+                type(exc).__name__,
+                sanitize_text(exc),
+            )
+            return {"error": "Erreur interne du service."}
 
     def delete_memory(self, memory_id: int) -> dict[str, Any]:
         """Supprimer un souvenir ciblé."""
@@ -133,8 +215,20 @@ class WebApp:
             if deleted:
                 return {"id": memory_id, "deleted": True}
             return {"error": f"Aucun souvenir avec l'id {memory_id}."}
-        except Exception as exc:  # noqa: BLE001
+        except PersistentMemoryError as exc:
+            # Message produit par MILES lui-même (texte fixe) : ne contient
+            # aucune valeur sensible, il peut être renvoyé au client.
+            logger.error(
+                "Refus de suppression d'un souvenir : %s", sanitize_text(exc)
+            )
             return {"error": str(exc)}
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "Erreur interne lors de la suppression d'un souvenir (%s) : %s",
+                type(exc).__name__,
+                sanitize_text(exc),
+            )
+            return {"error": "Erreur interne du service."}
 
 
 class MilesHandler(BaseHTTPRequestHandler):

@@ -21,6 +21,33 @@ class SettingsError(Exception):
     """Erreur de configuration."""
 
 
+# Valeurs acceptées pour un paramètre booléen, en variable d'environnement
+# ou dans le fichier de configuration JSON (insensible à la casse).
+_TRUE_VALUES = ("1", "true", "yes", "on")
+_FALSE_VALUES = ("0", "false", "no", "off")
+
+
+def _coerce_bool(value: Any, source: str) -> bool:
+    """Convertir une valeur de configuration en booléen.
+
+    Un booléen est renvoyé tel quel. Une chaîne est comparée à une liste
+    blanche de valeurs admises. Toute autre valeur lève une SettingsError
+    explicite : utiliser bool() serait trompeur, car bool("false") vaut True
+    et activerait silencieusement une fonctionnalité censée être désactivée.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in _TRUE_VALUES:
+            return True
+        if lowered in _FALSE_VALUES:
+            return False
+    raise SettingsError(
+        f"{source} doit être un booléen (true/false), valeur reçue : {value!r}"
+    )
+
+
 class Settings:
     """Paramètres de configuration de MILES."""
 
@@ -111,6 +138,10 @@ class Settings:
                         ) from exc
                 elif key == "voice_enabled":
                     value = value.lower() in ("1", "true", "yes", "on")
+                elif key == "memory_enabled":
+                    # Conversion explicite : "false" ne doit pas être
+                    # interprété comme vrai par bool().
+                    value = _coerce_bool(value, env_name)
                 self._values[key] = value
 
         # Validation
@@ -177,6 +208,16 @@ class Settings:
                 f"memory_max_content_length doit être un entier positif, valeur reçue: {max_content!r}"
             )
 
+        # Normalisation du paramètre booléen mémoire : la valeur peut venir
+        # du fichier de configuration JSON sous forme de chaîne ("true" /
+        # "false"). Sans cette normalisation, bool("false") vaudrait True et
+        # activerait la mémoire persistante malgré une désactivation
+        # explicite. Une valeur invalide provoque une erreur explicite.
+        if "memory_enabled" in self._values:
+            self._values["memory_enabled"] = _coerce_bool(
+                self._values["memory_enabled"], "memory_enabled"
+            )
+
     @property
     def provider(self) -> str:
         return str(self._values["provider"])
@@ -202,6 +243,12 @@ class Settings:
 
     @property
     def memory_enabled(self) -> bool:
+        """Indiquer si la mémoire persistante locale est activée.
+
+        La valeur est normalisée en booléen lors de la validation de la
+        configuration : la chaîne "false" ne doit jamais être interprétée
+        comme vraie.
+        """
         return bool(self._values.get("memory_enabled", False))
 
     @property

@@ -8,7 +8,7 @@ from app.ai_providers.local import LocalProvider
 from app.ai_providers.remote import RemoteProvider
 from app.config.settings import Settings
 from app.interface.cli import CLI
-from app.memory.persistent import PersistentMemory
+from app.memory.persistent import PersistentMemory, PersistentMemoryError
 
 
 def build_parser() -> argparse.ArgumentParser:
