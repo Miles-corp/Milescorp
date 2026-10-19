@@ -35,6 +35,15 @@ Aucun blocage à ce jour.
 
 - DEC-001 à DEC-004 acceptées (voir `docs/coordination/DECISIONS.md`).
 
+## Audit final Agent A (MISSION 004A)
+
+- Rapport : `docs/reports/AUDIT-TASK-DEV-003.md`
+- Résultat : TASK-DEV-003 marqué DONE par Agent B avec réserves (tests exécutés sur Windows Python 3.14.7, pas sur Debian 13).
+- Critères PASS : tests unitaires (18/18 sur Windows), démarrage `miles.py --help` (code 0), absence de secrets, cohérence des documents, pas de basculement silencieux, pas d'accès shell arbitraire, configuration invalide gérée, dégradation gracieuse voix.
+- Critères FAIL : documentation d'installation manquante (`docs/installation/` contient uniquement un `.gitkeep`).
+- Critères BLOCKED : validation spécifique sur Debian 13 (environnement non disponible sur le poste Windows d'Agent B et de Agent A).
+- Recommandation : créer `docs/installation/` et valider sur Debian 13 avant de considérer le jalon pleinement atteint.
+
 ## Notes
 
 - Les deux PC possèdent leur propre clone local du dépôt.
