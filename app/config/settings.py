@@ -96,7 +96,13 @@ class Settings:
             value = os.environ.get(env_name)
             if value is not None:
                 # Conversion de type pour les champs numériques
-                if key in ("remote_timeout", "local_timeout", "history_limit"):
+                if key in (
+                    "remote_timeout",
+                    "local_timeout",
+                    "history_limit",
+                    "memory_max_memories_in_context",
+                    "memory_max_content_length",
+                ):
                     try:
                         value = int(value)
                     except ValueError as exc:

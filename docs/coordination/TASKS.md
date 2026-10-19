@@ -23,6 +23,7 @@ Convention :
 | TASK-DEV-005 | MILESTONE-005 : Assistant personnel hybride distant/local | Fournisseur distant branché, interface web http.server, sélection explicite, tests automatisés, chargement .env | DONE | Agent A | app/interface/web.py, app/interface/__init__.py, miles.py, app/config/settings.py, tests/test_web.py, tests/test_env_loading.py, tests/test_provider_selection.py, docs/reports/MILESTONE-005.md, docs/coordination/DECISIONS.md | Fournisseur distant connecté à la CLI et au web, pas de basculement silencieux, .env chargé (stdlib), 95 tests OK sur Windows | Dépend de TASK-DEV-004 publié sur GitHub | 2026-10-19 | 2026-10-19 |
 | TASK-DEV-006 | MILESTONE-006 : Mémoire persistante locale | Mémoire persistante SQLite contrôlable par l'utilisateur, souvenirs explicites uniquement, tests, documentation | DONE | Agent A | app/memory/persistent.py, app/memory/__init__.py, app/config/settings.py, app/interface/cli.py, miles.py, tests/test_memory_persistent.py, config/config.json.example, .env.example, docs/reports/MILESTONE-006.md | Mémoire persiste entre lancements, souvenirs distincts de l'historique, pas de secrets stockés, dégradation gracieuse sur base corrompue, 95 tests OK sur Windows | Dépend de TASK-DEV-005 publié sur GitHub | 2026-10-19 | 2026-10-19 |
 | TASK-DEV-007 | MILESTONE-007 : Fournisseur local hors ligne (RTX 3050) | Étude technique et proposition de moteur local + modèle adapté à RTX 3050 4 Go, sans Ollama, sans téléchargement sans accord | TODO | Agent A | docs/reports/LOCAL_PROVIDER_PROPOSAL.md (à créer) | Plan technique documenté : moteur, modèle, taille, mémoire VRAM, dépendances, limites | Aucune | — | — |
+| TASK-DEV-008 | Phase 4 : Moteur d'outils sécurisé | Registre central, moteur de décision, politique de sécurité, journal d'audit, premier outil status_read, tests automatisés | DONE | Agent A | app/tools/**, tests/test_tool_*.py | 137 tests OK (67 existants + 70 nouveaux), aucun secret dans les logs, pas d'accès shell arbitraire, pas de basculement des permissions | Dépend de TASK-DEV-006 publié sur GitHub | 2026-10-19 | 2026-10-19 |
 
 ## Registre des fichiers et propriétaires (Mission DEV-001)
 
@@ -61,6 +62,17 @@ Convention :
 | tests/test_milestone_005.py | Tests sélection remote/local, pas de basculement silencieux, erreur fournisseur, préservation historique | Agent A | Créé | unittest, app.ai_providers, app.config.settings, app.interface.cli, app.core.conversation | — | TASK-DEV-005 |
 | app/memory/persistent.py | Mémoire persistante SQLite : souvenirs, préférences, contexte IA, détection secrets | Agent A | Créé | sqlite3 (stdlib) | Classe PersistentMemory, PersistentMemoryError | TASK-DEV-006 |
 | tests/test_memory_persistent.py | Tests mémoire persistante : init, ajout, lecture, suppression, effacement, base invalide, secrets, préférences, contexte | Agent A | Créé | unittest, tempfile, app.memory.persistent | — | TASK-DEV-006 |
+| app/tools/__init__.py | Package outils MILES : exports publics | Agent A | Créé | — | Python | TASK-DEV-008 |
+| app/tools/registry.py | Registre central des outils autorisés (ToolDefinition, ToolParameter, ToolRegistry) | Agent A | Créé | app/tools/ | Classe ToolRegistry, ToolDefinition, ToolParameter | TASK-DEV-008 |
+| app/tools/engine.py | Moteur de décision (ToolEngine, ToolResult) — sélection, validation, exécution avec timeout, audit | Agent A | Créé | app/tools/ | Classe ToolEngine, ToolResult | TASK-DEV-008 |
+| app/tools/policy.py | Politique de sécurité (ToolPolicy) — permissions, refus shell/code/secrets | Agent A | Créé | app/tools/ | Classe ToolPolicy | TASK-DEV-008 |
+| app/tools/audit.py | Journal d'audit (AuditLogger, AuditEntry) — traçabilité sans secrets | Agent A | Créé | app/tools/ | Classe AuditLogger, AuditEntry | TASK-DEV-008 |
+| app/tools/status_tool.py | Premier outil : statut MILES, lecture seule, sans effet de bord | Agent A | Créé | app/tools/ | Fonction status_tool_handler | TASK-DEV-008 |
+| tests/test_tool_registry.py | Tests du registre d'outils | Agent A | Créé | tests/ | unittest | TASK-DEV-008 |
+| tests/test_tool_policy.py | Tests de la politique de sécurité | Agent A | Créé | tests/ | unittest | TASK-DEV-008 |
+| tests/test_tool_audit.py | Tests du journal d'audit | Agent A | Créé | tests/ | unittest | TASK-DEV-008 |
+| tests/test_tool_engine.py | Tests du moteur de décision | Agent A | Créé | tests/ | unittest | TASK-DEV-008 |
+| tests/test_status_tool.py | Tests du premier outil | Agent A | Créé | tests/ | unittest | TASK-DEV-008 |
 
 ## Règles d'attribution
 
