@@ -6,18 +6,21 @@ contrôles de sécurité stricts :
 - Vérifie que l'outil existe et est enregistré.
 - Valide strictement les paramètres (types, contraintes, absence de
   paramètres supplémentaires non déclarés).
+- Applique la politique de sécurité (pas de shell, pas de code généré,
+  pas d'accès aux secrets).
 - Vérifie les permissions requises.
-- Exige une confirmation humaine explicite pour les outils MEDIUM/HIGH.
-- Exécute avec un délai maximal (timeout).
-- Journalise chaque demande (outil, décision, résultat).
-- Aucun shell arbitraire, aucun eval()/exec() de code généré.
+- Exige une confirmation humaine explicite pour les outils MEDIUM/HIGH,
+  avec expiration des jetons.
+- Exécute avec un délai maximal (timeout) et arrêt effectif du processus.
+- Journalise chaque demande (outil, décision, résultat) sans exposer
+  de secrets ni d'exceptions brutes.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import threading
+import multiprocessing
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -54,11 +57,37 @@ class ToolResult:
 
 @dataclass
 class _PendingConfirmation:
-    """Demande de confirmation en attente pour un outil risqué."""
+    """Demande de confirmation en attente pour un outil risqué.
+
+    Attributs :
+        tool_id : identifiant de l'outil.
+        parameters_hash : empreinte des paramètres exacts.
+        token : jeton de confirmation.
+        expires_at : instant d'expiration (secondes depuis l'époque).
+    """
 
     tool_id: str
     parameters_hash: str
     token: str
+    expires_at: float
+
+
+def _run_handler_in_process(
+    handler: Callable[..., Any],
+    parameters: Dict[str, Any],
+    result_queue: "multiprocessing.Queue[Any]",
+    error_queue: "multiprocessing.Queue[str]",
+) -> None:
+    """Exécuter un handler dans un processus séparé.
+
+    Cette fonction est définie au niveau du module pour pouvoir être
+    sérialisée par multiprocessing sur Windows (spawn).
+    """
+    try:
+        result = handler(**parameters)
+        result_queue.put(("ok", result))
+    except Exception as exc:  # noqa: BLE001
+        error_queue.put(("error", str(exc)))
 
 
 class ToolEngine:
@@ -68,6 +97,10 @@ class ToolEngine:
         registry : registre des outils autorisés.
         policy : politique de sécurité.
         audit : journal d'audit.
+        _clock : fonction retournant le temps actuel (secondes depuis
+            l'époque). Utilisée pour les tests d'expiration.
+        _confirmation_ttl_seconds : durée de validité d'un jeton de
+            confirmation (défaut : 300 secondes = 5 minutes).
     """
 
     def __init__(
@@ -75,10 +108,15 @@ class ToolEngine:
         registry: ToolRegistry,
         policy: ToolPolicy,
         audit: AuditLogger,
+        *,
+        clock: Callable[[], float] = time.time,
+        confirmation_ttl_seconds: float = 300.0,
     ) -> None:
         self._registry = registry
         self._policy = policy
         self._audit = audit
+        self._clock = clock
+        self._confirmation_ttl_seconds = confirmation_ttl_seconds
         self._pending_confirmations: Dict[str, _PendingConfirmation] = {}
 
     # --- Interface publique ---
@@ -121,7 +159,29 @@ class ToolEngine:
                 error_message=f"Outil inconnu : {tool_id}",
             )
 
-        # 2. Rejeter tout paramètre supplémentaire non déclaré
+        # 2. Appliquer la politique de sécurité sur les paramètres
+        try:
+            self._policy.validate_no_shell_access(parameters)
+            self._policy.validate_no_code_execution(parameters)
+            self._policy.validate_no_secret_access(parameters)
+        except PermissionError as exc:
+            params_hash = self._hash_parameters(parameters)
+            self._record(
+                tool_id,
+                user_confirmed,
+                False,
+                "refused",
+                "Refus de sécurité : action non autorisée.",
+                parameters,
+                params_hash,
+            )
+            return ToolResult(
+                tool_id=tool_id,
+                success=False,
+                error_message="Action refusée par la politique de sécurité.",
+            )
+
+        # 3. Rejeter tout paramètre supplémentaire non déclaré
         declared_params = {p.name for p in tool.parameters}
         extra_params = set(parameters.keys()) - declared_params
         if extra_params:
@@ -144,7 +204,7 @@ class ToolEngine:
                 ),
             )
 
-        # 3. Valider les paramètres déclarés
+        # 4. Valider les paramètres déclarés
         param_errors = self._validate_parameters(tool, parameters)
         if param_errors:
             params_hash = self._hash_parameters(parameters)
@@ -163,7 +223,7 @@ class ToolEngine:
                 error_message="; ".join(param_errors),
             )
 
-        # 4. Vérifier les permissions requises
+        # 5. Vérifier les permissions requises
         if not self._policy.has_all_permissions(tool.required_permissions):
             missing = [
                 p for p in tool.required_permissions
@@ -185,17 +245,14 @@ class ToolEngine:
                 error_message=f"Permissions manquantes : {missing}",
             )
 
-        # 5. Gérer la confirmation pour outils risqués
+        # 6. Gérer la confirmation pour outils risqués
         params_hash = self._hash_parameters(parameters)
 
         if self._policy.requires_human_confirmation(tool.risk_level):
-            # Vérifier si une confirmation valide existe déjà pour ce tool
-            # et ces paramètres exacts.
             pending = self._find_pending_confirmation(
                 tool_id, params_hash, confirmation_token
             )
             if pending is None or not user_confirmed:
-                # Générer un nouveau token de confirmation
                 token = self._create_pending_confirmation(tool_id, params_hash)
                 self._audit.record(
                     tool_id=tool_id,
@@ -218,10 +275,10 @@ class ToolEngine:
             # Confirmation valide : consommer le token
             self._pending_confirmations.pop(pending.token, None)
 
-        # 6. Exécuter l'outil avec timeout
+        # 7. Exécuter l'outil avec timeout et arrêt effectif
         result = self._execute_tool(tool, parameters)
 
-        # 7. Consigner le résultat
+        # 8. Consigner le résultat (sans exposer de secrets)
         self._record(
             tool_id,
             user_confirmed,
@@ -301,46 +358,66 @@ class ToolEngine:
         tool: ToolDefinition,
         parameters: Dict[str, Any],
     ) -> ToolResult:
-        """Exécuter l'outil avec un délai maximal.
+        """Exécuter l'outil avec un délai maximal et arrêt effectif.
 
-        L'exécution se fait dans un thread séparé pour permettre l'interruption
-        en cas de dépassement de délai. Aucun shell arbitraire n'est utilisé.
+        L'exécution se fait dans un processus séparé (multiprocessing)
+        pour permettre un arrêt effectif en cas de dépassement de délai.
+        Aucun shell arbitraire n'est utilisé.
         """
-        result_container: Dict[str, Any] = {}
-        error_container: Dict[str, Optional[Exception]] = {}
+        result_queue: "multiprocessing.Queue[Any]" = multiprocessing.Queue()
+        error_queue: "multiprocessing.Queue[str]" = multiprocessing.Queue()
 
-        def _target() -> None:
-            try:
-                result_container["value"] = tool.handler(**parameters)
-            except Exception as exc:  # noqa: BLE001
-                error_container["error"] = exc
+        process = multiprocessing.Process(
+            target=_run_handler_in_process,
+            args=(tool.handler, parameters, result_queue, error_queue),
+            daemon=True,
+        )
+        process.start()
+        process.join(timeout=tool.timeout_seconds)
 
-        thread = threading.Thread(target=_target, daemon=True)
-        thread.start()
-        thread.join(timeout=tool.timeout_seconds)
-
-        if thread.is_alive():
-            # Le thread est toujours en cours : dépassement de délai
+        if process.is_alive():
+            # Le processus est toujours en cours : arrêt effectif
+            process.terminate()
+            process.join(timeout=5)
+            if process.is_alive():
+                process.kill()
             return ToolResult(
                 tool_id=tool.tool_id,
                 success=False,
                 error_message=(
-                    f"Délai d'attente dépassé ({tool.timeout_seconds}s)"
+                    f"Délai d'attente dépassé ({tool.timeout_seconds}s). "
+                    "Exécution arrêtée."
                 ),
             )
 
-        if "error" in error_container:
-            exc = error_container["error"]
+        # Récupérer le résultat ou l'erreur
+        if not result_queue.empty():
+            kind, value = result_queue.get()
+            if kind == "ok":
+                return ToolResult(
+                    tool_id=tool.tool_id,
+                    success=True,
+                    data=value,
+                )
+            # Ne devrait pas arriver, mais on gère
             return ToolResult(
                 tool_id=tool.tool_id,
                 success=False,
-                error_message=f"Erreur d'exécution : {exc}",
+                error_message="Erreur interne lors de l'exécution.",
+            )
+
+        if not error_queue.empty():
+            _kind, error_msg = error_queue.get()
+            return ToolResult(
+                tool_id=tool.tool_id,
+                success=False,
+                error_message="Erreur d'exécution.",
             )
 
         return ToolResult(
             tool_id=tool.tool_id,
-            success=True,
-            data=result_container.get("value"),
+            success=False,
+            error_message="Erreur interne lors de l'exécution.",
         )
 
     def _hash_parameters(self, parameters: Dict[str, Any]) -> str:
@@ -355,10 +432,12 @@ class ToolEngine:
     ) -> str:
         """Créer une demande de confirmation en attente."""
         token = uuid.uuid4().hex
+        expires_at = self._clock() + self._confirmation_ttl_seconds
         self._pending_confirmations[token] = _PendingConfirmation(
             tool_id=tool_id,
             parameters_hash=parameters_hash,
             token=token,
+            expires_at=expires_at,
         )
         return token
 
@@ -378,6 +457,10 @@ class ToolEngine:
             return None
         if pending.parameters_hash != parameters_hash:
             return None
+        if self._clock() > pending.expires_at:
+            # Jeton expiré : le supprimer et refuser
+            del self._pending_confirmations[pending.token]
+            return None
         return pending
 
     def _record(
@@ -390,7 +473,11 @@ class ToolEngine:
         parameters: Optional[Dict[str, Any]] = None,
         parameters_hash: Optional[str] = None,
     ) -> None:
-        """Enregistrer une entrée d'audit."""
+        """Enregistrer une entrée d'audit sans exposer de secrets.
+
+        Les exceptions brutes ne sont jamais journalisées : seul un message
+        générique est enregistré.
+        """
         if parameters_hash is None:
             parameters_hash = self._hash_parameters(parameters or {})
         self._audit.record(
