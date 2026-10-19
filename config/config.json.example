@@ -8,5 +8,9 @@
   "local_timeout": 60,
   "history_limit": 10,
   "voice_enabled": false,
-  "allowed_actions": ["datetime", "workdir", "list_files"]
+  "allowed_actions": ["datetime", "workdir", "list_files"],
+  "memory_enabled": false,
+  "memory_db_path": "data/memory.db",
+  "memory_max_memories_in_context": 5,
+  "memory_max_content_length": 1000
 }

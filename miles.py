@@ -6,6 +6,7 @@ import argparse
 
 from app.config.settings import Settings
 from app.interface.cli import CLI
+from app.memory.persistent import PersistentMemory
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,7 +42,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.provider is not None:
         settings.provider = args.provider
 
-    cli = CLI(settings=settings)
+    memory = None
+    if settings.memory_enabled:
+        try:
+            memory = PersistentMemory(
+                enabled=True,
+                db_path=settings.memory_db_path,
+                max_memories_in_context=settings.memory_max_memories_in_context,
+                max_content_length=settings.memory_max_content_length,
+            )
+        except PersistentMemoryError as exc:
+            print(f"Avertissement : mémoire persistante non disponible : {exc}", file=sys.stderr)
+
+    cli = CLI(settings=settings, memory=memory)
     try:
         cli.run()
     except KeyboardInterrupt:

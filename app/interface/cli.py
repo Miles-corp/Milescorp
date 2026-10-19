@@ -11,6 +11,7 @@ from typing import Any
 
 from app.ai_providers.base import AIProvider, AIProviderError
 from app.core.conversation import Conversation
+from app.memory.persistent import PersistentMemory, PersistentMemoryError
 from app.security.validator import ActionValidator, ActionResult
 
 HELP_TEXT = """\nCommandes disponibles :
@@ -19,6 +20,9 @@ HELP_TEXT = """\nCommandes disponibles :
   /clear       Effacer l'historique de la conversation
   /provider    Afficher le fournisseur IA courant
   /status      Afficher l'état du programme
+  /remember    Enregistrer un souvenir explicite (usage: /remember <texte>)
+  /memory      Lister les souvenirs persistants
+  /forget      Supprimer un souvenir (usage: /forget <id>)
 Tapez votre message pour discuter avec l'assistant.
 """
 
@@ -32,6 +36,7 @@ class CLI:
         provider: AIProvider | None = None,
         conversation: Conversation | None = None,
         validator: ActionValidator | None = None,
+        memory: PersistentMemory | None = None,
     ) -> None:
         self.settings = settings
         self.provider = provider
@@ -41,6 +46,7 @@ class CLI:
             )
         self.conversation = conversation
         self.validator = validator or ActionValidator()
+        self.memory = memory
         self._running = True
 
     def run(self) -> None:
@@ -127,6 +133,50 @@ class CLI:
             print(f"Fournisseur : {provider_name}")
             print(f"Disponible : {'oui' if available else 'non'}")
             print(f"Messages dans l'historique : {len(self.conversation)}")
+            if self.memory is not None:
+                print(
+                    f"Mémoire persistante : {'activée' if self.memory.is_available else 'désactivée/indisponible'}"
+                )
+        elif cmd == "/remember":
+            if self.memory is None or not self.memory.is_available:
+                print("Mémoire persistante indisponible ou désactivée.")
+                return
+            if not args:
+                print("Usage : /remember <texte du souvenir>")
+                return
+            content = " ".join(args)
+            try:
+                mem_id = self.memory.add_memory(content)
+                print(f"Souvenir enregistré (id {mem_id}).")
+            except PersistentMemoryError as exc:
+                print(f"Erreur : {exc}")
+        elif cmd == "/memory":
+            if self.memory is None or not self.memory.is_available:
+                print("Mémoire persistante indisponible ou désactivée.")
+                return
+            memories = self.memory.list_memories()
+            if not memories:
+                print("Aucun souvenir enregistré.")
+                return
+            print("Souvenirs persistants :")
+            for m in memories:
+                print(f"  [{m['id']}] {m['content']} (catégorie: {m['category']}, importance: {m['importance']})")
+        elif cmd == "/forget":
+            if self.memory is None or not self.memory.is_available:
+                print("Mémoire persistante indisponible ou désactivée.")
+                return
+            if not args:
+                print("Usage : /forget <id du souvenir>")
+                return
+            try:
+                memory_id = int(args[0])
+            except ValueError:
+                print("L'identifiant doit être un nombre.")
+                return
+            if self.memory.delete_memory(memory_id):
+                print(f"Souvenir {memory_id} supprimé.")
+            else:
+                print(f"Aucun souvenir avec l'id {memory_id}.")
         else:
             print(f"Commande inconnue : {cmd}. Tapez /help pour l'aide.")
 

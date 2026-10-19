@@ -35,6 +35,10 @@ class Settings:
         "history_limit": 10,
         "voice_enabled": False,
         "allowed_actions": ["datetime", "workdir", "list_files"],
+        "memory_enabled": False,
+        "memory_db_path": "data/memory.db",
+        "memory_max_memories_in_context": 5,
+        "memory_max_content_length": 1000,
     }
 
     def __init__(self, config_path: str | None = None) -> None:
@@ -74,6 +78,11 @@ class Settings:
             "MILES_LOCAL_TIMEOUT": "local_timeout",
             "MILES_HISTORY_LIMIT": "history_limit",
             "MILES_VOICE_ENABLED": "voice_enabled",
+            # Mémoire persistante locale
+            "MILES_MEMORY_ENABLED": "memory_enabled",
+            "MILES_MEMORY_DB_PATH": "memory_db_path",
+            "MILES_MEMORY_MAX_MEMORIES_IN_CONTEXT": "memory_max_memories_in_context",
+            "MILES_MEMORY_MAX_CONTENT_LENGTH": "memory_max_content_length",
             # Secrets : jamais codés en dur, lus uniquement depuis l'environnement
             "MILES_REMOTE_API_KEY": "remote_api_key",
             "MILES_LOCAL_API_KEY": "local_api_key",
@@ -109,6 +118,18 @@ class Settings:
                 f"history_limit doit être un entier positif, valeur reçue: {history_limit!r}"
             )
 
+        max_memories = self._values.get("memory_max_memories_in_context")
+        if not isinstance(max_memories, int) or max_memories < 0:
+            raise SettingsError(
+                f"memory_max_memories_in_context doit être un entier positif, valeur reçue: {max_memories!r}"
+            )
+
+        max_content = self._values.get("memory_max_content_length")
+        if not isinstance(max_content, int) or max_content < 1:
+            raise SettingsError(
+                f"memory_max_content_length doit être un entier positif, valeur reçue: {max_content!r}"
+            )
+
     @property
     def provider(self) -> str:
         return str(self._values["provider"])
@@ -131,3 +152,19 @@ class Settings:
     def as_dict(self) -> dict[str, Any]:
         """Retourne une copie des valeurs (les clés API sont incluses, ne pas journaliser)."""
         return dict(self._values)
+
+    @property
+    def memory_enabled(self) -> bool:
+        return bool(self._values.get("memory_enabled", False))
+
+    @property
+    def memory_db_path(self) -> str:
+        return str(self._values.get("memory_db_path", "data/memory.db"))
+
+    @property
+    def memory_max_memories_in_context(self) -> int:
+        return int(self._values.get("memory_max_memories_in_context", 5))
+
+    @property
+    def memory_max_content_length(self) -> int:
+        return int(self._values.get("memory_max_content_length", 1000))
