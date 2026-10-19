@@ -7,7 +7,7 @@
 - **Contenu actuel** : `.gitattributes` (initial), documents de coordination (Mission 001, commit c71d3af), prototype DEV-001 (commit 416dc2e), correction Agent B (commit 153bb16). Code fonctionnel : interface terminal, fournisseurs IA hybride, contexte conversationnel, actions locales, tests, configuration.
 - **Mission en cours** : Mission 001 — terminée. Prototype DEV-001 — créé et publié (Agent A, commit 416dc2e). Révision Agent B — intégrée (commit 153bb16, Agent B). Consolidation Debian 13 (TASK-DEV-003) — en préparation (Agent B).
 
-- **Mission en cours** : Mission 001 — terminée. Prototype DEV-001 — créé et publié (Agent A, commit 416dc2e). Révision Agent B — intégrée (commit 153bb16, Agent B). TASK-DEV-003 — terminée par Agent B (commit 131a99a, tests exécutés sur Windows Python 3.14.7, non Debian 13).
+- **Mission en cours** : Mission 001 — terminée. Prototype DEV-001 — créé et publié (Agent A, commit 416dc2e). Révision Agent B — intégrée (commit 153bb16, Agent B). TASK-DEV-003 — terminée par Agent B (commit 131a99a, tests exécutés sur Windows Python 3.14.7, non Debian 13). TASK-DEV-004 — terminée par Agent B (38 tests OK, défaut L-005 signalé à Agent A via M-001).
 
 ## Prochain objectif
 
@@ -26,6 +26,7 @@
 | TASK-DEV-001 | Premier prototype fonctionnel MILES | DONE | Agent A |
 | TASK-DEV-002 | Revue indépendante des tests et vérification | TODO | Agent B |
 | TASK-DEV-003 | Consolidation du prototype et validation sur Debian 13 | DONE | Agent B |
+| TASK-DEV-004 | Fiabilisation du prototype (Mission 004B) | DONE | Agent B |
 
 ## Blocages
 

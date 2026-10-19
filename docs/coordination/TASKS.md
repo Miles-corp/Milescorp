@@ -19,6 +19,7 @@ Convention :
 | TASK-DEV-001 | Premier prototype fonctionnel MILES | Créer un prototype exécutable : interface terminal, fournisseurs IA hybride, contexte conversationnel, actions locales, voix optionnelle | DONE | Agent A | app/**, config/**, tests/**, miles.py, requirements.txt, .gitignore | Programme lançable en terminal, conversation avec IA, contexte de session, actions locales autorisées, voix optionnelle documentée | — | 2026-10-19 | 2026-10-19 |
 | TASK-DEV-002 | Revue indépendante des tests et vérification | Exécuter les tests sur Debian 13, vérifier le bon fonctionnement du mode texte, détecter les oublis et ambiguïtés | TODO | Agent B | tests/*.py (lecture et modification autorisée), miles.py (lecture seule), app/ (lecture seule) | Tous les tests passent sur Debian 13, rapport de vérification | Dépend de TASK-DEV-001 publié sur GitHub | — | — |
 | TASK-DEV-003 | Consolidation du prototype et validation sur Debian 13 | Vérifier le démarrage de miles.py, exécuter les tests, confirmer l'absence de secrets, valider la documentation d'installation | DONE | Agent B | miles.py, app/**, tests/**, config/**, docs/reports/DEV-001.md | Tous les tests passent sur Windows (Python 3.14.7, non Debian 13), mode texte fonctionne, pas de secrets dans le dépôt, documentation d'installation absente (.gitkeep uniquement) | Dépend de TASK-DEV-001 publié sur GitHub | 2026-10-19 | 2026-10-19 |
+| TASK-DEV-004 | Fiabilisation du prototype (Mission 004B) | DONE | Agent B | tests/** (ajout tests fiabilité), docs/installation/** (création doc), docs/reports/TASK-DEV-004.md (nouveau rapport) | Tests erreurs fournisseurs, préservation historique, validation config, voix optionnelle, doc install reproducible. Défaut L-005 signalé à Agent A (MESSAGES.md M-001). | — | 2026-10-19 | 2026-10-19 |
 
 ## Registre des fichiers et propriétaires (Mission DEV-001)
 
@@ -42,6 +43,11 @@ Convention :
 | tests/test_conversation.py | Tests de l'historique et du contexte | Agent B | Disponible | unittest, app/core/conversation.py | — | TASK-DEV-002 |
 | tests/test_actions.py | Tests du validateur d'actions | Agent B | Disponible | unittest, app/security/validator.py | — | TASK-DEV-002 |
 | tests/test_providers.py | Tests des fournisseurs (simulés) | Agent B | Disponible | unittest, app/ai_providers/base.py | — | TASK-DEV-002 |
+| tests/test_cli_reliability.py | Tests fiabilité CLI : erreurs fournisseurs, préservation historique, commandes | Agent B | Disponible | unittest, app/interface.cli, app.ai_providers.base, app.core.conversation | — | TASK-DEV-004 |
+| tests/test_settings.py | Tests validation Settings : fournisseur invalide, history_limit, pas de secrets en dur | Agent B | Disponible | unittest, app.config.settings | — | TASK-DEV-004 |
+| tests/test_voice.py | Tests interface vocale optionnelle : indisponibilité, VoiceUnavailableError | Agent B | Disponible | unittest, app.voice.base | — | TASK-DEV-004 |
+| docs/installation/INSTALL.md | Documentation d'installation et de configuration reproducible | Agent B | Créé | — | Markdown | TASK-DEV-004 |
+| docs/reports/TASK-DEV-004.md | Rapport de mission 004B : défauts, causes, corrections, tests, limites | Agent B | Créé | — | Markdown | TASK-DEV-004 |
 | docs/reports/DEV-001.md | Rapport de mission DEV-001 (Agent A) | Agent A | Disponible | — | Markdown | TASK-DEV-001 |
 | docs/reports/DEV-002-INTEGRATION-AND-COORDINATION.md | Rapport d'intégration revue Agent B + coordination (Agent A) | Agent A | Disponible | — | Markdown | TASK-DEV-002 |
 | docs/reports/TASK-DEV-003.md | Rapport de consolidation et validation Debian 13 (à créer par Agent B) | Agent B | Prévu | — | Markdown | TASK-DEV-003 |
