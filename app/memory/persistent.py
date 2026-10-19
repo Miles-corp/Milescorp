@@ -66,9 +66,8 @@ class PersistentMemory:
         except (sqlite3.Error, OSError) as exc:
             self._available = False
             self._conn = None
-            raise PersistentMemoryError(
-                f"Impossible d'initialiser la mémoire persistante : {exc}"
-            ) from exc
+            # Dégradation gracieuse : base corrompue ou inaccessible,
+            # la mémoire est simplement indisponible, aucune exception levée.
 
     def _create_schema(self) -> None:
         assert self._conn is not None

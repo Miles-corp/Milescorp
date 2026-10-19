@@ -4,14 +4,15 @@
 
 - **Projet** : MILES — dépôt GitHub privé `https://github.com/Miles-corp/Milescorp.git`
 - **Branche** : `main` (à jour avec `origin/main`, working tree propre)
-- **Contenu actuel** : `.gitattributes` (initial), documents de coordination (Mission 001, commit c71d3af), prototype DEV-001 (commit 416dc2e), correction Agent B (commit 153bb16), fiabilisation Agent B (commit e156a24), audit Agent A (commit a63609f), MILESTONE-005 (commit 5c63332). Code fonctionnel : interface terminal, fournisseurs IA hybride, contexte conversationnel, actions locales, tests, configuration, utilitaire GPU, mémoire persistante SQLite.
-- **Mission en cours** : Mission 001 — terminée. Prototype DEV-001 — créé et publié (Agent A). Fiabilisation TASK-DEV-004 — terminée (Agent B, 38 tests OK). Audit final TASK-DEV-003 — terminé (Agent A, rapport AUDIT-TASK-DEV-003). MILESTONE-005 — terminé (Agent A, commit 5c63332). MILESTONE-006 — mémoire persistante locale (IN_PROGRESS, Agent A).
+- **Contenu actuel** : `.gitattributes` (initial), documents de coordination (Mission 001, commit c71d3af), prototype DEV-001 (commit 416dc2e), correction Agent B (commit 153bb16), fiabilisation Agent B (commit e156a24), audit Agent A (commit a63609f), MILESTONE-005 (commit 5c63332), MILESTONE-006 (commit fe5a017) + correction L-006 (en cours de publication). Code fonctionnel : interface terminal, fournisseurs IA hybride, contexte conversationnel, actions locales, tests, configuration, utilitaire GPU, mémoire persistante SQLite.
+- **Mission en cours** : Mission 001 — terminée. Prototype DEV-001 — créé et publié (Agent A). Fiabilisation TASK-DEV-004 — terminée (Agent B, 38 tests OK). Audit final TASK-DEV-003 — terminé (Agent A, rapport AUDIT-TASK-DEV-003). MILESTONE-005 — terminé (Agent A, commit 5c63332). MILESTONE-006 — mémoire persistante locale (IN_PROGRESS, Agent A). Défaut L-006 corrigé (dégradation gracieuse sur base corrompue), tests non exécutés — pas de Python 3 sur ce poste Windows.
 
 ## Prochain objectif
 
-- Finaliser MILESTONE-006 : mémoire persistante SQLite, souvenirs explicites, tests, documentation, pas de secrets.
+- Publier la correction L-006 et les rapports TEST-001 / TEST-002 sur GitHub (après autorisation).
+- Faire exécuter les tests par Agent B sur Debian 13 (67 tests attendus, 1 échec connu L-006 maintenant corrigé).
+- Valider le prototype sur Debian 13 (environnement non disponible sur ce poste Windows).
 - Poursuivre TASK-002 à TASK-004 (revue indépendante de l'organisation par Agent B).
-- Valider sur Debian 13 (environnement non disponible sur ce poste Windows).
 
 ## Tâches actives
 
