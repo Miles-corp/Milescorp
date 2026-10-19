@@ -1,0 +1,12 @@
+{
+  "provider": "remote",
+  "remote_base_url": "http://localhost:8000",
+  "remote_model": "miles-default",
+  "remote_timeout": 30,
+  "local_base_url": "http://localhost:11434",
+  "local_model": "miles-local",
+  "local_timeout": 60,
+  "history_limit": 10,
+  "voice_enabled": false,
+  "allowed_actions": ["datetime", "workdir", "list_files"]
+}

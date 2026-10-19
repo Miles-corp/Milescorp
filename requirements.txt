@@ -1,0 +1,6 @@
+# Dépendances optionnelles pour le mode voix
+# pyttsx3>=2.90   # synthèse vocale hors ligne (Linux compatible)
+# SpeechRecognition>=3.10.0  # reconnaissance vocale
+
+# Dépendance principale (optionnelle si utilisation de urllib)
+# requests>=2.31.0
