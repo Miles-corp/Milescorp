@@ -9,7 +9,15 @@ Règles permanentes applicables à tous les agents OpenCode travaillant sur le p
 
 Chaque agent doit s'identifier dans chaque modification de document de coordination (champ `author` / `modifié-par`).
 
-## 2. Règles obligatoires
+## 2. Fichiers de coordination (docs/coordination/)
+
+- `TASKS.md` : tableau des tâches (qui fait quoi, état).
+- `STATUS.md` : état instantané de chaque agent.
+- `DECISIONS.md` : journal append-only des décisions d'architecture validées.
+- `MESSAGES.md` : canal persistant de communication asynchrone (questions, réponses, demandes de clarification, alertes, décisions à confirmer).
+- `HANDOFF.md` : compte rendu officiel de transfert de tâche (travail réalisé, fichiers modifiés, commits, tests, problèmes restants, prochaine action).
+
+## 3. Règles obligatoires
 
 1. Avant toute tâche, lire `AGENTS.md`, `docs/coordination/TASKS.md`, `docs/coordination/STATUS.md` et les décisions pertinentes dans `docs/coordination/DECISIONS.md`.
 2. Vérifier l'état Git (`git status`) avant toute modification.
@@ -26,7 +34,26 @@ Chaque agent doit s'identifier dans chaque modification de document de coordinat
 13. Ne pas modifier des fichiers hors du périmètre attribué.
 14. En cas de conflit ou d'incertitude structurante, arrêter uniquement l'action concernée et expliquer le problème.
 
-## 3. Communication entre agents
+## 4. Règles anti-conflits Git
+
+1. Avant toute modification : inspecter l'état Git et les documents de coordination.
+2. Un agent ne modifie qu'une tâche qu'il a lui-même passée en `[DOING]` / `IN_PROGRESS`.
+3. Pas de modification concurrente d'un même fichier par les deux agents.
+4. En cas de doute sur l'état de l'autre agent : consulter GitHub ou demander à l'utilisateur.
+5. Jamais de `git push --force`, `git reset --hard` ni checkout des fichiers de l'autre.
+
+## 5. Convention de statut des tâches
+
+`[TODO]` · `[DOING]` / `IN_PROGRESS` · `[BLOCKED]` · `[DONE]` · `[CANCELLE]` / `CANCELLED`
+
+## 6. Identification des identificateurs
+
+- Identifiant de message : `M-001`, `M-002`, …
+- Identifiant de tâche : `T-001`, `T-002`, … (format `TASK-###` accepté si déjà en usage)
+- Identifiant de décision : `D-001`, `D-002`, … (format `DEC-###` accepté si déjà en usage)
+- Identifiant de handoff : `H-001`, `H-002`, …
+
+## 7. Communication entre agents
 
 - Asynchrone uniquement, via les fichiers Markdown de `docs/coordination/` et GitHub.
 - Aucun mécanisme de communication directe entre les deux instances OpenCode n'est installé.
@@ -34,13 +61,19 @@ Chaque agent doit s'identifier dans chaque modification de document de coordinat
 - L'état du projet et les prochains objectifs transitent par `docs/coordination/STATUS.md`.
 - Les questions, blocages et résultats transitent par `docs/coordination/TASKS.md` et, le cas échéant, par un compte rendu suivant `docs/coordination/REPORT_TEMPLATE.md`.
 
-## 4. Périmètre de la mission en cours (Mission 001)
+## 8. Flux de communication
+
+1. Une question ou une information à transmettre → `MESSAGES.md`.
+2. Une tâche terminée ou un transfert de responsabilité → `HANDOFF.md`.
+3. Une décision définitive d'architecture → `DECISIONS.md`, avec une référence dans le message concerné.
+
+## 9. Périmètre de la mission en cours (Mission 001)
 
 - Organisation, documentation et règles de collaboration uniquement.
 - Aucun développement fonctionnel de l'assistant MILES.
 - Aucun secret, aucune donnée personnelle dans les documents.
 
-## 5. Répartition initiale (provisoire)
+## 10. Répartition initiale (provisoire)
 
 | Rôle | Agent | Responsabilités |
 |------|-------|-----------------|

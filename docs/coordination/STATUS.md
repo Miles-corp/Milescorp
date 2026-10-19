@@ -37,3 +37,4 @@ Aucun blocage à ce jour.
 
 - Les deux PC possèdent leur propre clone local du dépôt.
 - La communication est asynchrone via GitHub ; aucun mécanisme direct entre les instances OpenCode n'est installé.
+- Avant de commencer une tâche, consulter les messages non résolus dans `MESSAGES.md` (statut `[EN ATTENTE]`).

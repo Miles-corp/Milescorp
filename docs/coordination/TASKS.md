@@ -5,6 +5,7 @@ Convention :
 - Statuts : `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`, `CANCELLED`
 - Agents : `Agent A`, `Agent B`
 - Une tâche est terminée uniquement quand son statut est `DONE`, le résultat attendu produit, et les contrôles exécutés.
+- Règle anti-conflit : un agent ne passe une tâche en `IN_PROGRESS` qu'après avoir commis la ligne dans ce fichier. Seul le propriétaire d'une tâche en `IN_PROGRESS` ou `BLOCKED` peut la modifier.
 
 ## Tâches en cours / initiales (Mission 001)
 

@@ -18,7 +18,18 @@ Procédure à suivre par chaque agent à la fin de sa session de travail, afin q
 6. Relire son propre diff (`git diff`) avant de committer localement.
 7. Committer localement les documents modifiés (pas de push sans accord explicite).
 
-## 2. Transmission de la main
+## 2. Format de compte rendu de transfert (H-###)
+
+### H-001 — 2026-10-19 — Agent X → Agent Y
+**Tâche :** TASK-### — …
+**Travail réalisé :** …
+**Fichiers modifiés :** …
+**Commits :** …
+**Tests exécutés :** …
+**Problèmes restants :** …
+**Prochaine action recommandée :** …
+
+## 3. Transmission de la main
 
 - Prévenir l'autre agent (par le canal convenu hors dépôt, ex. message) qu'une mise à jour est disponible sur GitHub ou dans le clone partagé.
 - L'autre agent doit alors :
@@ -26,7 +37,7 @@ Procédure à suivre par chaque agent à la fin de sa session de travail, afin q
   2. `git fetch origin` et comparer avec son état local.
   3. Ne pas reprendre une tâche `IN_PROGRESS` attribuée à l'autre agent sans coordination explicite.
 
-## 3. Ce qui doit être transmis (minimum)
+## 4. Ce qui doit être transmis (minimum)
 
 - Quelles tâches sont terminées, en cours, bloquées.
 - Quels fichiers ont été modifiés ou créés.
@@ -34,7 +45,7 @@ Procédure à suivre par chaque agent à la fin de sa session de travail, afin q
 - Quelles questions restent ouvertes pour l'autre agent.
 - Quelles décisions doivent être prises par un humain.
 
-## 4. Interdictions
+## 5. Interdictions
 
 - Ne jamais considérer une conversation OpenCode comme la source de vérité partagée.
 - Ne jamais écraser le travail local de l'autre agent.

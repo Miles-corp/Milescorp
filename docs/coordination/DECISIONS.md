@@ -1,6 +1,6 @@
 # docs/coordination/DECISIONS.md — Registre des décisions MILES
 
-Convention : chaque décision reçoit un ID `DEC-###`, une date, un auteur, un contexte, la décision et un statut (`PROPOSEE`, `ACCEPTEE`, `REJETEE`, `OBSOLETE`).
+Convention : chaque décision reçoit un ID `DEC-###` (ou `D-###`), une date, un auteur, un contexte, la décision et un statut (`PROPOSEE`, `ACCEPTEE`, `REJETEE`, `OBSOLETE`). Journal append-only : les décisions ne sont jamais modifiées rétroactivement.
 
 ## DEC-001 — Système de coordination asynchrone par fichiers Markdown
 
