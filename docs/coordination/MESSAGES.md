@@ -1,16 +1,17 @@
-# MILES â€” Messages asynchrones (MESSAGES.md)
+# MILES — Messages asynchrones (MESSAGES.md)
 
 Canal persistant entre l'agent A et l'agent B. Les messages s'ajoutent en queue de fichier, jamais d'effacement d'historique.
 
-## RÃ¨gles
-- Identifiant : M-001, M-002, â€¦
-- Statut : [EN ATTENTE] Â· [LU] Â· [RÃ‰PONDU]
-- Avant de commencer une tÃ¢che, consulter les messages non rÃ©solus ([EN ATTENTE]).
-- Une rÃ©ponse est un nouveau message qui rÃ©fÃ©rence le prÃ©cÃ©dent.
+## Règles
 
-| ID | Auteur â†’ Destinataire | Date | Statut | Objet / RÃ©fÃ©rence tÃ¢che |
+- Identifiant : M-001, M-002, …
+- Statut : [EN ATTENTE] · [LU] · [RÉPONDU]
+- Avant de commencer une tâche, consulter les messages non résolus ([EN ATTENTE]).
+- Une réponse est un nouveau message qui référence le précédent.
+
+| ID | Auteur → Destinataire | Date | Statut | Objet / Référence tâche |
 |----|-----------------------|------|--------|-------------------------|
 
 ## Historique (ajout en queue uniquement)
 
-(Vide â€” aucun message pour l'instant.)
+(Vide — aucun message pour l'instant.)

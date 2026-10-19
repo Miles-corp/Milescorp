@@ -4,15 +4,13 @@
 
 - **Projet** : MILES — dépôt GitHub privé `https://github.com/Miles-corp/Milescorp.git`
 - **Branche** : `main` (à jour avec `origin/main`, working tree propre)
-- **Contenu actuel** : uniquement `.gitattributes` (commit initial `f4c525e`). Aucun code fonctionnel, aucune documentation de coordination existante avant cette mission.
-- **Mission en cours** : Mission 001 — terminée (documents de coordination publiés, commit c71d3af).
-- **Mission suivante** : Mission DEV-001 — premier prototype fonctionnel MILES : création initiale terminée par Agent A (statut DONE). En attente de publication sur GitHub, puis revue et tests par Agent B (TASK-DEV-002).
+- **Contenu actuel** : `.gitattributes` (initial), documents de coordination (Mission 001, commit c71d3af), prototype DEV-001 (commit 416dc2e), correction Agent B (commit 153bb16). Code fonctionnel : interface terminal, fournisseurs IA hybride, contexte conversationnel, actions locales, tests, configuration.
+- **Mission en cours** : Mission 001 — terminée. Prototype DEV-001 — créé et publié (Agent A, commit 416dc2e). Révision Agent B — intégrée (commit 153bb16, Agent B). Consolidation Debian 13 (TASK-DEV-003) — en préparation (Agent B).
 
 ## Prochain objectif
 
-- Publier les documents de coordination et le prototype DEV-001 sur GitHub (après autorisation).
-- Faire relire et valider l'organisation par Agent B (TASK-002 à TASK-004).
-- Faire exécuter et vérifier les tests par Agent B sur Debian 13 (TASK-DEV-002).
+- Valider le prototype sur Debian 13 : démarrage de `miles.py`, exécution des tests (`python3 -m unittest discover -s tests -v`), vérification de l'absence de secrets, confirmation de la documentation d'installation.
+- Poursuivre TASK-002 à TASK-004 (revue indépendante de l'organisation par Agent B).
 
 ## Tâches actives
 
@@ -24,6 +22,7 @@
 | TASK-004 | Détection des oublis et des ambiguïtés | TODO | Agent B |
 | TASK-DEV-001 | Premier prototype fonctionnel MILES | DONE | Agent A |
 | TASK-DEV-002 | Revue indépendante des tests et vérification | TODO | Agent B |
+| TASK-DEV-003 | Consolidation du prototype et validation sur Debian 13 | TODO | Agent B |
 
 ## Blocages
 
