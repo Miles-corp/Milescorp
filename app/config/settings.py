@@ -44,7 +44,12 @@ class Settings:
     def __init__(self, config_path: str | None = None) -> None:
         self._values: dict[str, Any] = dict(self.DEFAULTS)
 
-        # 1. Fichier JSON optionnel
+        # 1. Chargement du fichier .env (stdlib, pas de dépendance externe).
+        # Les variables déjà présentes dans l'environnement du processus
+        # sont prioritaires et ne sont pas écrasées.
+        self._load_env_file()
+
+        # 2. Fichier JSON optionnel
         resolved_config = config_path or os.environ.get(
             "MILES_CONFIG", "config/config.json"
         )
@@ -104,6 +109,42 @@ class Settings:
 
         # Validation
         self._validate()
+
+    def _load_env_file(self) -> None:
+        """Charger les variables d'un fichier .env s'il existe.
+
+        Utilise uniquement la bibliothèque standard Python (aucun
+        python-dotenv). Les variables déjà présentes dans l'environnement
+        du processus sont prioritaires et ne sont pas écrasées. Un fichier
+        .env absent n'empêche pas le démarrage.
+        """
+        env_path = Path(os.environ.get("MILES_ENV_FILE", ".env"))
+        if not env_path.is_file():
+            return
+        try:
+            with env_path.open("r", encoding="utf-8") as fh:
+                for raw_line in fh:
+                    line = raw_line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if "=" not in line:
+                        continue
+                    key, value = line.split("=", 1)
+                    key = key.strip()
+                    value = value.strip()
+                    # Retirer les guillemets environnants s'ils existent.
+                    if (
+                        len(value) >= 2
+                        and value[0] == value[-1]
+                        and value[0] in ('"', "'")
+                    ):
+                        value = value[1:-1]
+                    # Ne pas écraser une variable déjà définie.
+                    if key not in os.environ:
+                        os.environ[key] = value
+        except OSError:
+            # Fichier .env illisible : on ignore, le démarrage continue.
+            pass
 
     def _validate(self) -> None:
         provider = self._values.get("provider")

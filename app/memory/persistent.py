@@ -4,6 +4,10 @@ Stocke des souvenirs explicites et des préférences utilisateur dans une base
 SQLite sur la machine de l'utilisateur. Aucun envoi vers un fournisseur distant.
 Le stockage de souvenirs est exclusivement à la demande de l'utilisateur :
 aucune conversation n'est enregistrée automatiquement.
+
+Thread-safe : la connexion SQLite est partagée entre threads (check_same_thread=False)
+et protégée par un verrou réentrant (RLock) car get_context_memories appelle
+list_memories en interne.
 """
 
 from __future__ import annotations
@@ -11,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from typing import Any
 
@@ -46,6 +51,7 @@ class PersistentMemory:
         self.max_content_length = max_content_length
         self._conn: sqlite3.Connection | None = None
         self._available = False
+        self._lock = threading.RLock()
 
         if self.enabled:
             self._initialize()
@@ -59,7 +65,7 @@ class PersistentMemory:
             if db_dir and not os.path.isdir(db_dir):
                 os.makedirs(db_dir, exist_ok=True)
 
-            self._conn = sqlite3.connect(self.db_path)
+            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
             self._create_schema()
             self._available = True
@@ -119,10 +125,11 @@ class PersistentMemory:
 
     def close(self) -> None:
         """Fermer la connexion à la base de données."""
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
-            self._available = False
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
+                self._available = False
 
     @property
     def is_available(self) -> bool:
@@ -190,17 +197,18 @@ class PersistentMemory:
             )
 
         now = self._now_iso()
-        assert self._conn is not None
-        cursor = self._conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO memories (content, category, importance, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (content.strip(), category, int(importance), now, now),
-        )
-        self._conn.commit()
-        return int(cursor.lastrowid)
+        with self._lock:
+            assert self._conn is not None
+            cursor = self._conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO memories (content, category, importance, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (content.strip(), category, int(importance), now, now),
+            )
+            self._conn.commit()
+            return int(cursor.lastrowid)
 
     def list_memories(
         self,
@@ -221,29 +229,30 @@ class PersistentMemory:
                 "Mémoire persistante indisponible ou désactivée."
             )
 
-        assert self._conn is not None
-        cursor = self._conn.cursor()
-        if category is not None:
-            rows = cursor.execute(
-                """
-                SELECT id, content, category, importance, created_at, updated_at
-                FROM memories
-                WHERE category = ?
-                ORDER BY importance DESC, created_at DESC
-                LIMIT ?
-                """,
-                (category, limit if limit is not None else -1),
-            ).fetchall()
-        else:
-            rows = cursor.execute(
-                """
-                SELECT id, content, category, importance, created_at, updated_at
-                FROM memories
-                ORDER BY importance DESC, created_at DESC
-                LIMIT ?
-                """,
-                (limit if limit is not None else -1,),
-            ).fetchall()
+        with self._lock:
+            assert self._conn is not None
+            cursor = self._conn.cursor()
+            if category is not None:
+                rows = cursor.execute(
+                    """
+                    SELECT id, content, category, importance, created_at, updated_at
+                    FROM memories
+                    WHERE category = ?
+                    ORDER BY importance DESC, created_at DESC
+                    LIMIT ?
+                    """,
+                    (category, limit if limit is not None else -1),
+                ).fetchall()
+            else:
+                rows = cursor.execute(
+                    """
+                    SELECT id, content, category, importance, created_at, updated_at
+                    FROM memories
+                    ORDER BY importance DESC, created_at DESC
+                    LIMIT ?
+                    """,
+                    (limit if limit is not None else -1,),
+                ).fetchall()
 
         return [dict(row) for row in rows]
 
@@ -254,15 +263,16 @@ class PersistentMemory:
                 "Mémoire persistante indisponible ou désactivée."
             )
 
-        assert self._conn is not None
-        row = self._conn.execute(
-            """
-            SELECT id, content, category, importance, created_at, updated_at
-            FROM memories
-            WHERE id = ?
-            """,
-            (memory_id,),
-        ).fetchone()
+        with self._lock:
+            assert self._conn is not None
+            row = self._conn.execute(
+                """
+                SELECT id, content, category, importance, created_at, updated_at
+                FROM memories
+                WHERE id = ?
+                """,
+                (memory_id,),
+            ).fetchone()
         return dict(row) if row is not None else None
 
     def delete_memory(self, memory_id: int) -> bool:
@@ -272,11 +282,12 @@ class PersistentMemory:
                 "Mémoire persistante indisponible ou désactivée."
             )
 
-        assert self._conn is not None
-        cursor = self._conn.cursor()
-        cursor.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
-        self._conn.commit()
-        return cursor.rowcount > 0
+        with self._lock:
+            assert self._conn is not None
+            cursor = self._conn.cursor()
+            cursor.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+            self._conn.commit()
+            return cursor.rowcount > 0
 
     def clear_all_memories(self) -> int:
         """Effacer tous les souvenirs. Retourner le nombre supprimé."""
@@ -285,11 +296,12 @@ class PersistentMemory:
                 "Mémoire persistante indisponible ou désactivée."
             )
 
-        assert self._conn is not None
-        cursor = self._conn.cursor()
-        cursor.execute("DELETE FROM memories")
-        self._conn.commit()
-        return cursor.rowcount
+        with self._lock:
+            assert self._conn is not None
+            cursor = self._conn.cursor()
+            cursor.execute("DELETE FROM memories")
+            self._conn.commit()
+            return cursor.rowcount
 
     def get_context_memories(self) -> list[dict[str, Any]]:
         """Retourner les souvenirs les plus pertinents pour le contexte IA.
@@ -320,25 +332,27 @@ class PersistentMemory:
                 "Enregistrement refusé."
             )
         now = self._now_iso()
-        assert self._conn is not None
-        self._conn.execute(
-            """
-            INSERT INTO preferences (key, value, updated_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-            """,
-            (key, value, now),
-        )
-        self._conn.commit()
+        with self._lock:
+            assert self._conn is not None
+            self._conn.execute(
+                """
+                INSERT INTO preferences (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                """,
+                (key, value, now),
+            )
+            self._conn.commit()
 
     def get_preference(self, key: str) -> str | None:
         """Retourner une préférence, ou None."""
         if not self.is_available:
             return None
-        assert self._conn is not None
-        row = self._conn.execute(
-            "SELECT value FROM preferences WHERE key = ?", (key,)
-        ).fetchone()
+        with self._lock:
+            assert self._conn is not None
+            row = self._conn.execute(
+                "SELECT value FROM preferences WHERE key = ?", (key,)
+            ).fetchone()
         return row["value"] if row is not None else None
 
     def delete_preference(self, key: str) -> bool:
@@ -347,11 +361,12 @@ class PersistentMemory:
             raise PersistentMemoryError(
                 "Mémoire persistante indisponible ou désactivée."
             )
-        assert self._conn is not None
-        cursor = self._conn.cursor()
-        cursor.execute("DELETE FROM preferences WHERE key = ?", (key,))
-        self._conn.commit()
-        return cursor.rowcount > 0
+        with self._lock:
+            assert self._conn is not None
+            cursor = self._conn.cursor()
+            cursor.execute("DELETE FROM preferences WHERE key = ?", (key,))
+            self._conn.commit()
+            return cursor.rowcount > 0
 
     def __enter__(self) -> "PersistentMemory":
         return self

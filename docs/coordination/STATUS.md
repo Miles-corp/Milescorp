@@ -4,14 +4,14 @@
 
 - **Projet** : MILES — dépôt GitHub privé `https://github.com/Miles-corp/Milescorp.git`
 - **Branche** : `main` (à jour avec `origin/main`, working tree propre)
-- **Contenu actuel** : `.gitattributes` (initial), documents de coordination (Mission 001, commit c71d3af), prototype DEV-001 (commit 416dc2e), correction Agent B (commit 153bb16), fiabilisation Agent B (commit e156a24), audit Agent A (commit a63609f), MILESTONE-005 (commit 5c63332), MILESTONE-006 (commit fe5a017) + correction L-006 (en cours de publication). Code fonctionnel : interface terminal, fournisseurs IA hybride, contexte conversationnel, actions locales, tests, configuration, utilitaire GPU, mémoire persistante SQLite.
-- **Mission en cours** : Mission 001 — terminée. Prototype DEV-001 — créé et publié (Agent A). Fiabilisation TASK-DEV-004 — terminée (Agent B, 38 tests OK). Audit final TASK-DEV-003 — terminé (Agent A, rapport AUDIT-TASK-DEV-003). MILESTONE-005 — terminé (Agent A, commit 5c63332). MILESTONE-006 — mémoire persistante locale (IN_PROGRESS, Agent A). Défaut L-006 corrigé (dégradation gracieuse sur base corrompue), tests non exécutés — pas de Python 3 sur ce poste Windows.
+- **Contenu actuel** : `.gitattributes` (initial), documents de coordination (Mission 001, commit c71d3af), prototype DEV-001 (commit 416dc2e), correction Agent B (commit 153bb16), fiabilisation Agent B (commit e156a24), audit Agent A (commit a63609f), MILESTONE-005 (commit 5c63332), MILESTONE-006 (commit fe5a017), Phase 2 fournisseur distant + web + .env (commit 0ad3a41). Code fonctionnel : interface terminal, fournisseurs IA hybride distant connecté, contexte conversationnel, actions locales, tests, configuration, utilitaire GPU, mémoire persistante SQLite, interface web http.server.
+- **Mission en cours** : Mission 001 — terminée. Prototype DEV-001 — créé et publié (Agent A). Fiabilisation TASK-DEV-004 — terminée (Agent B, 38 tests OK). Audit final TASK-DEV-003 — terminé (Agent A, rapport AUDIT-TASK-DEV-003). MILESTONE-005 — terminé (Agent A, commit 5c63332). MILESTONE-006 — terminé (Agent A, commit fe5a017). Phase 2 — fournisseur distant connecté, interface web http.server, chargement .env, tests simulés (terminé, commit 0ad3a41, 95 tests OK sur Windows).
 
 ## Prochain objectif
 
-- Publier la correction L-006 et les rapports TEST-001 / TEST-002 sur GitHub (après autorisation).
-- Faire exécuter les tests par Agent B sur Debian 13 (67 tests attendus, 1 échec connu L-006 maintenant corrigé).
-- Valider le prototype sur Debian 13 (environnement non disponible sur ce poste Windows).
+- Proposition technique du fournisseur local hors ligne (TASK-DEV-007) : moteur et modèle adaptés à RTX 3050 4 Go, sans Ollama, sans téléchargement sans accord.
+- Tests réels sur le fournisseur distant (uniquement après accord utilisateur pour coût API).
+- Validation sur Debian 13 (environnement non disponible sur ce poste Windows).
 - Poursuivre TASK-002 à TASK-004 (revue indépendante de l'organisation par Agent B).
 
 ## Tâches actives
@@ -27,7 +27,8 @@
 | TASK-DEV-003 | Consolidation du prototype et validation sur Debian 13 | DONE | Agent B |
 | TASK-DEV-004 | Fiabilisation du prototype (Mission 004B) | DONE | Agent B |
 | TASK-DEV-005 | MILESTONE-005 : Assistant personnel hybride distant/local | DONE | Agent A |
-| TASK-DEV-006 | MILESTONE-006 : Mémoire persistante locale | IN_PROGRESS | Agent A |
+| TASK-DEV-006 | MILESTONE-006 : Mémoire persistante locale | DONE | Agent A |
+| TASK-DEV-007 | MILESTONE-007 : Fournisseur local hors ligne (RTX 3050) | TODO | Agent A |
 
 ## Blocages
 
@@ -38,6 +39,7 @@ Aucun blocage à ce jour.
 - DEC-001 à DEC-004 acceptées (voir `docs/coordination/DECISIONS.md`).
 - DEC-005 : Architecture hybride distant/local avec sélection explicite (ACCEPTEE, Agent A).
 - DEC-006 : Mémoire persistante locale SQLite (ACCEPTEE, Agent A).
+- DEC-007 : Interface web http.server sur 127.0.0.1, zéro dépendance supplémentaire (ACCEPTEE, Agent A).
 
 ## Audit final Agent A (MISSION 004A)
 

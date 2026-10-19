@@ -4,6 +4,8 @@
 import sys
 import argparse
 
+from app.ai_providers.local import LocalProvider
+from app.ai_providers.remote import RemoteProvider
 from app.config.settings import Settings
 from app.interface.cli import CLI
 from app.memory.persistent import PersistentMemory
@@ -42,6 +44,22 @@ def main(argv: list[str] | None = None) -> int:
     if args.provider is not None:
         settings.provider = args.provider
 
+    provider = None
+    if settings.provider == "remote":
+        provider = RemoteProvider(
+            base_url=settings.get("remote_base_url"),
+            model=settings.get("remote_model"),
+            api_key=settings.get("remote_api_key"),
+            timeout=settings.get("remote_timeout", 30),
+        )
+    elif settings.provider == "local":
+        provider = LocalProvider(
+            base_url=settings.get("local_base_url"),
+            model=settings.get("local_model"),
+            api_key=settings.get("local_api_key"),
+            timeout=settings.get("local_timeout", 60),
+        )
+
     memory = None
     if settings.memory_enabled:
         try:
@@ -54,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
         except PersistentMemoryError as exc:
             print(f"Avertissement : mémoire persistante non disponible : {exc}", file=sys.stderr)
 
-    cli = CLI(settings=settings, memory=memory)
+    cli = CLI(settings=settings, provider=provider, memory=memory)
     try:
         cli.run()
     except KeyboardInterrupt:
