@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.core.conversation import Conversation, ConversationError
+from app.core.conversation import Conversation, ConversationError, Message
 
 
 class TestConversation(unittest.TestCase):
@@ -33,8 +33,8 @@ class TestConversation(unittest.TestCase):
             conv.add_user_message(f"msg {i}")
             conv.add_assistant_message(f"rep {i}")
         context = conv.get_context()
-        # 2 derniers échanges = 4 messages maximum (pas de system_prompt)
-        self.assertEqual(len(context), 4)
+        # 2 derniers messages maximum (history_limit = nb de messages, pas d'échanges)
+        self.assertEqual(len(context), 2)
 
     def test_history_limit_minimum_one(self) -> None:
         conv = Conversation(history_limit=1)
