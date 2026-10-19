@@ -21,6 +21,10 @@ class RemoteProvider(AIProvider):
         timeout: int = 30,
     ) -> None:
         self._base_url = base_url.rstrip("/")
+        # Éviter le doublon "/v1/" si l'URL de base se termine déjà par "/v1"
+        # (cas fréquent avec Groq : https://api.groq.com/openai/v1).
+        if self._base_url.endswith("/v1"):
+            self._base_url = self._base_url[:-3]
         self._model = model
         self._api_key = api_key
         self._timeout = timeout
