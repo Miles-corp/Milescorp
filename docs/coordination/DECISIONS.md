@@ -33,3 +33,11 @@ Convention : chaque décision reçoit un ID `DEC-###` (ou `D-###`), une date, un
 - **Contexte** : L'utilisateur a demandé de ne rien publier sans son autorisation.
 - **Décision** : Les documents sont créés localement. Aucun commit ni push n'est effectué sans accord explicite pour publier.
 - **Statut** : ACCEPTEE
+
+## DEC-005 — Architecture hybride distant/local avec sélection explicite
+
+- **Date** : 2026-10-19
+- **Auteur** : Agent A
+- **Contexte** : MILESTONE-005 demande un fournisseur local sur PC avec GPU NVIDIA (RTX 3050, 4 Go VRAM détectés via nvidia-smi).
+- **Décision** : Réutiliser `LocalProvider` existant (serveur local HTTP type Ollama/llama.cpp). Aucune réécriture des fournisseurs distants. Sélection explicite via `MILES_PROVIDER` ou `--provider`. Pas de basculement silencieux. Diagnostic GPU via `nvidia-smi` (lecture seule, optionnel). MILES ne télécharge aucun modèle.
+- **Statut** : ACCEPTEE

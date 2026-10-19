@@ -35,9 +35,11 @@ class CLI:
     ) -> None:
         self.settings = settings
         self.provider = provider
-        self.conversation = conversation or Conversation(
-            history_limit=settings.get("history_limit", 10)
-        )
+        if conversation is None:
+            conversation = Conversation(
+                history_limit=settings.get("history_limit", 10)
+            )
+        self.conversation = conversation
         self.validator = validator or ActionValidator()
         self._running = True
 
