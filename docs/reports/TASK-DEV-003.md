@@ -140,7 +140,48 @@ Aucun commit ni push n'a été effectué. L'autorisation de l'utilisateur est re
 | Poursuivre TASK-002 à TASK-004 (revue indépendante de l'organisation) | Agent B | En attente |
 | Décision : fournisseur IA par défaut (remote/local) et endpoint | Utilisateur / les deux agents | En attente |
 
-## 9. Décisions nécessitant un accord humain
+## 8. Résultats réels — Agent B (PC Windows, Python 3.14.7)
+
+Contrôles exécutés sur ce poste Windows (non Debian 13, voir limitation §9).
+
+### 8.1 Démarrage de `miles.py`
+
+| Vérification | Résultat |
+|--------------|----------|
+| `python miles.py --help` | ✅ Affiche l'aide, code de sortie 0 |
+| Import `app.config.settings` | ✅ Aucun échec |
+| Import `app.interface.cli` | ✅ Aucun échec |
+
+### 8.2 Exécution des tests
+
+| Commande | Résultat |
+|----------|----------|
+| `python -m unittest discover -s tests -v` | ✅ 18 tests, 18 OK, 0 échec, 0 erreur |
+| `tests/test_conversation.py` | 7 tests, tous OK |
+| `tests/test_actions.py` | 7 tests, tous OK |
+| `tests/test_providers.py` | 5 tests, tous OK |
+
+### 8.3 Absence de secrets
+
+| Vérification | Résultat |
+|--------------|----------|
+| Scan motifs (`sk-`, `api_key`, `password`, `secret`, `token`, etc.) sur tous les fichiers | ✅ Aucun vrai secret. Toutes les correspondances sont des faux positifs : noms de variables d'environnement (`MILES_REMOTE_API_KEY`, etc.), commentaires de règles de sécurité, ou valeurs factices dans `.env.example` |
+| `.env.example` | ✅ Clés API commentées (`# MILES_REMOTE_API_KEY=votre_cle_api_ici`), aucun vrai secret |
+| `app/config/settings.py` | ✅ Aucune clé en dur, lecture uniquement depuis `os.environ` |
+
+### 8.4 Documentation d'installation
+
+| Vérification | Résultat |
+|--------------|----------|
+| `docs/installation/` | ⚠️ Contient uniquement un `.gitkeep`. Il n'existe **aucune** documentation d'installation à valider. Ce document est à créer. |
+
+## 9. Limites
+
+- Ce poste est **Windows**, pas Debian 13. La validation spécifique "sur Debian 13" demandée par TASK-DEV-003 n'a pas pu être effectuée ici.
+- Aucun fournisseur IA réel n'a été appelé (pas d'endpoint configuré, pas de clé API).
+- Le mode voix n'a pas été testé (dépendances `pyttsx3`, `speech_recognition` non installées, optionnelles).
+
+## 10. Décisions nécessitant un accord humain
 
 1. Autorisation de committer et pousser les 4 fichiers modifiés/néw sur `main`.
 2. Choix du fournisseur IA par défaut et de l'endpoint associé pour les tests réels sur Debian 13.

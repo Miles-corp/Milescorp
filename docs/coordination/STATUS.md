@@ -7,10 +7,13 @@
 - **Contenu actuel** : `.gitattributes` (initial), documents de coordination (Mission 001, commit c71d3af), prototype DEV-001 (commit 416dc2e), correction Agent B (commit 153bb16). Code fonctionnel : interface terminal, fournisseurs IA hybride, contexte conversationnel, actions locales, tests, configuration.
 - **Mission en cours** : Mission 001 — terminée. Prototype DEV-001 — créé et publié (Agent A, commit 416dc2e). Révision Agent B — intégrée (commit 153bb16, Agent B). Consolidation Debian 13 (TASK-DEV-003) — en préparation (Agent B).
 
+- **Mission en cours** : Mission 001 — terminée. Prototype DEV-001 — créé et publié (Agent A, commit 416dc2e). Révision Agent B — intégrée (commit 153bb16, Agent B). TASK-DEV-003 — terminée par Agent B (commit 131a99a, tests exécutés sur Windows Python 3.14.7, non Debian 13).
+
 ## Prochain objectif
 
-- Valider le prototype sur Debian 13 : démarrage de `miles.py`, exécution des tests (`python3 -m unittest discover -s tests -v`), vérification de l'absence de secrets, confirmation de la documentation d'installation.
 - Poursuivre TASK-002 à TASK-004 (revue indépendante de l'organisation par Agent B).
+- Créer la documentation d'installation manquante (`docs/installation/` contient uniquement un `.gitkeep`).
+- Valider le prototype sur Debian 13 (environnement non disponible sur ce poste Windows).
 
 ## Tâches actives
 
@@ -22,7 +25,7 @@
 | TASK-004 | Détection des oublis et des ambiguïtés | TODO | Agent B |
 | TASK-DEV-001 | Premier prototype fonctionnel MILES | DONE | Agent A |
 | TASK-DEV-002 | Revue indépendante des tests et vérification | TODO | Agent B |
-| TASK-DEV-003 | Consolidation du prototype et validation sur Debian 13 | TODO | Agent B |
+| TASK-DEV-003 | Consolidation du prototype et validation sur Debian 13 | DONE | Agent B |
 
 ## Blocages
 
