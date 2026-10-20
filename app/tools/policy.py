@@ -22,6 +22,13 @@ class ToolPolicy:
     - Aucune extension automatique des permissions par le modèle.
     """
 
+    _SHELL_KEYS = {"shell", "command", "cmd", "exec", "eval", "run", "system"}
+    _CODE_KEYS = {"code", "script", "python", "javascript", "shell_code", "source"}
+    _SECRET_KEYS = {
+        "password", "secret", "api_key", "token", "private_key", "credential",
+        "apikey", "access_key", "secret_key",
+    }
+
     def __init__(self, granted_permissions: Set[str]) -> None:
         self._granted_permissions: Set[str] = set(granted_permissions)
 
@@ -41,29 +48,73 @@ class ToolPolicy:
         """Déterminer si une confirmation humaine explicite est requise."""
         return risk_level in ("MEDIUM", "HIGH")
 
+    @staticmethod
+    def _iter_values(obj: Any):
+        """Parcourir récursivement toutes les valeurs d'une structure imbriquée."""
+        if isinstance(obj, dict):
+            for value in obj.values():
+                yield from ToolPolicy._iter_values(value)
+        elif isinstance(obj, (list, tuple, set)):
+            for value in obj:
+                yield from ToolPolicy._iter_values(value)
+        else:
+            yield obj
+
+    @staticmethod
+    def _iter_keys(obj: Any):
+        """Parcourir récursivement toutes les clés d'une structure imbriquée."""
+        if isinstance(obj, dict):
+            for key in obj.keys():
+                yield key
+                yield from ToolPolicy._iter_keys(key)
+        elif isinstance(obj, (list, tuple, set)):
+            for value in obj:
+                yield from ToolPolicy._iter_keys(value)
+
     def validate_no_shell_access(self, parameters: dict[str, Any]) -> None:
         """Rejeter toute tentative d'accès shell arbitraire."""
         forbidden_keys = {"shell", "command", "cmd", "exec", "eval", "run", "system"}
-        for key in parameters:
-            if key.lower() in forbidden_keys:
+        for key in self._iter_keys(parameters):
+            if isinstance(key, str) and key.lower() in forbidden_keys:
                 raise PermissionError(
                     f"Paramètre interdit (accès shell) : {key}"
                 )
+        for value in self._iter_values(parameters):
+            if isinstance(value, str):
+                lowered = value.lower()
+                if any(k in lowered for k in forbidden_keys):
+                    raise PermissionError(
+                        f"Valeur interdite (accès shell) : {value}"
+                    )
 
     def validate_no_code_execution(self, parameters: dict[str, Any]) -> None:
         """Rejeter toute tentative d'exécution de code généré par le modèle."""
         code_keys = {"code", "script", "python", "javascript", "shell_code", "source"}
-        for key in parameters:
-            if key.lower() in code_keys:
+        for key in self._iter_keys(parameters):
+            if isinstance(key, str) and key.lower() in code_keys:
                 raise PermissionError(
                     f"Paramètre interdit (exécution de code) : {key}"
                 )
+        for value in self._iter_values(parameters):
+            if isinstance(value, str):
+                lowered = value.lower()
+                if any(k in lowered for k in code_keys):
+                    raise PermissionError(
+                        f"Valeur interdite (exécution de code) : {value}"
+                    )
 
     def validate_no_secret_access(self, parameters: dict[str, Any]) -> None:
         """Rejeter toute tentative d'accès à des secrets ou mots de passe."""
-        secret_keys = {"password", "secret", "api_key", "token", "private_key", "credential"}
-        for key in parameters:
-            if key.lower() in secret_keys:
+        secret_keys = {"password", "secret", "api_key", "token", "private_key", "credential", "apikey", "access_key", "secret_key"}
+        for key in self._iter_keys(parameters):
+            if isinstance(key, str) and key.lower() in secret_keys:
                 raise PermissionError(
                     f"Paramètre interdit (accès aux secrets) : {key}"
                 )
+        for value in self._iter_values(parameters):
+            if isinstance(value, str):
+                lowered = value.lower()
+                if any(k in lowered for k in secret_keys):
+                    raise PermissionError(
+                        f"Valeur interdite (accès aux secrets) : {value}"
+                    )
