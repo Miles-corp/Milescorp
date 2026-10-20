@@ -1,8 +1,109 @@
 # docs/reports/MILES_V1_VERIFICATION_AGENT_B.md — Vérification indépendante MILES V1 (Agent B)
 
-> **Révision 3 — finalisation de l'audit V1, validation Debian 13 et push automatique (2026-10-20).**
+> **Révision 4 — contre-audit final du commit `95dac41` (R3 documentation + R6 erreurs fournisseur), 2026-10-20.**
+> Révision 3 : finalisation de l'audit V1 et validation Debian 13.
 > Révision 2 : audit de suivi après les corrections d'Agent A.
 > Révision 1 : audit initial du commit `be9f317` (défauts D-B1 à D-B5 ouverts).
+
+## 0ter. Contre-audit du commit `95dac41` — synthèse
+
+| Élément | Valeur vérifiée |
+|---------|-----------------|
+| Commit audité | `95dac41fabde232901dd3c806c6edaec485c39c3` (`docs+fix: R3 documentation INSTALL.md et R6 erreurs fournisseur`, DripMind, 2026-10-20 14:48) |
+| Branche | `origin/feature/miles-v1-conversation-persistence` (avancée de `7dacdfe` → `95dac41`) |
+| Diff | 9 fichiers, +692/−11 : `app/ai_providers/public_errors.py` (nouveau), `app/interface/cli.py`, `app/interface/web.py`, `docs/installation/INSTALL.md`, `tests/test_docs_configuration.py` (nouveau, 11 tests), `tests/test_provider_errors.py` (nouveau), 2 documents de coordination, 1 rapport |
+| Environnement | Debian GNU/Linux 13 (trixie), noyau `6.12.113+deb13-amd64`, Python 3.13.5, stdlib uniquement, worktree isolé `/root/miles-audit`, dépôt local propre |
+| Ma branche d'audit | `audit/agent-b-v1-review` @ `e98c320` — **synchronisée** avec le distant avant et après session |
+
+### Faits vérifiés — suite de tests Debian 13
+
+| Mesure | Valeur |
+|--------|--------|
+| Tests exécutés | **328** |
+| Réussis | **328** |
+| Échoués | **0** |
+| Erreurs | **0** |
+| Ignorés | **3** (les 3 tests de liens symboliques — **pour un motif erroné**, voir D-C1) |
+| Durée | 38,4 s |
+
+Le total de **328** correspond exactement à l'annonce d'Agent A. L'écart avec mes 302 tests précédents vient des 26 nouveaux tests de `test_docs_configuration.py` (11) et `test_provider_errors.py` (15).
+
+### Écarts de plateforme
+
+| Plateforme | Exécutés | Réussis | Ignorés | Raison des skips |
+|---|---|---|---|---|
+| **Debian 13** | 328 | 328 | **3** | Les 3 tests de liens symboliques — **motif erroné** (D-C1). Le message affiche « Test exécuté sous Debian 13 » alors que l'exécution a lieu sous Debian 13. |
+| Windows | 328 | 328 | 7 | 3 liens symboliques (privilège « Développeur » requis) + 4 tests de voix liés à `pyttsx3`/`speech_recognition` absents. |
+
+**Correction de la mission :** `tests/test_voice.py` comporte **6** tests (et non 4) et **aucun n'est ignoré** — ils s'exécutent et passent, car le cas « dépendances vocales absentes → `VoiceUnavailableError` » est précisément le comportement attendu, vérifié sans installation. Aucun paquet n'a été installé.
+
+### D-C1 — Les tests de liens symboliques restent ignorés sous Debian 13 (défaut confirmé)
+
+| Élément | Valeur |
+|---|---|
+| **Priorité** | **Moyenne** |
+| **Fichiers** | `tests/test_path_security.py` (lignes 31-37, détection) ; `app/security/paths.py` (protection, non modifiée) |
+| **Branches concernées** | `origin/feature/miles-v1-conversation-persistence` (`95dac41`) → **défectueuse** ; `origin/fix/agent-b-s002-s004-s005-s006` → **défectueuse** ; `origin/audit/agent-b-v1-review` → **corrigée** ; `origin/main` et `origin/work/agent-a-phase4-audit` → fichier de test absent (antérieur à S-005) |
+| **Scénario de reproduction** | `python3 -m unittest tests.test_path_security -v` sur Debian 13 avec le commit `95dac41` |
+| **Comportement attendu** | Les 3 tests de confinement par lien symbolique s'exécutent sous Linux (la création de liens symboliques y est possible nativement) |
+| **Comportement observé** | Les 3 tests sont **ignorés** avec le motif « Création de lien symbolique non permise sur cette plateforme (**Windows** requiert un privilège). Test exécuté sous Debian 13. » — message contradictoire, puisqu'on est sous Debian 13 |
+| **Preuve disponible** | Contrôle en casse-sensible du contenu de `tests/test_path_security.py` à `95dac41` : la détection est toujours `os.symlink("cible", os.devnull)` → tente de créer le lien **à `/dev/null`** (chemin déjà existant) → `FileExistsError` (une `OSError`) → faux négatif « symlink non supporté ». Vérifié sur Debian 13 : `os.symlink("cible", os.devnull)` → `FileExistsError: [Errno 17] File exists: 'cible' -> '/dev/null'`, alors qu'une création correcte (`dst` dans un temporaire) réussit. |
+| **Impact** | La **preuve centrale de S-005** (le confinement des chemins tient compte des liens symboliques) **reste non exécutée sur toutes les plateformes**. Le rapport de Phase 4 d'Agent A et le rapport V1 d'Agent A présentent donc cette garantie comme validée, alors qu'elle ne l'est pas. |
+| **Correction recommandée** | Déjà écrite et **publiée par Agent B** : `c548e3b` (intégré dans `3029f3f`) remplace la détection par `_symlink_supported()` (sonde dans un répertoire temporaire, `dst` correct, nettoyage garanti). Il reste à **fusionner** `audit/agent-b-v1-review` dans la branche V1 puis dans `main` — aucune correction de production n'est nécessaire. |
+| **Test de non-régression requis** | `tests.test_path_security` doit s'exécuter **sans skip** sous Debian 13 (0 ignoré) et la mutation de `is_within()` doit faire échouer 10 tests (déjà vérifié en révision 3). |
+
+### D-C2 — Nuance de formulation dans la documentation R3 (faible)
+
+| Élément | Valeur |
+|---|---|
+| **Priorité** | **Faible** (documentation) |
+| **Fichier** | `docs/installation/INSTALL.md` — section « 3ter. Sources de configuration et variables reconnues » |
+| **Scénario** | Un `.env` contenant `MILES_ENV_FILE=/tmp/r3/autre.env` |
+| **Comportement attendu** | Le tableau liste ces variables sous « Seules les variables `MILES_*` listées ci-dessous sont **lues depuis le fichier `.env`** » |
+| **Comportement observé** | `MILES_ENV_FILE` et `MILES_CONFIG` sont lues **exclusivement de l'environnement du processus** (`os.environ.get(...)`), jamais du `.env` : impossible d'utiliser une variable du `.env` pour localiser le `.env`. Démonstration : avec `MILES_ENV_FILE` pointant vers `.env`, la valeur lue est `42` (dans `.env`) et non `999` (dans `autre.env`). |
+| **Preuve disponible** | Exécution réelle sur Debian 13 (§ R3 ci-dessus) ; lecture du code `settings.py` (2 lectures directes hors `env_mapping`) |
+| **Correction recommandée** | Distinguer visuellement les 2 variables de chemin dans le tableau (colonne « lue depuis le `.env` ? » : non) ou les sortir du tableau des variables lues depuis le `.env`. Le décompte **19 = 17 + 2** et la puce dédiée qui suit sont **exacts** : l'incohérence est uniquement dans l'introduction du tableau. |
+| **Test de non-régression requis** | Assert que `MILES_ENV_FILE` présent dans un `.env` est **ignoré** (le test documentaire existant couvre déjà les 19/17 et l'ignorance des variables non mappées). |
+
+### Points validés sans réserve
+
+| Point | Preuve (Debian 13, `95dac41`) |
+|---|---|
+| **R3 — 4 sources et priorité** | Process env > `.env` > JSON > défauts : vérifié par `tests/test_docs_configuration.py` (4 tests de priorité) — **tous passent** |
+| **R3 — décompte des variables** | **19 = 17 + 2** : `env_mapping` du code = 17 ; `MILES_ENV_FILE` et `MILES_CONFIG` lus hors mapping = 2. Le compte d'Agent A (19) est **exact** — mon estimation antérieure de 18 était erronée et est rectifiée ici. |
+| **R3 — variables non mappées** | `HTTP_PROXY` dans un `.env` → absent de `os.environ` et non lu par `Settings` (vérifié par exécution et par `test_variable_non_reconnue_ignoree`) |
+| **R3 — procédure proxy** | `export HTTP_PROXY=…` puis `urllib.request.getproxies()` → `http://proxy.exemple:3128` : la procédure documentée est **correcte** (`test_proxy_du_processus_est_utilise_par_urllib` passe) |
+| **R6 — CLI et web alignés** | 8 cas d'erreur traités → **CLI et web exposent un message public identique** dans les 8 cas |
+| **R6 — aucune fuite** | Aucun message public ne contient de code HTTP, d'URL, de corps de réponse ni de secret (contrôle sur 8 cas × 7 motifs) |
+| **R6 — détail technique assaini** | `technical_detail()` → `AIProviderError: echec avec [REDACTED]` : le secret est absent, le type d'exception conservé pour le diagnostic |
+| **R6 — scénario réel** | Serveur simulé renvoyant HTTP 401 + corps `body!` → stdout : `Erreur du fournisseur IA : authentification refusée.` ; `401`, `body!` et `Erreur HTTP` **absents** de la sortie. Le détail va dans le journal `miles.cli`. |
+| **Non-régression D-B1** | `attach_transcript(t,"INEXISTANT")` → `recreated`, 0 orphelin, 1 conversation visible |
+| **Non-régression D-B2** | `assertEqual(status, 413)` et `assertEqual(status, 400)` présents, `_assert_refused` **absent**, `send_body=False` présent : les assertions n'ont pas été affaiblies |
+| **Non-régression D-B3** | `PRAGMA foreign_keys = 1`, insertion fantôme refusée, messages 2 → 0 à la suppression |
+| **Non-régression D-B4** | `memory.close()` appelé en sortie normale **et** en exception |
+| **Non-régression D-B5** | `_persist` renvoie `False` sur `TranscriptError` et quand `message_id is None` |
+| **Non-régression `/clear`** | Messages supprimés de la base (2 → 0) et **non restaurés** après redémarrage (0) |
+| **Non-régression confinement** | `/tmp/ailleurs/x.db` refusé, `data/ok.db` accepté |
+| **Non-régression transactions** | Autocommit, 50 écritures sans échec, séquences 1..50 contiguës et uniques |
+| **Aucun appel payant** | Aucun appel à Groq ni à un autre fournisseur distant ; aucun modèle téléchargé ni installé |
+
+### Tests non exécutés et raisons
+
+| Non exécuté | Raison |
+|---|---|
+| Inférence réelle (Groq) | **Non autorisé** — coût API ; hors périmètre de ce contre-audit |
+| 3 tests de liens symboliques *sur `95dac41`* | **Ignorés par la defective detection** (D-C1) — ils s'exécutent si la correction d'Agent B est fusionnée (prouvé en révision 3 : 0 ignoré) |
+| 4 tests de voix sous Windows | Dépendances `pyttsx3`/`speech_recognition` absentes — **non installées volontairement** ; sous Debian 13 ces 6 tests de voix s'exécutent et passent sans installation |
+
+### Verdict global (contre-audit `95dac41`)
+
+**VALIDÉ POUR LE PÉRIMÈTRE ANNONCÉ, AVEC UNE RÉSERVE D-C1 À LEVANT.**
+
+R3 et R6 sont **correctement implémentés et prouvés** : la documentation correspond au code (19 variables, priorités, variables non mappées, proxy), et les erreurs fournisseur ne divulguent plus rien au terminal comme au client HTTP, avec une source de classification unique partagée par le CLI et le web. Aucune non-régression D-B1→D-B5 n'a été introduite.
+
+**Réserve D-C1 (à lever)** : la branche auditée conserve le détecteur de liens symboliques défectueux, ce qui maintient **silencieusement ignorés** les 3 tests qui prouvent le confinement des chemins — la garantie S-005 reste donc invérifiée sur la branche de développement. Le correctif existe déjà et est publié par Agent B : il ne reste qu'à **fusionner `audit/agent-b-v1-review`**.
+
+---
 
 ## 0. État réel vérifié (rectificatif)
 
@@ -208,12 +309,13 @@ Les cinq défauts D-B1 à D-B5 sont **résolus et vérifiés par des scénarios 
 
 | # | Action | Responsable | État |
 |---|--------|--------------|------|
-| 1 | Publier la branche `audit/agent-b-v1-review` (rapport + correction de la détection symlink) | Agent B (push automatique) | ✅ **Fait** — `3029f3f` publié, synchronisation confirmée |
-| 2 | Fusionner `7dacdfe` (corrections D-B1→D-B5) dans `main` | Utilisateur | ⏳ Requiert autorisation explicite |
-| 3 | Fusionner `audit/agent-b-v1-review` (pour que le correctif de détection symlink parvienne à `main` et à la branche V1) | Utilisateur | ⏳ Requiert autorisation explicite |
-| 4 | Documenter R3 dans `INSTALL.md` (section fournie dans **M-006**) | Agent A | ⏳ Transmis, non vérifié |
-| 5 | Restreindre le détail d'erreur fournisseur au terminal (R6) | Agent A | ⏳ Transmis via **M-007** |
-| 6 | Fusionner `7dacdfe` dans la branche V1 elle-même, si la branche V1 doit rester la référence de développement | Utilisateur | ⏳ À arbitrer |
+| 0 | **Fusionner `audit/agent-b-v1-review` dans la branche V1 puis dans `main`** — porte le correctif de détection des liens symboliques (**D-C1**) | Utilisateur (autorisation) | ⏳ **Prioritaire** : sans cela, les 3 tests S-005 restent ignorés sur toutes les plateformes |
+| 1 | Publier la branche `audit/agent-b-v1-review` (rapport + correction de la détection symlink) | Agent B (push automatique) | ✅ **Fait** — `e98c320` publié, synchronisation confirmée |
+| 2 | Fusionner `7dacdfe` / `95dac41` (corrections D-B1→D-B5, R3, R6) dans `main` | Utilisateur | ⏳ Requiert autorisation explicite |
+| 3 | Documenter R3 dans `INSTALL.md` (section fournie dans **M-006**) | Agent A | ✅ **Fait** dans `95dac41` — vérifié, 1 nuance de formulation (**D-C2**) |
+| 4 | Restreindre le détail d'erreur fournisseur au terminal (R6) | Agent A | ✅ **Fait** dans `95dac41` — vérifié, aucune fuite |
+| 5 | Nuance de formulation R3 dans `INSTALL.md` (**D-C2**) | Agent A | ⏳ Transmis via **M-008** |
+| 6 | Test d'inférence réel (Groq) | Non autorisé — coût API | ⏳ Décision à votre main |
 
 ## 13. Références de branche et de commit
 
