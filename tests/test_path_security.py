@@ -27,13 +27,28 @@ from app.security.paths import (
 )
 from app.security.validator import ActionValidator
 
+def _symlink_supported() -> bool:
+    """Vérifier si la création de liens symboliques est possible ici.
+
+    La détection se fait dans un répertoire temporaire : `os.symlink(src, dst)`
+    crée le lien `dst`. Utiliser `os.devnull` comme destination échouerait
+    systématiquement (ce chemin existe déjà) et ferait ignorer ces tests
+    sur toutes les plateformes, y compris Linux.
+    """
+    tmpdir = tempfile.mkdtemp(prefix="miles_test_symlink_probe_")
+    probe = os.path.join(tmpdir, "cible")
+    try:
+        os.symlink("cible", probe)
+        return True
+    except (OSError, NotImplementedError, AttributeError):
+        return False
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 # Création d'un lien symbolique : possible nativement sous Linux.
 # Sous Windows, os.symlink peut échouer (privilège insuffisant).
-try:
-    os.symlink("cible", os.devnull)
-    _SYMLINK_SUPPORTED = True
-except (OSError, NotImplementedError, AttributeError):
-    _SYMLINK_SUPPORTED = False
+_SYMLINK_SUPPORTED = _symlink_supported()
 
 
 class TestAllowedRoots(unittest.TestCase):
