@@ -17,6 +17,9 @@ Vérifie que :
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import tempfile
 import threading
 import unittest
 import urllib.error
@@ -79,6 +82,10 @@ class _Server:
         self._port = self._server.server_address[1]
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
+
+    @property
+    def port(self) -> int:
+        return self._port
 
     def __enter__(self) -> "_Server":
         return self
@@ -368,6 +375,174 @@ class TestWebServerLocalOnly(unittest.TestCase):
         from app.interface.web import LOCAL_ONLY_HOST
 
         self.assertEqual(LOCAL_ONLY_HOST, "127.0.0.1")
+
+
+class TestWebRequestBodyLimit(unittest.TestCase):
+    """S-004 : le corps HTTP est limité à 64 KiB et validé proprement."""
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.mkdtemp(prefix="miles_test_body_")
+        self.db_path = os.path.join(self.tmpdir, "memory.db")
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _raw_post(self, content_length: str | None, body: bytes) -> dict:
+        """Envoyer une requête POST avec un Content-Length imposé."""
+        import http.client
+
+        app = WebApp(settings=Settings())
+        with _Server(app) as server:
+            conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=10)
+            try:
+                headers = {"Content-Type": "application/json"}
+                if content_length is not None:
+                    headers["Content-Length"] = content_length
+                conn.request("POST", "/message", body=body, headers=headers)
+                resp = conn.getresponse()
+                return {
+                    "status": resp.status,
+                    "body": resp.read().decode("utf-8", errors="replace"),
+                }
+            finally:
+                conn.close()
+
+    def _payload_of_size(self, size: int) -> bytes:
+        """Construire un corps JSON valide de exactement `size` octets."""
+        prefix = b'{"message": "'
+        suffix = b'"}'
+        padding = size - len(prefix) - len(suffix)
+        if padding < 0:
+            raise ValueError("taille trop petite pour le gabarit")
+        return prefix + b"a" * padding + suffix
+
+    def _raw_socket_post(self, raw_request: bytes) -> dict:
+        """Envoyer une requête HTTP brute et lire la réponse.
+
+        Permet de contrôler exactement les octets émis (en-tête
+        Content-Length absent, corps tronqué, etc.).
+        """
+        import socket
+
+        app = WebApp(settings=Settings())
+        with _Server(app) as server:
+            sock = socket.create_connection(("127.0.0.1", server.port), timeout=10)
+            try:
+                sock.sendall(raw_request)
+                # Fin de flux en écriture : le serveur voit la fin des
+                # données transmises sans que le client attende.
+                sock.shutdown(socket.SHUT_WR)
+                chunks = []
+                while True:
+                    data = sock.recv(4096)
+                    if not data:
+                        break
+                    chunks.append(data)
+                raw = b"".join(chunks).decode("utf-8", errors="replace")
+                status = 0
+                if " " in raw:
+                    try:
+                        status = int(raw.split(" ")[1])
+                    except ValueError:
+                        status = 0
+                return {"status": status, "body": raw}
+            finally:
+                sock.close()
+
+    def test_limite_exacte_acceptee(self) -> None:
+        """Un corps de exactement 65 536 octets est accepté."""
+        from app.interface.web import MAX_BODY_BYTES
+
+        self.assertEqual(MAX_BODY_BYTES, 65536)
+        payload = self._payload_of_size(MAX_BODY_BYTES)
+        self.assertEqual(len(payload), 65536)
+        result = self._raw_post(str(MAX_BODY_BYTES), payload)
+        # Le corps est accepté : la réponse porte sur le traitement métier
+        # (400 "Aucun fournisseur IA configuré" et non 413).
+        self.assertNotEqual(result["status"], 413)
+
+    def test_limite_depassee_refusee_en_413(self) -> None:
+        """Un corps de 65 537 octets reçoit HTTP 413."""
+        from app.interface.web import MAX_BODY_BYTES
+
+        payload = self._payload_of_size(MAX_BODY_BYTES + 1)
+        self.assertEqual(len(payload), 65537)
+        result = self._raw_post(str(MAX_BODY_BYTES + 1), payload)
+        self.assertEqual(result["status"], 413)
+        self.assertIn("volumineuse", result["body"])
+
+    def test_longueur_extremement_grande_refusee_sans_lecture(self) -> None:
+        """Une longueur aberrante est refusée sans lire les données."""
+        result = self._raw_post("999999999999", b"x")
+        self.assertEqual(result["status"], 413)
+        self.assertIn("volumineuse", result["body"])
+
+    def test_longueur_negative_refusee(self) -> None:
+        result = self._raw_post("-1", b"")
+        self.assertEqual(result["status"], 400)
+        self.assertIn("Content-Length", result["body"])
+
+    def test_longueur_non_numerique_refusee(self) -> None:
+        result = self._raw_post("abc", b"{}")
+        self.assertEqual(result["status"], 400)
+        self.assertIn("Content-Length", result["body"])
+
+    def test_longueur_absente_traitee_proprement(self) -> None:
+        """Une requête sans en-tête Content-Length ne provoque pas d'exception."""
+        request = (
+            "POST /message HTTP/1.1\r\n"
+            "Host: 127.0.0.1\r\n"
+            "Content-Type: application/json\r\n"
+            "\r\n"
+        ).encode("ascii")
+        result = self._raw_socket_post(request)
+        self.assertNotEqual(result["status"], 0)
+        self.assertNotIn("Traceback", result["body"])
+        # Le corps vide est traité comme une requête sans message valide.
+        self.assertIn(result["status"], (400, 411, 413))
+
+    def test_corpus_plus_court_que_la_longueur_annoncee(self) -> None:
+        """Un corps plus court que la longueur annoncée est refusé proprement."""
+        request = (
+            "POST /message HTTP/1.1\r\n"
+            "Host: 127.0.0.1\r\n"
+            "Content-Type: application/json\r\n"
+            "Content-Length: 100\r\n"
+            "\r\n"
+        ).encode("ascii") + b"{}"
+        result = self._raw_socket_post(request)
+        self.assertEqual(result["status"], 400)
+        self.assertIn("incomplet", result["body"])
+
+    def test_corps_json_non_objet_refuse(self) -> None:
+        """Un corps JSON qui n'est pas un objet est refusé proprement."""
+        result = self._raw_post("2", b"[]")
+        self.assertEqual(result["status"], 400)
+        self.assertIn("JSON", result["body"])
+
+    def test_lecture_bornee_a_la_limite(self) -> None:
+        """Le handler ne lit jamais plus de MAX_BODY_BYTES octets."""
+        from app.interface.web import MAX_BODY_BYTES, MilesHandler
+
+        recorded: list[int] = []
+
+        class _FakeFile:
+            def read(self, size: int) -> bytes:
+                recorded.append(size)
+                return b""
+
+        class _FakeHandler(MilesHandler):
+            def __init__(self) -> None:  # noqa: D107 - double de test
+                self.headers = {"Content-Length": str(MAX_BODY_BYTES + 1)}
+                self.rfile = _FakeFile()
+                self.close_connection = False
+
+        handler = _FakeHandler()
+        with self.assertRaises(Exception) as ctx:
+            handler._read_body()
+        self.assertEqual(getattr(ctx.exception, "status", None), 413)
+        # Aucune lecture n'a eu lieu : le refus précède la lecture.
+        self.assertEqual(recorded, [])
 
 
 if __name__ == "__main__":

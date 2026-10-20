@@ -37,9 +37,26 @@ REDACTED = "[REDACTED]"
 # joignable depuis le réseau local ou Internet.
 LOCAL_ONLY_HOST = "127.0.0.1"
 
+# Taille maximale du corps d'une requête HTTP, en octets (64 KiB).
+# Au-delà, la requête est refusée avec HTTP 413 sans que les données
+# annoncées soient lues ou allouées.
+MAX_BODY_BYTES = 65536
+
 
 class WebServerSecurityError(Exception):
     """Refus de démarrer le serveur web sur une adresse non locale."""
+
+
+class RequestBodyError(Exception):
+    """Corps de requête HTTP invalide (en-tête ou taille).
+
+    Le statut HTTP à renvoyer au client est porté par l'exception.
+    """
+
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.message = message
 
 
 def assert_local_host(host: str) -> str:
@@ -263,6 +280,10 @@ class WebApp:
 class MilesHandler(BaseHTTPRequestHandler):
     """Gestionnaire des requêtes HTTP pour MILES."""
 
+    # Délai maximal d'attente d'une requête. Évite qu'un client qui annonce
+    # une taille puis n'envoie rien ne bloque un thread indéfiniment.
+    timeout = 30
+
     # L'application métier est attachée au serveur via server.miles_app.
     app: Optional[WebApp] = None
 
@@ -280,12 +301,61 @@ class MilesHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _read_body(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length", 0))
-        raw = self.rfile.read(length) if length > 0 else b""
+        """Lire et valider le corps de la requête.
+
+        Le corps ne doit jamais dépasser MAX_BODY_BYTES octets. La taille
+        annoncée est contrôlée AVANT toute lecture : un corps trop
+        volumineux n'est donc ni lu ni alloué.
+
+        Raises:
+            RequestBodyError: en-tête Content-Length absent, négatif, non
+                numérique, corps trop volumineux (413) ou incomplet.
+        """
+        raw_length = self.headers.get("Content-Length")
+        if raw_length is None:
+            length = 0
+        else:
+            try:
+                length = int(raw_length)
+            except (TypeError, ValueError):
+                raise RequestBodyError(
+                    400, "Requête mal formée : en-tête Content-Length invalide."
+                ) from None
+            if length < 0:
+                raise RequestBodyError(
+                    400, "Requête mal formée : en-tête Content-Length invalide."
+                )
+            if length > MAX_BODY_BYTES:
+                # Refus immédiat : les données annoncées ne sont pas lues.
+                raise RequestBodyError(
+                    413,
+                    "Requête trop volumineuse : le corps dépasse la limite autorisée.",
+                )
+
+        raw = b""
+        if length > 0:
+            try:
+                raw = self.rfile.read(length)
+            except (TimeoutError, OSError):
+                raise RequestBodyError(
+                    400, "Requête mal formée : corps de requête incomplet."
+                ) from None
+            if len(raw) < length:
+                raise RequestBodyError(
+                    400, "Requête mal formée : corps de requête incomplet."
+                )
+
+        if not raw:
+            return {}
         try:
-            return json.loads(raw.decode("utf-8")) if raw else {}
+            data = json.loads(raw.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):
             return {}
+        if not isinstance(data, dict):
+            raise RequestBodyError(
+                400, "Requête mal formée : corps JSON invalide."
+            )
+        return data
 
     def _html_escape(self, text: str) -> str:
         return html.escape(text or "", quote=True)
@@ -306,7 +376,14 @@ class MilesHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = self.path.split("?")[0]
-        data = self._read_body()
+        try:
+            data = self._read_body()
+        except RequestBodyError as exc:
+            # Le corps n'a pas été lu : la connexion ne peut plus être
+            # réutilisée pour une requête suivante.
+            self.close_connection = True
+            self._send_json(exc.status, {"error": exc.message})
+            return
 
         if path == "/message":
             self._handle_message(data)
