@@ -1,9 +1,103 @@
 # docs/reports/MILES_V1_VERIFICATION_AGENT_B.md — Vérification indépendante MILES V1 (Agent B)
 
-> **Révision 4 — contre-audit final du commit `95dac41` (R3 documentation + R6 erreurs fournisseur), 2026-10-20.**
+> **Révision 5 — contre-audit final D-C1 / D-C2 du commit `9a53652`, 2026-10-20.**
+> Révision 4 : contre-audit du commit `95dac41` (R3 + R6) — D-C1 et D-C2 confirmés.
 > Révision 3 : finalisation de l'audit V1 et validation Debian 13.
 > Révision 2 : audit de suivi après les corrections d'Agent A.
 > Révision 1 : audit initial du commit `be9f317` (défauts D-B1 à D-B5 ouverts).
+
+## 0quater. Contre-audit final D-C1 / D-C2 — commit `9a53652` — synthèse
+
+### SHA exacts audités
+
+| Rôle | SHA | Branche |
+|------|-----|---------|
+| **Commit de développement audité** | **`9a536523dabe29ebe5840bc85fa09cd08d8058f6`** (`docs+test: correctif D-C1 (detection symlink) et documentation D-C2`) | `origin/feature/miles-v1-conversation-persistence` |
+| Précédent audité (révision 4) | `95dac41fabde232901dd3c806c6edaec485c39c3` | idem |
+| Correctif d'Agent B rebasé par Agent A | `8d30809a6cac699282b0d81d9b756dac0f2451c1` | idem |
+| Correctif d'Agent B d'origine | `c548e3b6ca8c45a4529641510b4b2eb905f73f4d` | `audit/agent-b-v1-review` |
+| Branche d'audit d'Agent B | `9d8f9a4c38e88e20519fd067f7009bf22ef7bc41` | `origin/audit/agent-b-v1-review` |
+| `main` | `b5e100725efe3886a742d2eb13c2bd4bf185733f` — **inchangée** | `main` |
+
+**Note sur `c548e3b`.** Il n'est **pas** un ancêtre direct de la branche V1 : Agent A l'a **rebasé** sur `95dac41`, produisant le SHA `8d30809`. Conformément à la consigne (« ne considère pas la simple présence du commit comme une preuve suffisante »), j'ai vérifié **le code et les résultats d'exécution**, pas l'ascendance.
+
+### Résultats complets des tests
+
+| Exécution | Exécutés | Réussis | Échoués | Erreurs | Ignorés | Durée |
+|---|---|---|---|---|---|---|
+| **Debian 13** (`9a53652`) | **338** | **338** | 0 | 0 | **0** | 35,3 s |
+| Windows (`9a53652`) | 338 | 338 | 0 | 0 | 4 | 34,4 s |
+
+Les 4 skips Windows sont **justifiés et attendus** : 3 tests de liens symboliques (création de lien symbolique exigeant le privilège « Développeur » sous Windows) et 1 test de comptage de descripteurs (`/proc/self/fd` absent). Le message de skip indique correctement « Test exécuté sous Debian 13 » — et c'est désormais **exact**, puisque ces tests s'y exécutent bel et bien.
+
+### D-C1 — RÉSOLU : les tests de liens symboliques ne sont plus ignorés
+
+| Preuve | Résultat |
+|--------|----------|
+| Code de la détection | `_symlink_supported()` : temporaire créé, `dst` correct (`<tmp>/cible`), `os.symlink("cible", probe)`, nettoyage garanti par `finally: shutil.rmtree(...)`. Plus aucun usage d'`os.devnull` **en code** (seule mention dans la docstring qui explique pourquoi ne pas l'utiliser). |
+| Exécution sous Debian 13 | `python3 -m unittest tests.test_path_security -v` → **OK, 0 ignoré** |
+| Compte global de skips sous Debian 13 | **0 ligne « skipped »** dans toute la suite |
+| Preuve fonctionnelle (hors test) | **Lien symbolique sortant réellement créé** pointant vers `/tmp/…/out` → `resolve_authorized_path` → **REFUSE** (le confinement tient) |
+| Nouveau module de test | `tests/test_symlink_detection.py` (Agent A) → **OK** : le détecteur lui-même est désormais testé, ce qui empêche la régression |
+
+### D-C2 — RÉSOLU : la documentation correspond au code
+
+| Vérification | Résultat |
+|---|---|
+| Variables lues depuis le `.env` (`env_mapping` du code) | **17** |
+| Variables lues hors mapping (environnement du processus) | **2** → `MILES_ENV_FILE`, `MILES_CONFIG` |
+| **Total lu par le code** | **19** |
+| Annoncé dans `INSTALL.md` | **19** (dont « 17 variables de configuration ») → **cohérent** |
+| Comportement réel de `MILES_ENV_FILE` | **Ignoré** dans un `.env` : démonstration → valeur lue `42` (dans `.env`) et non `999` (dans `autre.env`) |
+| Correction apportée par Agent A | Les 2 variables de chemin sont désormais dans une **section dédiée** « Variables de chemin de fichier (lues uniquement de l'environnement) », avec l'explication *pourquoi* (impossible de localiser le `.env` par une variable qu'il contient), un avertissement que les écrire dans le `.env` est **sans effet**, et les 3 formulations concernées (introduction du tableau, section « variables non reconnues », puce « Limites ») ont été corrigées. |
+| Tests documentaires | `tests/test_docs_configuration.py` → **OK** (11 tests, dont le compte 19/17 et la bidirectionalité doc↔code) |
+
+### Non-régression (scénarios indépendants, Debian 13)
+
+| Point | Résultat |
+|---|---|
+| D-B1 | ✅ `recreated`, 0 orphelin, 1 conversation visible |
+| D-B2 | ✅ `assertEqual(413)` et `assertEqual(400)` présents, `_assert_refused` **absent**, `send_body=False` présent, contrôle de limite **avant** `rfile.read` |
+| D-B3 | ✅ `PRAGMA foreign_keys=1`, insertion fantôme refusée, messages 2→0 |
+| D-B4 | ✅ `close()` en sortie normale **et** en exception |
+| D-B5 | ✅ `add_user_message` → `False` sur panne d'écriture |
+| `/clear` | ✅ base 2→0, restauration après redémarrage = 0 |
+| Confinement | ✅ hors racine REFUSÉ, dans racine ACCEPTÉ, **lien symbolique sortant REFUSÉ** |
+| Transactions | ✅ autocommit, 50 écritures, séquences 1..50 contiguës |
+| R3 | ✅ variables non mappées ignorées, process env prioritaire sur `.env` |
+| R6 | ✅ CLI == Web sur 6 cas, **aucune fuite**, détail assaini (`AIProviderError: echec [REDACTED]`) |
+
+### Défauts résiduels
+
+| ID | Statut |
+|----|--------|
+| D-C1 | ✅ **RÉSOLU** — plus de défaut résiduel de ce côté |
+| D-C2 | ✅ **RÉSOLU** |
+| D-B1→D-B5, R2, R3, R4, R5, R6 | ✅ résolus, non réintroduits |
+
+**Aucun défaut résiduel identifié sur le commit `9a53652`.**
+
+### Limites de validation
+
+| Limite | Raison |
+|--------|--------|
+| Test d'inférence réel (Groq) | **Non autorisé** — coût API ; aucun appel payant effectué |
+| Fournisseur local (llama.cpp) | Hors périmètre ; aucun modèle téléchargé ni installé |
+| Dépendances vocales | `pyttsx3` / `speech_recognition` non installées (non nécessaires : les 6 tests de voix passent en vérifiant le comportement « dépendances absentes ») |
+| Exécution Windows | Les 4 tests ignorés sous Windows ne sont pas des échecs : ce sont des limites de plateforme ; leur exécution réelle est prouvée sous Debian 13 |
+| Périmètre | Voix, actions autonomes et performance non évalués (hors périmètre V1) |
+
+### Verdict global — contre-audit `9a53652`
+
+# VALIDÉ POUR LE PÉRIMÈTRE ANNONCÉ
+
+**D-C1 et D-C2 sont résolus, vérifiés par le code et par l'exécution, sans réserve.** La suite complète passe **338/338 avec 0 test ignoré sous Debian 13** ; les 4 skips restants sous Windows sont des limites de plateforme réelles et documentées, et les tests concernés s'exécutent effectivement sous Debian 13. Aucune non-régression D-B1→D-B5, R2→R6 n'a été introduite, et les assertions de sécurité n'ont pas été affaiblies.
+
+La garantie **S-005** (confinement des chemins tenant compte des liens symboliques) est désormais **réellement prouvée** : le test échoue si la protection est retirée (10 échecs mesurés en révision 3) et le cas réel d'un lien sortant est refusé.
+
+**Reste à faire, hors périmètre de ce contre-audit :** fusionner `9a53652` dans `main` (autorisation explicite requise) ; décider d'un éventuel test d'inférence réel (coût API).
+
+---
 
 ## 0ter. Contre-audit du commit `95dac41` — synthèse
 
@@ -309,13 +403,14 @@ Les cinq défauts D-B1 à D-B5 sont **résolus et vérifiés par des scénarios 
 
 | # | Action | Responsable | État |
 |---|--------|--------------|------|
-| 0 | **Fusionner `audit/agent-b-v1-review` dans la branche V1 puis dans `main`** — porte le correctif de détection des liens symboliques (**D-C1**) | Utilisateur (autorisation) | ⏳ **Prioritaire** : sans cela, les 3 tests S-005 restent ignorés sur toutes les plateformes |
-| 1 | Publier la branche `audit/agent-b-v1-review` (rapport + correction de la détection symlink) | Agent B (push automatique) | ✅ **Fait** — `e98c320` publié, synchronisation confirmée |
-| 2 | Fusionner `7dacdfe` / `95dac41` (corrections D-B1→D-B5, R3, R6) dans `main` | Utilisateur | ⏳ Requiert autorisation explicite |
-| 3 | Documenter R3 dans `INSTALL.md` (section fournie dans **M-006**) | Agent A | ✅ **Fait** dans `95dac41` — vérifié, 1 nuance de formulation (**D-C2**) |
-| 4 | Restreindre le détail d'erreur fournisseur au terminal (R6) | Agent A | ✅ **Fait** dans `95dac41` — vérifié, aucune fuite |
-| 5 | Nuance de formulation R3 dans `INSTALL.md` (**D-C2**) | Agent A | ⏳ Transmis via **M-008** |
+| 0 | ~~Fusionner `audit/agent-b-v1-review` dans la branche V1~~ | Agent A | ✅ **Fait** — correctif rebasé en `8d30809`, intégré dans `9a53652` |
+| 1 | Publier la branche `audit/agent-b-v1-review` (rapport) | Agent B (push automatique) | ✅ **Fait** — `9d8f9a4` publié, synchronisation confirmée |
+| 2 | Fusionner `9a53652` (V1 complète : D-B1→D-B5, R3, R6, D-C1, D-C2) dans `main` | Utilisateur | ⏳ Requiert autorisation explicite |
+| 3 | Documenter R3 dans `INSTALL.md` | Agent A | ✅ **Fait** dans `95dac41`, vérifié |
+| 4 | Restreindre le détail d'erreur fournisseur au terminal (R6) | Agent A | ✅ **Fait** dans `95dac41`, vérifié |
+| 5 | Nuance de formulation R3 (D-C2) | Agent A | ✅ **Fait** dans `9a53652`, vérifié |
 | 6 | Test d'inférence réel (Groq) | Non autorisé — coût API | ⏳ Décision à votre main |
+| 7 | Fusionner la branche V1 (`9a53652`) dans `main` **après** validation Debian 13 par l'agent | Utilisateur | ⏳ Recommandé avant intégration |
 
 ## 13. Références de branche et de commit
 
