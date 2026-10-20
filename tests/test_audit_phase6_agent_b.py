@@ -257,25 +257,27 @@ class TestAuditConfirmation(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertTrue(result.confirmation_required)
 
-    def audit_defaut_confirmation_non_liee_a_une_identite(self) -> None:
+    @unittest.expectedFailure
+    def test_audit_defaut_confirmation_non_liee_a_une_identite(self) -> None:
         """DEFAUT CONSTATE (P1) : le jeton n'est lie a aucune identite.
 
         Le jeton est lie a l'outil et aux parametres exacts, expire, et n'est
         utilisable qu'une fois. Mais il n'est lie a **aucune session ni
-        identite** : le client qui le detient peut l'utiliser, quel qu'il
-        soit. Ce test *documente* le defaut : il doit echouer (donc lever une
-        AssertionError) si un jour une liaison a l'identite est ajoutee.
+        identite** : dans le serveur web, un seul `ToolService` est partage
+        par tous les clients HTTP ; le jeton delivre a un client peut donc
+        etre reutilise par un autre client du meme service.
 
-        Consequence : avant toute exposition des outils a un modele (LLM),
-        le jeton doit etre lie a une session humaine.
+        Ce test exprime le comportement **souhaité** (refus) ; il est marque
+        `expectedFailure` car le defaut est present. Le jour ou la liaison a
+        l'identite sera implementee, ce test echouera comme "unexpected
+        success", signalant que la correction est a retirer de
+        `expectedFailure`.
         """
         token = self._token_for_list_files()
-        # Un second "client" (aucune session, aucun identifiant) utilise le
-        # jeton delivre au premier : c'est accepte.
-        autre_client = ToolService(
-            registry=self.service.registry, granted_permissions={"lecture_systeme"}
-        )
-        result = autre_client.request_tool(
+        # Second client du MEME service (comme deux navigateurs sur le
+        # serveur web local, qui partagent un seul ToolService) : il
+        # n'a aucune identite, mais peut reutiliser le jeton du premier.
+        result = self.service.request_tool(
             "action_list_files",
             {"path": "data"},
             user_confirmed=True,
@@ -283,9 +285,29 @@ class TestAuditConfirmation(unittest.TestCase):
         )
         self.assertFalse(
             result.success,
-            "Le jeton devrait etre rejete par un client sans identite lie "
-            "(defaut corrige : liaison a l'identite implementee).",
+            "Le jeton a ete accepte par un client sans identite lie : "
+            "le defaut P1 est corrige, retirer expectedFailure.",
         )
+
+    def test_jeton_non_partage_entre_moteurs_differents(self) -> None:
+        """Un jeton n'est pas partage entre deux moteurs distincts.
+
+        Ce n'est pas une protection d'identite : le serveur web n'expose
+        qu'un seul moteur. Ce test documente la frontiere reelle du
+        mecanisme de confirmation.
+        """
+        token = self._token_for_list_files()
+        autre_moteur = ToolService(
+            registry=self.service.registry, granted_permissions={"lecture_systeme"}
+        )
+        result = autre_moteur.request_tool(
+            "action_list_files",
+            {"path": "data"},
+            user_confirmed=True,
+            confirmation_token=token,
+        )
+        self.assertFalse(result.success)
+        self.assertTrue(result.confirmation_required)
 
 
 class TestAuditWebAccessControl(unittest.TestCase):
@@ -294,7 +316,8 @@ class TestAuditWebAccessControl(unittest.TestCase):
     def _app(self) -> WebApp:
         return WebApp(settings=Settings(), tool_service=ToolService())
 
-    def test_requete_cross_origin_traitee_sans_refus(self) -> None:
+    @unittest.expectedFailure
+    def test_audit_defaut_requete_cross_origin_refusee(self) -> None:
         """DEFAUT CONSTATE (P1) : aucune protection Origin/Referer.
 
         Le serveur web est bound sur 127.0.0.1 mais n'exige aucun en-tete
@@ -302,8 +325,8 @@ class TestAuditWebAccessControl(unittest.TestCase):
         page web tierce peut donc envoyer une requete POST simple (type
         `text/plain`, sans preflight CORS) vers un endpoint local.
 
-        Ce test *documente* le defaut : il doit echouer le jour ou une
-        protection Origin/Content-Type sera ajoutee.
+        Ce test exprime le comportement **souhaité** (refus 403) ; il est
+        marque `expectedFailure` car le defaut est present.
         """
         payload = json.dumps({"tool": "status_read", "parameters": {}}).encode()
         with _Server(self._app()) as server:
@@ -316,29 +339,31 @@ class TestAuditWebAccessControl(unittest.TestCase):
                     "Origin": "http://site-malveillant.example",
                 },
             )
-        self.assertNotEqual(
+        self.assertEqual(
             result["status"],
             403,
-            "Le serveur devrait refuser une requete cross-origin "
-            "(defaut corrige : protection Origin ajoutee).",
+            "La requete cross-origin a ete traitee : le defaut P1 est "
+            "corrige, retirer expectedFailure.",
         )
 
-    def test_content_type_de_requete_non_valide(self) -> None:
+    @unittest.expectedFailure
+    def test_audit_defaut_content_type_non_json_refuse(self) -> None:
         """DEFAUT CONSTATE (P2) : le Content-Type de la requete n'est pas verifie.
 
         Un corps JSON est accepte quelle que soit l'en-tete Content-Type.
-        Ce test documente le defaut.
+        Ce test exprime le comportement **souhaite** (415) ; il est marque
+        `expectedFailure` car le defaut est present.
         """
         payload = json.dumps({"tool": "status_read", "parameters": {}}).encode()
         with _Server(self._app()) as server:
             result = server.request(
                 "POST", "/tool", body=payload, headers={"Content-Type": "text/plain"}
             )
-        self.assertNotEqual(
+        self.assertEqual(
             result["status"],
             415,
-            "Le serveur devrait refuser un Content-Type non JSON "
-            "(defaut corrige : verification du Content-Type ajoutee).",
+            "Le Content-Type non JSON a ete accepte : le defaut P2 est "
+            "corrige, retirer expectedFailure.",
         )
 
     def test_outil_inconnu_refuse_par_la_route(self) -> None:
