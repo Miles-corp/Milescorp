@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import multiprocessing
 import time
 import uuid
@@ -29,6 +30,12 @@ from typing import Any, Callable, Dict, Optional
 from app.tools.audit import AuditLogger
 from app.tools.policy import ToolPolicy
 from app.tools.registry import ToolDefinition, ToolRegistry
+
+logger = logging.getLogger("miles.tools")
+if not logger.handlers:
+    # Handler neutre : l'application reste libre de configurer la
+    # journalisation. N'écrit rien sur stderr par défaut.
+    logger.addHandler(logging.NullHandler())
 
 
 @dataclass
@@ -363,62 +370,92 @@ class ToolEngine:
         L'exécution se fait dans un processus séparé (multiprocessing)
         pour permettre un arrêt effectif en cas de dépassement de délai.
         Aucun shell arbitraire n'est utilisé.
+
+        Les files de résultat et d'erreur sont systématiquement fermées,
+        y compris sur les chemins d'erreur et de dépassement de délai, afin
+        de ne pas laisser de descripteurs de fichiers ni de threads
+        derrière soi.
         """
         result_queue: "multiprocessing.Queue[Any]" = multiprocessing.Queue()
         error_queue: "multiprocessing.Queue[str]" = multiprocessing.Queue()
 
-        process = multiprocessing.Process(
-            target=_run_handler_in_process,
-            args=(tool.handler, parameters, result_queue, error_queue),
-            daemon=True,
-        )
-        process.start()
-        process.join(timeout=tool.timeout_seconds)
-
-        if process.is_alive():
-            # Le processus est toujours en cours : arrêt effectif
-            process.terminate()
-            process.join(timeout=5)
-            if process.is_alive():
-                process.kill()
-            return ToolResult(
-                tool_id=tool.tool_id,
-                success=False,
-                error_message=(
-                    f"Délai d'attente dépassé ({tool.timeout_seconds}s). "
-                    "Exécution arrêtée."
-                ),
+        try:
+            process = multiprocessing.Process(
+                target=_run_handler_in_process,
+                args=(tool.handler, parameters, result_queue, error_queue),
+                daemon=True,
             )
+            process.start()
+            process.join(timeout=tool.timeout_seconds)
 
-        # Récupérer le résultat ou l'erreur
-        if not result_queue.empty():
-            kind, value = result_queue.get()
-            if kind == "ok":
+            if process.is_alive():
+                # Le processus est toujours en cours : arrêt effectif
+                process.terminate()
+                process.join(timeout=5)
+                if process.is_alive():
+                    process.kill()
+                    # Récolter le processus tué : pas de processus zombie.
+                    process.join(timeout=5)
                 return ToolResult(
                     tool_id=tool.tool_id,
-                    success=True,
-                    data=value,
+                    success=False,
+                    error_message=(
+                        f"Délai d'attente dépassé ({tool.timeout_seconds}s). "
+                        "Exécution arrêtée."
+                    ),
                 )
-            # Ne devrait pas arriver, mais on gère
+
+            # Récupérer le résultat ou l'erreur
+            if not result_queue.empty():
+                kind, value = result_queue.get()
+                if kind == "ok":
+                    return ToolResult(
+                        tool_id=tool.tool_id,
+                        success=True,
+                        data=value,
+                    )
+                # Ne devrait pas arriver, mais on gère
+                return ToolResult(
+                    tool_id=tool.tool_id,
+                    success=False,
+                    error_message="Erreur interne lors de l'exécution.",
+                )
+
+            if not error_queue.empty():
+                _kind, error_msg = error_queue.get()
+                return ToolResult(
+                    tool_id=tool.tool_id,
+                    success=False,
+                    error_message="Erreur d'exécution.",
+                )
+
             return ToolResult(
                 tool_id=tool.tool_id,
                 success=False,
                 error_message="Erreur interne lors de l'exécution.",
             )
+        finally:
+            # Les files sont fermées dans tous les cas (succès, erreur,
+            # dépassement de délai).
+            self._close_queues(result_queue, error_queue)
 
-        if not error_queue.empty():
-            _kind, error_msg = error_queue.get()
-            return ToolResult(
-                tool_id=tool.tool_id,
-                success=False,
-                error_message="Erreur d'exécution.",
-            )
+    @staticmethod
+    def _close_queues(*queues: "multiprocessing.Queue[Any]") -> None:
+        """Fermer les files de résultat et d'erreur.
 
-        return ToolResult(
-            tool_id=tool.tool_id,
-            success=False,
-            error_message="Erreur interne lors de l'exécution.",
-        )
+        `cancel_join_thread()` est appelé avant `close()` : si le processus
+        enfant a été tué en cours d'écriture, la fermeture ne doit pas
+        bloquer sur le thread d'alimentation de la file.
+        """
+        for queue in queues:
+            try:
+                queue.cancel_join_thread()
+            except Exception as exc:  # noqa: BLE001 — fermeture best-effort
+                logger.warning("Annulation de jointure de file impossible : %s", exc)
+            try:
+                queue.close()
+            except Exception as exc:  # noqa: BLE001 — fermeture best-effort
+                logger.warning("Fermeture de file impossible : %s", exc)
 
     def _hash_parameters(self, parameters: Dict[str, Any]) -> str:
         """Calculer une empreinte déterministe des paramètres."""
