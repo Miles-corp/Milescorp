@@ -23,6 +23,7 @@ from app.ai_providers.public_errors import public_provider_error as _public_prov
 from app.config.settings import Settings
 from app.core.conversation import Conversation
 from app.memory.persistent import PersistentMemory, PersistentMemoryError
+from app.tools.service import ToolService
 from app.utilities.redaction import REDACTED, sanitize_text
 
 logger = logging.getLogger("miles.web")
@@ -123,6 +124,7 @@ class WebApp:
         provider: Optional[AIProvider] = None,
         conversation: Optional[Conversation] = None,
         memory: Optional[PersistentMemory] = None,
+        tool_service: Optional[ToolService] = None,
     ) -> None:
         self.settings = settings
         self.provider = provider
@@ -130,6 +132,50 @@ class WebApp:
             history_limit=settings.get("history_limit", 10)
         )
         self.memory = memory
+        # Même service d'outils que le CLI : aucune duplication de la
+        # logique métier (validation, permissions, confirmation, audit).
+        self.tool_service = tool_service
+
+    # --- Outils ---
+
+    def list_tools(self) -> dict[str, Any]:
+        """Retourner le catalogue des outils disponibles."""
+        if self.tool_service is None:
+            return {"tools": [], "error": "Aucun service d'outils disponible."}
+        return {"tools": self.tool_service.list_tools()}
+
+    def run_tool(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Exécuter un outil via le service partagé (même moteur que le CLI).
+
+        Le client peut transmettre ``confirmation_token`` et
+        ``user_confirmed`` pour confirmer une action à effet externe.
+        """
+        if self.tool_service is None:
+            return {"error": "Aucun service d'outils disponible."}
+
+        tool_id = data.get("tool", data.get("tool_id", ""))
+        if not isinstance(tool_id, str) or not tool_id.strip():
+            return {"error": "Identifiant d'outil manquant."}
+
+        raw_parameters = data.get("parameters", {})
+        if raw_parameters is None:
+            raw_parameters = {}
+        if not isinstance(raw_parameters, dict):
+            return {"error": "Paramètres invalides."}
+        parameters = {str(k): v for k, v in raw_parameters.items()}
+
+        user_confirmed = bool(data.get("user_confirmed", False))
+        confirmation_token = data.get("confirmation_token")
+        if confirmation_token is not None and not isinstance(confirmation_token, str):
+            return {"error": "Jeton de confirmation invalide."}
+
+        result = self.tool_service.request_tool(
+            tool_id=tool_id.strip(),
+            parameters=parameters,
+            user_confirmed=user_confirmed,
+            confirmation_token=confirmation_token,
+        )
+        return self.tool_service.describe_result(result)
 
     # --- Fournisseur ---
 
@@ -361,6 +407,8 @@ class MilesHandler(BaseHTTPRequestHandler):
             self._handle_status()
         elif path == "/memory":
             self._handle_list_memories()
+        elif path == "/tools":
+            self._handle_list_tools()
         else:
             self._send_json(404, {"error": "Not found", "path": path})
 
@@ -381,6 +429,8 @@ class MilesHandler(BaseHTTPRequestHandler):
             self._handle_remember(data)
         elif path == "/forget":
             self._handle_forget(data)
+        elif path == "/tool":
+            self._handle_run_tool(data)
         else:
             self._send_json(404, {"error": "Not found", "path": path})
 
@@ -421,6 +471,11 @@ button.secondary:hover {{ background: #616161; }}
 .memories {{ margin: 1rem 0; }}
 .memories ul {{ list-style: none; padding: 0; }}
 .memories li {{ margin: 0.25rem 0; padding: 0.25rem; background: #f5f5f5; border-radius: 4px; }}
+.tools {{ margin: 1rem 0; }}
+.tools ul {{ list-style: none; padding: 0; }}
+.tools li {{ margin: 0.35rem 0; padding: 0.35rem; background: #f5f5f5; border-radius: 4px; font-size: 0.9rem; }}
+.tools code {{ background: #e0e0e0; padding: 0 0.25rem; border-radius: 3px; }}
+.tools input[type="text"] {{ width: auto; padding: 0.25rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem; }}
 </style>
 </head>
 <body>
@@ -443,6 +498,11 @@ button.secondary:hover {{ background: #616161; }}
 </form>
 
 <div class="memories" id="memories"></div>
+
+<div class="tools" id="tools">
+<strong>Outils :</strong>
+<div id="toolsList"><p>Chargement…</p></div>
+</div>
 
 <script>
 async function sendMessage(e) {{
@@ -494,6 +554,91 @@ async function loadMemories() {{
   }} catch (err) {{ console.error(err); }}
 }}
 
+async function loadTools() {{
+  const container = document.getElementById('toolsList');
+  try {{
+    const res = await fetch('/tools');
+    const data = await res.json();
+    if (!Array.isArray(data.tools) || data.tools.length === 0) {{
+      container.innerHTML = '<p>Aucun outil disponible.</p>';
+      return;
+    }}
+    container.innerHTML = '<ul>' + data.tools.map(t => {{
+      const champs = (t.parameters || []).map(p =>
+        '<input type="text" data-tool="' + escapeHtml(t.id) + '" data-param="' + escapeHtml(p.name) +
+        '" data-type="' + escapeHtml(p.type) + '" placeholder="' + escapeHtml(p.name) + '" size="12">'
+      ).join(' ');
+      return '<li><code>' + escapeHtml(t.id) + '</code> [' + escapeHtml(t.risk_level) + '] ' +
+        escapeHtml(t.description) +
+        (t.requires_confirmation ? ' <em>(confirmation requise)</em>' : '') +
+        ' ' + champs +
+        ' <button type="button" class="secondary" onclick="runTool(\\'' + escapeHtml(t.id) + '\\')">Exécuter</button></li>';
+    }}).join('') + '</ul>';
+  }} catch (err) {{
+    container.innerHTML = '<p>Erreur de chargement des outils.</p>';
+    console.error(err);
+  }}
+}}
+
+function collectToolParams(toolId) {{
+  const params = {{}};
+  document.querySelectorAll('input[data-tool="' + toolId + '"]').forEach(input => {{
+    const valeur = input.value.trim();
+    if (!valeur) return;
+    const type = input.getAttribute('data-type');
+    if (type === 'int') {{
+      params[input.getAttribute('data-param')] = parseInt(valeur, 10);
+    }} else if (type === 'float') {{
+      params[input.getAttribute('data-param')] = parseFloat(valeur);
+    }} else if (type === 'bool') {{
+      params[input.getAttribute('data-param')] = (valeur === 'true' || valeur === '1');
+    }} else {{
+      params[input.getAttribute('data-param')] = valeur;
+    }}
+  }});
+  return params;
+}}
+
+async function postTool(toolId, params, userConfirmed, token) {{
+  const body = {{ tool: toolId, parameters: params }};
+  if (userConfirmed) {{
+    body.user_confirmed = true;
+    body.confirmation_token = token;
+  }}
+  const res = await fetch('/tool', {{
+    method: 'POST',
+    headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify(body)
+  }});
+  return await res.json();
+}}
+
+async function runTool(toolId) {{
+  const params = collectToolParams(toolId);
+  let data = await postTool(toolId, params, false, null);
+  if (data.confirmation_required) {{
+    // Confirmation humaine explicite : l'utilisateur tranche dans le
+    // navigateur avant que le jeton ne soit renvoyé.
+    const ok = window.confirm("L'outil '" + toolId + "' requiert une confirmation humaine.\\nExécuter ?");
+    if (!ok) {{
+      appendMessage('system', 'Action annulée.');
+      return;
+    }}
+    data = await postTool(toolId, params, true, data.confirmation_token);
+  }}
+  if (data.success) {{
+    appendMessage('assistant', 'Résultat de ' + toolId + ' :\\n' + formatToolResult(data.result));
+  }} else {{
+    appendMessage('error', 'Outil ' + toolId + ' : ' + (data.error || 'échec'));
+  }}
+}}
+
+function formatToolResult(result) {{
+  if (result === null || result === undefined) return '(aucun résultat)';
+  if (typeof result === 'object') return JSON.stringify(result, null, 2);
+  return String(result);
+}}
+
 function appendMessage(role, text) {{
   const chat = document.getElementById('chat');
   const div = document.createElement('div');
@@ -510,6 +655,7 @@ function escapeHtml(text) {{
 }}
 
 loadStatus();
+loadTools();
 </script>
 </body>
 </html>"""
@@ -521,6 +667,30 @@ loadStatus();
         state = self.app.provider_state()
         state["memory_available"] = self.app.memory.is_available if self.app.memory else False
         self._send_json(200, state)
+
+    def _handle_list_tools(self) -> None:
+        if self.app is None:
+            self._send_json(500, {"error": "Application non initialisée"})
+            return
+        payload = self.app.list_tools()
+        status = 200 if "error" not in payload else 503
+        self._send_json(status, payload)
+
+    def _handle_run_tool(self, data: dict[str, Any]) -> None:
+        if self.app is None:
+            self._send_json(500, {"error": "Application non initialisée"})
+            return
+        payload = self.app.run_tool(data)
+        # Une demande de confirmation est une réponse normale du protocole
+        # (200 + jeton), pas une erreur : le client doit pouvoir confirmer.
+        if payload.get("confirmation_required"):
+            self._send_json(200, payload)
+            return
+        if not payload.get("success"):
+            # Refus ou échec de l'outil : erreur côté appelant, pas serveur.
+            self._send_json(400, payload)
+            return
+        self._send_json(200, payload)
 
     def _handle_list_memories(self) -> None:
         if self.app is None:

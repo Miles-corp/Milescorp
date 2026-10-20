@@ -29,6 +29,7 @@ Convention :
 | TASK-DEV-012 | Correctif D-C1 (detection symlink) et documentation D-C2 | Integrer le correctif de detection des liens symboliques (c548e3b) ; distinguer dans INSTALL.md les variables lues du .env et celles lues exclusivement de l'environnement du processus | DONE | Agent A | tests/test_path_security.py, docs/installation/INSTALL.md, tests/test_symlink_detection.py, tests/test_docs_configuration.py | D-C1 integre (303->338 tests OK), D-C2 documente (19 = 17 + 2), VM Debian 13 inaccessible depuis ce poste | Aucune | 2026-10-20 | 2026-10-20 |
 | TASK-DEV-008 | Phase 4 : Moteur d'outils sécurisé | Registre central, moteur de décision, politique de sécurité, journal d'audit, premier outil status_read, tests automatisés | DONE | Agent A | app/tools/**, tests/test_tool_*.py | 137 tests OK (67 existants + 70 nouveaux), aucun secret dans les logs, pas d'accès shell arbitraire, pas de basculement des permissions | Dépend de TASK-DEV-006 publié sur GitHub | 2026-10-19 | 2026-10-19 |
 | TASK-DEV-008 | Phase 3B : validation fonctionnelle (terminal, web, mémoire) | DONE | Agent B | tests/** (lecture et exécution), docs/reports/PHASE_3B_VALIDATION.md (création), docs/coordination/STATUS.md (mise à jour) | Rapport de validation fonctionnelle exact, commandes de reproduction, limites documentées. 95 tests de régression OK. | Aucune | 2026-10-19 | 2026-10-19 |
+| TASK-DEV-013 | Phase 5 : intégration du moteur d'outils dans le CLI et l'interface web | Brancher le moteur d'outils existant dans les deux interfaces via une couche métier unique (ToolService), enregistrer les outils réellement implémentés, confirmation humaine pour les actions sensibles, tests d'intégration et de sécurité, rapport | DONE | Agent A | app/tools/{service,builtin,local_actions}.py, app/interface/{cli,web}.py, app/tools/status_tool.py, miles.py, tests/test_tool_integration.py, docs/reports/PHASE_5_TOOL_ENGINE_INTEGRATION_AGENT_A.md | CLI `/tools` et `/tool`, web `GET /tools` et `POST /tool`, service partagé (zéro doublon), 4 outils enregistrés, 40 nouveaux tests, 378 tests OK sur Windows, aucune action réelle pendant les tests | Aucune | 2026-10-20 | 2026-10-20 |
 
 ## Registre des fichiers et propriétaires (Mission DEV-001)
 
@@ -78,6 +79,10 @@ Convention :
 | tests/test_tool_audit.py | Tests du journal d'audit | Agent A | Créé | tests/ | unittest | TASK-DEV-008 |
 | tests/test_tool_engine.py | Tests du moteur de décision | Agent A | Créé | tests/ | unittest | TASK-DEV-008 |
 | tests/test_status_tool.py | Tests du premier outil | Agent A | Créé | tests/ | unittest | TASK-DEV-008 |
+| app/tools/local_actions.py | Handlers locaux picklables : datetime, workdir, list_files (chemins confinés) | Agent A | Créé | app/tools/, app/security/paths.py | Fonctions de niveau module | TASK-DEV-013 |
+| app/tools/builtin.py | Registre par défaut des outils réellement implémentés | Agent A | Créé | app/tools/ | Fonction build_default_registry() | TASK-DEV-013 |
+| app/tools/service.py | Façade commune CLI/web au-dessus du moteur d'outils | Agent A | Créé | app/tools/ | Classe ToolService | TASK-DEV-013 |
+| tests/test_tool_integration.py | Tests d'intégration du moteur d'outils (CLI, web, sécurité, régression) | Agent A | Créé | tests/ | unittest | TASK-DEV-013 |
 
 ## Règles d'attribution
 

@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import Any
+from typing import Any, Optional
 
 from app.ai_providers.base import AIProvider, AIProviderError
 from app.ai_providers.public_errors import public_provider_error, technical_detail
 from app.core.conversation import Conversation
 from app.memory.persistent import PersistentMemory, PersistentMemoryError
 from app.security.validator import ActionValidator, ActionResult
+from app.tools.service import ToolService
 
 logger = logging.getLogger("miles.cli")
 if not logger.handlers:
@@ -23,7 +24,7 @@ if not logger.handlers:
     logger.addHandler(logging.NullHandler())
 
 HELP_TEXT = """\nCommandes disponibles :
-  /help        Afficher cette aide
+  /help        Afficher l'aide
   /quit ou /q  Quitter le programme
   /clear       Effacer l'historique de la conversation
   /provider    Afficher le fournisseur IA courant
@@ -33,6 +34,8 @@ HELP_TEXT = """\nCommandes disponibles :
   /forget      Supprimer un souvenir (usage: /forget <id>)
   /conversations Lister les conversations enregistrées
   /new         Démarrer une nouvelle conversation
+  /tools       Lister les outils disponibles
+  /tool        Exécuter un outil (usage: /tool <id> [cle=valeur ...])
 Tapez votre message pour discuter avec l'assistant.
 """
 
@@ -47,6 +50,7 @@ class CLI:
         conversation: Conversation | None = None,
         validator: ActionValidator | None = None,
         memory: PersistentMemory | None = None,
+        tool_service: ToolService | None = None,
     ) -> None:
         self.settings = settings
         self.provider = provider
@@ -57,6 +61,7 @@ class CLI:
         self.conversation = conversation
         self.validator = validator or ActionValidator()
         self.memory = memory
+        self.tool_service = tool_service
         self._restored_message_count = 0
         self._running = True
 
@@ -207,6 +212,10 @@ class CLI:
                 print(f"Nouvelle conversation : {new_id}")
             else:
                 print("Impossible de créer une nouvelle conversation.")
+        elif cmd == "/tools":
+            self._handle_tools_command()
+        elif cmd == "/tool":
+            self._handle_tool_command(args)
         elif cmd == "/remember":
             if self.memory is None or not self.memory.is_available:
                 print("Mémoire persistante indisponible ou désactivée.")
@@ -250,8 +259,100 @@ class CLI:
         else:
             print(f"Commande inconnue : {cmd}. Tapez /help pour l'aide.")
 
+    # --- Outils ---
+
+    def _handle_tools_command(self) -> None:
+        """Lister les outils disponibles (catalogue, sans exécution)."""
+        if self.tool_service is None:
+            print("Aucun service d'outils disponible.")
+            return
+        catalogue = self.tool_service.list_tools()
+        if not catalogue:
+            print("Aucun outil enregistré.")
+            return
+        print("Outils disponibles :")
+        for tool in catalogue:
+            confirmation = (
+                " (confirmation requise)"
+                if tool["requires_confirmation"]
+                else ""
+            )
+            print(f"  {tool['id']}  [risque {tool['risk_level']}]{confirmation}")
+            print(f"      {tool['description']}")
+
+    def _handle_tool_command(self, args: list[str]) -> None:
+        """Exécuter un outil via le service partagé.
+
+        La validation, les permissions, la confirmation et les délais sont
+        entièrement gérés par le moteur : cette méthode ne fait qu'acheminer
+        la demande et présenter le résultat.
+        """
+        if self.tool_service is None:
+            print("Aucun service d'outils disponible.")
+            return
+        if not args:
+            print("Usage : /tool <id> [cle=valeur ...]")
+            return
+
+        tool_id = args[0]
+        parameters = self._parse_tool_parameters(args[1:])
+        if parameters is None:
+            return
+
+        result = self.tool_service.request_tool(
+            tool_id=tool_id, parameters=parameters
+        )
+
+        if result.confirmation_required:
+            token = result.confirmation_token
+            print(f"Confirmation humaine requise pour l'outil '{tool_id}'.")
+            try:
+                answer = input("Confirmer ? (o/N) ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print("\nAction annulée.")
+                return
+            if answer not in ("o", "oui", "y", "yes"):
+                print("Action annulée.")
+                return
+            result = self.tool_service.request_tool(
+                tool_id=tool_id,
+                parameters=parameters,
+                user_confirmed=True,
+                confirmation_token=token,
+            )
+
+        if not result.success:
+            print(f"[Outil refusé ou en échec] {tool_id} : {result.error_message}")
+            return
+        print(f"[Outil exécuté] {tool_id}")
+        if result.data is not None:
+            print(result.data)
+
+    @staticmethod
+    def _parse_tool_parameters(args: list[str]) -> Optional[dict[str, str]]:
+        """Analyser les arguments `cle=valeur` d'une commande d'outil.
+
+        Retourne None si un argument est mal formé (message affiché).
+        """
+        parameters: dict[str, str] = {}
+        for arg in args:
+            if "=" not in arg:
+                print(f"Argument invalide : '{arg}'. Format attendu : cle=valeur")
+                return None
+            key, value = arg.split("=", 1)
+            key = key.strip()
+            if not key:
+                print(f"Argument invalide : '{arg}'. La clé ne peut pas être vide.")
+                return None
+            parameters[key] = value
+        return parameters
+
     def propose_action(self, action_name: str, arguments: dict[str, Any]) -> None:
-        """Proposer une action, la valider et l'exécuter si autorisée."""
+        """Proposer une action, la valider et l'exécuter si autorisée.
+
+        Note : chemin historique conservé pour compatibilité. Les nouveaux
+        usages passent par le service d'outils (commande /tool).
+        """
         result: ActionResult = self.validator.execute(action_name, arguments)
         if not result.allowed:
             print(f"[Action refusée] {action_name} : {result.reason}")

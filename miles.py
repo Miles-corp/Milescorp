@@ -12,6 +12,7 @@ from app.interface.cli import CLI
 from app.memory.persistent import PersistentMemory, PersistentMemoryError
 from app.memory.transcript import ConversationTranscript
 from app.security.paths import PathSecurityError, resolve_authorized_path
+from app.tools.service import ToolService
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -129,6 +130,11 @@ def main(argv: list[str] | None = None) -> int:
 
     provider = _build_provider(settings)
 
+    # Service d'outils : registre alimenté, permissions accordées par
+    # l'application. Le même service est partagé entre le CLI et l'interface
+    # web : aucune duplication de la logique métier.
+    tool_service = ToolService()
+
     memory = None
     if settings.memory_enabled:
         try:
@@ -182,6 +188,7 @@ def main(argv: list[str] | None = None) -> int:
         provider=provider,
         conversation=conversation,
         memory=memory,
+        tool_service=tool_service,
     )
     if restored:
         cli.set_restored_message_count(restored)

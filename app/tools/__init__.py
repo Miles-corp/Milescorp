@@ -5,9 +5,11 @@ un journal d'audit et des outils individuels, sans accès shell arbitraire.
 """
 
 from app.tools.audit import AuditLogger
+from app.tools.builtin import build_default_registry
 from app.tools.engine import ToolEngine, ToolResult
 from app.tools.policy import ToolPolicy
 from app.tools.registry import ToolDefinition, ToolParameter, ToolRegistry
+from app.tools.service import ToolService
 from app.tools.status_tool import status_tool_handler
 
 __all__ = [
@@ -18,5 +20,7 @@ __all__ = [
     "ToolRegistry",
     "ToolDefinition",
     "ToolParameter",
+    "ToolService",
+    "build_default_registry",
     "status_tool_handler",
 ]
