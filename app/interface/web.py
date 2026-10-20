@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Optional
 
@@ -23,6 +24,9 @@ from app.ai_providers.public_errors import public_provider_error as _public_prov
 from app.config.settings import Settings
 from app.core.conversation import Conversation
 from app.memory.persistent import PersistentMemory, PersistentMemoryError
+from app.orchestration.models import Mission, MissionState
+from app.orchestration.runner import MissionRunner
+from app.tools.grants import default_session_id
 from app.tools.service import ToolService
 from app.utilities.redaction import REDACTED, sanitize_text
 
@@ -125,6 +129,8 @@ class WebApp:
         conversation: Optional[Conversation] = None,
         memory: Optional[PersistentMemory] = None,
         tool_service: Optional[ToolService] = None,
+        mission_runner: Optional[MissionRunner] = None,
+        session_id: Optional[str] = None,
     ) -> None:
         self.settings = settings
         self.provider = provider
@@ -135,6 +141,12 @@ class WebApp:
         # Même service d'outils que le CLI : aucune duplication de la
         # logique métier (validation, permissions, confirmation, audit).
         self.tool_service = tool_service
+        self.mission_runner = mission_runner
+        # Identité de session : les jetons de confirmation et les
+        # autorisations de mission ne sont valables que dans cette session.
+        self.session_id = session_id or default_session_id("web")
+        self._mission_threads: dict[str, threading.Thread] = {}
+        self._mission_lock = threading.Lock()
 
     # --- Outils ---
 
@@ -174,8 +186,161 @@ class WebApp:
             parameters=parameters,
             user_confirmed=user_confirmed,
             confirmation_token=confirmation_token,
+            actor_id=self.session_id,
         )
         return self.tool_service.describe_result(result)
+
+    # --- Missions ---
+
+    def list_missions(self) -> dict[str, Any]:
+        """Retourner la liste des missions connues."""
+        if self.mission_runner is None:
+            return {"missions": [], "error": "Orchestrateur indisponible."}
+        return {"missions": self.mission_runner.list_missions(limit=50)}
+
+    def mission_detail(self, mission_id: str) -> dict[str, Any]:
+        """Retourner l'état détaillé d'une mission."""
+        if self.mission_runner is None:
+            return {"error": "Orchestrateur indisponible."}
+        mission = self.mission_runner.get(mission_id)
+        if mission is None:
+            return {"error": f"Mission inconnue : {mission_id}"}
+        return self._mission_payload(mission)
+
+    def create_mission(self, objective: Any) -> dict[str, Any]:
+        """Créer une mission et lancer son exécution en arrière-plan.
+
+        Une mission identique déjà en cours n'est pas relancée : un double
+        clic ou une requête répétée ne produit pas deux exécutions.
+        """
+        if self.mission_runner is None:
+            return {"error": "Orchestrateur indisponible."}
+        if not isinstance(objective, str) or not objective.strip():
+            return {"error": "Objectif de mission manquant."}
+
+        existing = self.mission_runner.find_running(objective.strip())
+        if existing is not None:
+            payload = self._mission_payload(existing)
+            payload["already_running"] = True
+            return payload
+
+        try:
+            mission = self.mission_runner.create(objective.strip())
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+        self._start_mission_thread(mission.mission_id, self.mission_runner.run)
+        return self._mission_payload(mission)
+
+    def authorize_mission(self, mission_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Accorder ou refuser l'autorisation demandée par une mission."""
+        if self.mission_runner is None:
+            return {"error": "Orchestrateur indisponible."}
+        mission = self.mission_runner.get(mission_id)
+        if mission is None:
+            return {"error": f"Mission inconnue : {mission_id}"}
+        if mission.pending is None or mission.pending.kind != "authorization":
+            return {"error": "Aucune autorisation en attente pour cette mission."}
+        approved = bool(data.get("approved", False))
+        self._start_mission_thread(
+            mission_id,
+            lambda mid: self.mission_runner.authorize(mid, approved=approved),
+        )
+        return {"mission_id": mission_id, "approved": approved, "started": True}
+
+    def answer_mission(self, mission_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Transmettre une réponse à une demande en attente."""
+        if self.mission_runner is None:
+            return {"error": "Orchestrateur indisponible."}
+        mission = self.mission_runner.get(mission_id)
+        if mission is None:
+            return {"error": f"Mission inconnue : {mission_id}"}
+        if mission.pending is None:
+            return {"error": "Aucune demande en attente pour cette mission."}
+        answer = data.get("answer", "")
+        if not isinstance(answer, str) or not answer.strip():
+            return {"error": "Réponse vide."}
+        self._start_mission_thread(
+            mission_id,
+            lambda mid: self.mission_runner.answer(mid, answer.strip()),
+        )
+        return {"mission_id": mission_id, "answered": True, "started": True}
+
+    def cancel_mission(self, mission_id: str) -> dict[str, Any]:
+        """Demander l'arrêt d'une mission."""
+        if self.mission_runner is None:
+            return {"error": "Orchestrateur indisponible."}
+        cancelled = self.mission_runner.cancel(mission_id)
+        if not cancelled:
+            return {"error": f"Mission {mission_id} introuvable ou déjà terminée."}
+        return {"mission_id": mission_id, "cancelled": True}
+
+    def _start_mission_thread(self, mission_id: str, action: Any) -> None:
+        """Lancer une action de mission dans un fil d'exécution séparé.
+
+        Le fil est un démon : il n'empêche pas l'arrêt du programme. Une
+        mission déjà en cours d'exécution n'est pas relancée.
+        """
+        with self._mission_lock:
+            existing = self._mission_threads.get(mission_id)
+            if existing is not None and existing.is_alive():
+                return
+
+            def _target() -> None:
+                try:
+                    action(mission_id)
+                except Exception:  # noqa: BLE001 — un échec ne doit pas tuer le serveur
+                    logger.error(
+                        "Erreur interne pendant l'execution de la mission %s.",
+                        mission_id,
+                    )
+
+            thread = threading.Thread(
+                target=_target, name=f"mission-{mission_id}", daemon=True
+            )
+            self._mission_threads[mission_id] = thread
+            thread.start()
+
+    @staticmethod
+    def _mission_payload(mission: Mission) -> dict[str, Any]:
+        """Construire la charge utile d'une mission pour le client web."""
+        steps = []
+        if mission.plan is not None:
+            for step in mission.plan.steps:
+                steps.append(
+                    {
+                        "step_id": step.step_id,
+                        "objective": step.objective,
+                        "tool": step.tool_id,
+                        "status": step.status.value,
+                        "attempts": step.attempts,
+                        "error": sanitize_text(step.error),
+                        "note": sanitize_text(step.note),
+                    }
+                )
+        pending = None
+        if mission.pending is not None:
+            pending = {
+                "kind": mission.pending.kind,
+                "question": sanitize_text(mission.pending.question),
+                "tool_ids": list(mission.pending.tool_ids),
+                "allowed_roots": list(mission.pending.allowed_roots),
+            }
+        return {
+            "mission_id": mission.mission_id,
+            "objective": sanitize_text(mission.objective),
+            "state": mission.state.value,
+            "planner": mission.planner,
+            "planner_note": sanitize_text(mission.planner_note),
+            "steps": steps,
+            "facts": [sanitize_text(f) for f in mission.facts],
+            "errors": [sanitize_text(e) for e in mission.errors],
+            "unfinished": [sanitize_text(u) for u in mission.unfinished],
+            "pending": pending,
+            "report": sanitize_text(mission.report),
+            "created_at": mission.created_at,
+            "updated_at": mission.updated_at,
+        }
 
     # --- Fournisseur ---
 
@@ -409,6 +574,10 @@ class MilesHandler(BaseHTTPRequestHandler):
             self._handle_list_memories()
         elif path == "/tools":
             self._handle_list_tools()
+        elif path == "/missions":
+            self._handle_list_missions()
+        elif path.startswith("/mission/"):
+            self._handle_mission_detail(path)
         else:
             self._send_json(404, {"error": "Not found", "path": path})
 
@@ -431,6 +600,14 @@ class MilesHandler(BaseHTTPRequestHandler):
             self._handle_forget(data)
         elif path == "/tool":
             self._handle_run_tool(data)
+        elif path == "/mission":
+            self._handle_create_mission(data)
+        elif re.match(r"^/mission/[^/]+/authorize$", path):
+            self._handle_mission_authorize(path, data)
+        elif re.match(r"^/mission/[^/]+/answer$", path):
+            self._handle_mission_answer(path, data)
+        elif re.match(r"^/mission/[^/]+/cancel$", path):
+            self._handle_mission_cancel(path)
         else:
             self._send_json(404, {"error": "Not found", "path": path})
 
@@ -691,6 +868,61 @@ loadTools();
             self._send_json(400, payload)
             return
         self._send_json(200, payload)
+
+    def _handle_list_missions(self) -> None:
+        if self.app is None:
+            self._send_json(500, {"error": "Application non initialisée"})
+            return
+        payload = self.app.list_missions()
+        status = 200 if "error" not in payload else 503
+        self._send_json(status, payload)
+
+    def _handle_mission_detail(self, path: str) -> None:
+        if self.app is None:
+            self._send_json(500, {"error": "Application non initialisée"})
+            return
+        mission_id = path[len("/mission/") :].strip("/")
+        if not mission_id:
+            self._send_json(404, {"error": "Mission inconnue"})
+            return
+        payload = self.app.mission_detail(mission_id)
+        status = 200 if "error" not in payload else 404
+        self._send_json(status, payload)
+
+    def _handle_create_mission(self, data: dict[str, Any]) -> None:
+        if self.app is None:
+            self._send_json(500, {"error": "Application non initialisée"})
+            return
+        payload = self.app.create_mission(data.get("objective", ""))
+        status = 200 if "error" not in payload else 400
+        self._send_json(status, payload)
+
+    def _handle_mission_authorize(self, path: str, data: dict[str, Any]) -> None:
+        if self.app is None:
+            self._send_json(500, {"error": "Application non initialisée"})
+            return
+        mission_id = path.split("/")[2]
+        payload = self.app.authorize_mission(mission_id, data)
+        status = 200 if "error" not in payload else 400
+        self._send_json(status, payload)
+
+    def _handle_mission_answer(self, path: str, data: dict[str, Any]) -> None:
+        if self.app is None:
+            self._send_json(500, {"error": "Application non initialisée"})
+            return
+        mission_id = path.split("/")[2]
+        payload = self.app.answer_mission(mission_id, data)
+        status = 200 if "error" not in payload else 400
+        self._send_json(status, payload)
+
+    def _handle_mission_cancel(self, path: str) -> None:
+        if self.app is None:
+            self._send_json(500, {"error": "Application non initialisée"})
+            return
+        mission_id = path.split("/")[2]
+        payload = self.app.cancel_mission(mission_id)
+        status = 200 if "error" not in payload else 404
+        self._send_json(status, payload)
 
     def _handle_list_memories(self) -> None:
         if self.app is None:

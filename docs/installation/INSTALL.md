@@ -92,6 +92,41 @@ python miles.py --list-conversations  # liste les conversations enregistrées
 python miles.py --no-persist          # mode éphémère, rien n'est écrit
 ```
 
+## 3quater. Orchestrateur de missions (Phase 6)
+
+L'orchestrateur reçoit un objectif en langage naturel, prépare un plan,
+exécute plusieurs étapes avec les outils autorisés, observe les résultats et
+produit un compte rendu. Il est accessible depuis le terminal :
+
+```
+/mission <objectif>          lancer une mission
+/missions                    lister les missions
+/mission-status <id>         consulter une mission
+/mission-answer <id> <texte> répondre à une demande en attente
+/mission-cancel <id>         arrêter une mission
+/mission-resume <id>         reprendre une mission interrompue
+```
+
+| Variable | Défaut | Rôle |
+|----------|--------|------|
+| `MILES_MISSION_ENABLED` | `true` | Activer l'orchestrateur de missions |
+| `MILES_MISSION_PERSIST` | `true` | Enregistrer les missions sur disque |
+| `MILES_MISSION_DB_PATH` | `data/missions.db` | Emplacement de la base des missions |
+| `MILES_MISSION_MAX_STEPS` | `12` | Nombre maximal d'étapes par mission |
+| `MILES_MISSION_MAX_ATTEMPTS` | `2` | Nombre maximal de tentatives par étape |
+| `MILES_MISSION_MAX_DURATION_SECONDS` | `120` | Durée maximale d'une mission |
+
+Ces bornes sont **appliquées par le code** : elles ne sont pas des
+recommandations adressées au modèle.
+
+Le chemin de la base est **confiné aux racines autorisées** (répertoire du
+projet et dossier `data/`), comme les autres bases MILES.
+
+Les actions sensibles (lecture de fichiers) exigent une **autorisation
+humaine explicite**, liée à la session courante et à la mission. Cette
+autorisation expire, son nombre d'utilisations est borné et elle ne peut pas
+être rejouée dans un autre contexte.
+
 ## 3ter. Sources de configuration et variables reconnues
 
 MILES lit sa configuration depuis quatre sources. En cas de conflit, la
@@ -114,6 +149,7 @@ Seules les variables `MILES_*` listées ci-dessous sont lues depuis le fichier `
 | Voix (facultative) (1) | `MILES_VOICE_ENABLED` |
 | Mémoire de souvenirs (4) | `MILES_MEMORY_ENABLED`, `MILES_MEMORY_DB_PATH`, `MILES_MEMORY_MAX_MEMORIES_IN_CONTEXT`, `MILES_MEMORY_MAX_CONTENT_LENGTH` |
 | Historique de conversation (2) | `MILES_CONVERSATION_PERSIST`, `MILES_CONVERSATION_DB_PATH` |
+| Orchestrateur de missions (6) | `MILES_MISSION_ENABLED`, `MILES_MISSION_PERSIST`, `MILES_MISSION_DB_PATH`, `MILES_MISSION_MAX_STEPS`, `MILES_MISSION_MAX_ATTEMPTS`, `MILES_MISSION_MAX_DURATION_SECONDS` |
 
 ### Variables de chemin de fichier (lues uniquement de l'environnement)
 

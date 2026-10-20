@@ -11,7 +11,11 @@ from app.core.conversation import Conversation
 from app.interface.cli import CLI
 from app.memory.persistent import PersistentMemory, PersistentMemoryError
 from app.memory.transcript import ConversationTranscript
+from app.orchestration.models import ExecutionLimits
+from app.orchestration.runner import MissionRunner
+from app.orchestration.store import MissionStore
 from app.security.paths import PathSecurityError, resolve_authorized_path
+from app.tools.grants import GrantRegistry, default_session_id
 from app.tools.service import ToolService
 
 
@@ -91,6 +95,21 @@ def _build_transcript(settings: Settings) -> ConversationTranscript | None:
     return ConversationTranscript(enabled=True, db_path=str(db_path))
 
 
+def _build_mission_store(settings: Settings) -> MissionStore | None:
+    """Instancier le stockage des missions si la persistance est active."""
+    if not settings.mission_persist:
+        return None
+    try:
+        db_path = resolve_authorized_path(settings.mission_db_path)
+    except PathSecurityError as exc:
+        print(
+            f"Avertissement : persistance des missions désactivée : {exc}",
+            file=sys.stderr,
+        )
+        return None
+    return MissionStore(enabled=True, db_path=str(db_path))
+
+
 def _list_conversations(transcript: ConversationTranscript | None) -> int:
     """Afficher les conversations enregistrées. Retourner le code de sortie."""
     if transcript is None or not transcript.is_available:
@@ -133,7 +152,13 @@ def main(argv: list[str] | None = None) -> int:
     # Service d'outils : registre alimenté, permissions accordées par
     # l'application. Le même service est partagé entre le CLI et l'interface
     # web : aucune duplication de la logique métier.
-    tool_service = ToolService()
+    #
+    # Les autorisations (grants) sont liées à la session courante et à la
+    # mission : elles expirent, sont bornées en nombre d'usages et ne
+    # peuvent pas être rejouées dans un autre contexte.
+    session_id = default_session_id("miles")
+    grant_registry = GrantRegistry()
+    tool_service = ToolService(grant_checker=grant_registry)
 
     memory = None
     if settings.memory_enabled:
@@ -154,6 +179,24 @@ def main(argv: list[str] | None = None) -> int:
     conversation = Conversation(
         history_limit=settings.get("history_limit", 10),
     )
+
+    # Orchestrateur de missions : même service d'outils, mêmes autorisations.
+    mission_runner = None
+    mission_store = None
+    if settings.mission_enabled:
+        mission_store = _build_mission_store(settings)
+        mission_runner = MissionRunner(
+            tool_service,
+            provider=provider,
+            store=mission_store,
+            limits=ExecutionLimits(
+                max_steps=settings.mission_max_steps,
+                max_attempts_per_step=settings.mission_max_attempts,
+                max_duration_seconds=float(settings.mission_max_duration_seconds),
+            ),
+            grant_registry=grant_registry,
+            session_id=session_id,
+        )
 
     # Restauration de la conversation : par défaut la dernière, sinon celle
     # demandée explicitement, sinon une nouvelle.
@@ -189,6 +232,8 @@ def main(argv: list[str] | None = None) -> int:
         conversation=conversation,
         memory=memory,
         tool_service=tool_service,
+        mission_runner=mission_runner,
+        session_id=session_id,
     )
     if restored:
         cli.set_restored_message_count(restored)
@@ -209,6 +254,8 @@ def main(argv: list[str] | None = None) -> int:
             memory.close()
         if transcript is not None:
             transcript.close()
+        if mission_store is not None:
+            mission_store.close()
 
     return 0
 

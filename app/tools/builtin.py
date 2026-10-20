@@ -12,17 +12,24 @@ Identifiant                  Risque    Rôle
 ``action_datetime``          LOW       Date et heure locales
 ``action_workdir``           LOW       Répertoire de travail courant
 ``action_list_files``        MEDIUM    Liste d'un répertoire autorisé (disque)
+``action_read_file``         MEDIUM    Lecture bornée d'un fichier autorisé
 ===========================  ========  =========================================
 
-``action_list_files`` est classé MEDIUM car il accède au système de
-fichiers : une confirmation humaine explicite est donc exigée.
+``action_list_files`` et ``action_read_file`` sont classés MEDIUM car ils
+accèdent au système de fichiers : une confirmation humaine explicite est
+donc exigée. La permission requise est ``lecture_systeme`` : aucune
+permission nouvelle n'est introduite.
 """
 
 from __future__ import annotations
 
 from app.tools.local_actions import (
+    DEFAULT_MAX_READ_BYTES,
+    HARD_MAX_READ_BYTES,
+    MAX_LIST_DEPTH,
     datetime_handler,
     list_files_handler,
+    read_file_handler,
     workdir_handler,
 )
 from app.tools.registry import ToolDefinition, ToolParameter, ToolRegistry
@@ -88,6 +95,51 @@ def build_default_registry() -> ToolRegistry:
                     required=False,
                     description="Répertoire à lister, relatif à la racine du projet.",
                 ),
+                ToolParameter(
+                    name="depth",
+                    type=int,
+                    required=False,
+                    description=(
+                        "Profondeur de parcours (1 = le dossier seul, "
+                        f"2 = un niveau de sous-dossiers, maximum {MAX_LIST_DEPTH})."
+                    ),
+                    min_value=1,
+                    max_value=MAX_LIST_DEPTH,
+                ),
+            ),
+            risk_level="MEDIUM",
+            required_permissions=("lecture_systeme",),
+            timeout_seconds=10,
+        )
+    )
+
+    registry.register(
+        ToolDefinition(
+            tool_id="action_read_file",
+            description=(
+                "Lire le début d'un fichier texte autorisé. Les fichiers "
+                "sensibles (.env, clés privées) sont refusés et la lecture "
+                "est bornée."
+            ),
+            handler=read_file_handler,
+            parameters=(
+                ToolParameter(
+                    name="path",
+                    type=str,
+                    required=True,
+                    description="Fichier à lire, relatif à la racine du projet.",
+                ),
+                ToolParameter(
+                    name="max_bytes",
+                    type=int,
+                    required=False,
+                    description=(
+                        "Nombre maximal d'octets lus "
+                        f"(entre 1024 et {HARD_MAX_READ_BYTES})."
+                    ),
+                    min_value=1024,
+                    max_value=HARD_MAX_READ_BYTES,
+                ),
             ),
             risk_level="MEDIUM",
             required_permissions=("lecture_systeme",),
@@ -100,3 +152,15 @@ def build_default_registry() -> ToolRegistry:
 
 #: Permissions connues du modèle d'outils.
 KNOWN_PERMISSIONS = ("lecture_systeme",)
+
+#: Outils d'observation (lecture seule) utilisables par une mission.
+READ_ONLY_TOOLS = (
+    "status_read",
+    "action_datetime",
+    "action_workdir",
+    "action_list_files",
+    "action_read_file",
+)
+
+#: Taille de lecture par défaut (octets).
+DEFAULT_READ_BYTES = DEFAULT_MAX_READ_BYTES

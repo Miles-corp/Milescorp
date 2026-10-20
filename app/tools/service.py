@@ -34,6 +34,7 @@ class ToolService:
         registry: Optional[ToolRegistry] = None,
         granted_permissions: Optional[set[str]] = None,
         confirmation_ttl_seconds: float = 300.0,
+        grant_checker: Optional[Any] = None,
     ) -> None:
         self.registry = registry if registry is not None else build_default_registry()
         self.policy = ToolPolicy(
@@ -45,6 +46,7 @@ class ToolService:
             policy=self.policy,
             audit=self.audit,
             confirmation_ttl_seconds=confirmation_ttl_seconds,
+            grant_checker=grant_checker,
         )
 
     # --- Découverte ---
@@ -93,6 +95,8 @@ class ToolService:
         parameters: Optional[dict[str, Any]] = None,
         user_confirmed: bool = False,
         confirmation_token: Optional[str] = None,
+        context_id: Optional[str] = None,
+        actor_id: Optional[str] = None,
     ) -> ToolResult:
         """Demander l'exécution d'un outil.
 
@@ -100,12 +104,24 @@ class ToolService:
         confirmation, délai) est réalisée par le moteur. Cette méthode est
         le seul point d'entrée : le CLI et l'interface web l'utilisent sans
         dupliquer la logique métier.
+
+        Args:
+            tool_id : outil demandé.
+            parameters : paramètres de l'appel.
+            user_confirmed : confirmation interactive déjà obtenue.
+            confirmation_token : jeton de confirmation correspondant.
+            context_id : contexte de la demande (mission) : le jeton de
+                confirmation n'est valable que dans ce contexte.
+            actor_id : identité de session : le jeton de confirmation n'est
+                valable que pour cette session.
         """
         return self.engine.request_tool(
             tool_id=tool_id,
             parameters=parameters or {},
             user_confirmed=user_confirmed,
             confirmation_token=confirmation_token,
+            context_id=context_id,
+            actor_id=actor_id,
         )
 
     def describe_result(self, result: ToolResult) -> dict[str, Any]:

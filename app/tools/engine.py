@@ -71,12 +71,16 @@ class _PendingConfirmation:
         parameters_hash : empreinte des paramètres exacts.
         token : jeton de confirmation.
         expires_at : instant d'expiration (secondes depuis l'époque).
+        context_id : contexte de mission du jeton (vide si non applicable).
+        actor_id : identité de session ayant demandé la confirmation.
     """
 
     tool_id: str
     parameters_hash: str
     token: str
     expires_at: float
+    context_id: str = ""
+    actor_id: str = ""
 
 
 def _run_handler_in_process(
@@ -118,6 +122,7 @@ class ToolEngine:
         *,
         clock: Callable[[], float] = time.time,
         confirmation_ttl_seconds: float = 300.0,
+        grant_checker: Optional[Any] = None,
     ) -> None:
         self._registry = registry
         self._policy = policy
@@ -125,6 +130,14 @@ class ToolEngine:
         self._clock = clock
         self._confirmation_ttl_seconds = confirmation_ttl_seconds
         self._pending_confirmations: Dict[str, _PendingConfirmation] = {}
+        # Vérificateur d'autorisations (grants) liés à une session et à une
+        # mission. Le moteur ne connaît que le contrat minimal : il ne
+        # dépend d'aucun module d'orchestration.
+        self._grant_checker = grant_checker
+
+    def set_grant_checker(self, grant_checker: Optional[Any]) -> None:
+        """Brancher (ou retirer) le vérificateur d'autorisations."""
+        self._grant_checker = grant_checker
 
     # --- Interface publique ---
 
@@ -134,6 +147,8 @@ class ToolEngine:
         parameters: Dict[str, Any],
         user_confirmed: bool = False,
         confirmation_token: Optional[str] = None,
+        context_id: Optional[str] = None,
+        actor_id: Optional[str] = None,
     ) -> ToolResult:
         """Demander l'exécution d'un outil avec validation complète.
 
@@ -143,6 +158,10 @@ class ToolEngine:
             user_confirmed : indication que l'utilisateur a confirmé
                 (seulement valide avec confirmation_token).
             confirmation_token : jeton généré précédemment par ce moteur.
+            context_id : contexte de la demande (mission). Le jeton de
+                confirmation n'est valable que dans ce contexte.
+            actor_id : identité de session de l'acteur. Le jeton de
+                confirmation n'est valable que pour cette session.
 
         Retourne :
             ToolResult contenant le résultat ou la demande de confirmation.
@@ -257,30 +276,54 @@ class ToolEngine:
 
         if self._policy.requires_human_confirmation(tool.risk_level):
             pending = self._find_pending_confirmation(
-                tool_id, params_hash, confirmation_token
+                tool_id, params_hash, confirmation_token, context_id, actor_id
             )
             if pending is None or not user_confirmed:
-                token = self._create_pending_confirmation(tool_id, params_hash)
-                self._audit.record(
-                    tool_id=tool_id,
-                    user_confirmed=user_confirmed,
-                    permission_granted=True,
-                    result="confirmation_required",
-                    error_message="Confirmation humaine requise",
-                    parameters_hash=params_hash,
+                # Voie 1 : une autorisation liée à la session et à la mission
+                # a déjà été accordée par l'utilisateur. Elle remplace la
+                # confirmation interactive, sans jamais contourner la
+                # politique de sécurité ni les permissions.
+                grant_id = self._authorized_grant_id(
+                    tool_id, parameters, context_id, actor_id
                 )
-                return ToolResult(
-                    tool_id=tool_id,
-                    success=False,
-                    confirmation_required=True,
-                    confirmation_token=token,
-                    error_message=(
-                        "Confirmation humaine requise pour cet outil. "
-                        "Utilisez le jeton de confirmation retourné."
-                    ),
-                )
-            # Confirmation valide : consommer le token
-            self._pending_confirmations.pop(pending.token, None)
+                if grant_id is not None:
+                    self._grant_checker.consume(grant_id)
+                    self._audit.record(
+                        tool_id=tool_id,
+                        user_confirmed=True,
+                        permission_granted=True,
+                        result="authorized",
+                        error_message="Autorisation liée à la session et à la mission",
+                        parameters_hash=params_hash,
+                    )
+                    if pending is not None:
+                        self._pending_confirmations.pop(pending.token, None)
+                else:
+                    # Voie 2 : demande de confirmation interactive.
+                    token = self._create_pending_confirmation(
+                        tool_id, params_hash, context_id, actor_id
+                    )
+                    self._audit.record(
+                        tool_id=tool_id,
+                        user_confirmed=user_confirmed,
+                        permission_granted=True,
+                        result="confirmation_required",
+                        error_message="Confirmation humaine requise",
+                        parameters_hash=params_hash,
+                    )
+                    return ToolResult(
+                        tool_id=tool_id,
+                        success=False,
+                        confirmation_required=True,
+                        confirmation_token=token,
+                        error_message=(
+                            "Confirmation humaine requise pour cet outil. "
+                            "Utilisez le jeton de confirmation retourné."
+                        ),
+                    )
+            else:
+                # Confirmation valide : consommer le token
+                self._pending_confirmations.pop(pending.token, None)
 
         # 7. Exécuter l'outil avec timeout et arrêt effectif
         result = self._execute_tool(tool, parameters)
@@ -465,9 +508,17 @@ class ToolEngine:
         return hashlib.sha256(serializable.encode("utf-8")).hexdigest()
 
     def _create_pending_confirmation(
-        self, tool_id: str, parameters_hash: str
+        self,
+        tool_id: str,
+        parameters_hash: str,
+        context_id: Optional[str] = None,
+        actor_id: Optional[str] = None,
     ) -> str:
-        """Créer une demande de confirmation en attente."""
+        """Créer une demande de confirmation en attente.
+
+        Le jeton est lié au contexte (mission) et à l'identité de session :
+        il ne peut pas être rejoué dans un autre contexte.
+        """
         token = uuid.uuid4().hex
         expires_at = self._clock() + self._confirmation_ttl_seconds
         self._pending_confirmations[token] = _PendingConfirmation(
@@ -475,6 +526,8 @@ class ToolEngine:
             parameters_hash=parameters_hash,
             token=token,
             expires_at=expires_at,
+            context_id=str(context_id or ""),
+            actor_id=str(actor_id or ""),
         )
         return token
 
@@ -483,8 +536,15 @@ class ToolEngine:
         tool_id: str,
         parameters_hash: str,
         confirmation_token: Optional[str],
+        context_id: Optional[str] = None,
+        actor_id: Optional[str] = None,
     ) -> Optional[_PendingConfirmation]:
-        """Vérifier si un token de confirmation correspond à la demande."""
+        """Vérifier si un token de confirmation correspond à la demande.
+
+        Le jeton doit correspondre à l'outil, aux paramètres exacts, au
+        contexte de mission **et** à l'identité de session. Un jeton émis
+        dans un autre contexte n'est jamais accepté (échec fermé).
+        """
         if confirmation_token is None:
             return None
         pending = self._pending_confirmations.get(confirmation_token)
@@ -494,11 +554,38 @@ class ToolEngine:
             return None
         if pending.parameters_hash != parameters_hash:
             return None
+        if pending.context_id != str(context_id or ""):
+            return None
+        if pending.actor_id != str(actor_id or ""):
+            return None
         if self._clock() > pending.expires_at:
             # Jeton expiré : le supprimer et refuser
             del self._pending_confirmations[pending.token]
             return None
         return pending
+
+    def _authorized_grant_id(
+        self,
+        tool_id: str,
+        parameters: Dict[str, Any],
+        context_id: Optional[str],
+        actor_id: Optional[str],
+    ) -> Optional[str]:
+        """Retourner l'identifiant d'un grant couvrant la demande, ou None."""
+        if self._grant_checker is None:
+            return None
+        try:
+            grant_id = self._grant_checker.authorize(
+                tool_id, parameters, context_id, actor_id
+            )
+        except Exception:  # noqa: BLE001 — un grant invalide ne vaut pas autorisation
+            logger.warning(
+                "Verificateur d'autorisations indisponible : requete refusee."
+            )
+            return None
+        if not grant_id:
+            return None
+        return str(grant_id)
 
     def _record(
         self,
