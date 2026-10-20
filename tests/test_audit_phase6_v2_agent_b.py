@@ -165,8 +165,7 @@ class TestAuditWebRoutesCSRF(unittest.TestCase):
                 },
             )
 
-    @unittest.expectedFailure
-    def test_audit_defaut_tool_accepte_une_requete_cross_origin(self) -> None:
+    def test_tool_accepte_une_requete_cross_origin(self) -> None:
         """DEFAUT CONSTATE (P1) : POST /tool sans contrôle d'origine.
 
         Exprime le comportement **souhaité** (403) ; `expectedFailure` car le
@@ -179,8 +178,7 @@ class TestAuditWebRoutesCSRF(unittest.TestCase):
             "La requete cross-origin a ete traitee : le defaut P1 est corrige.",
         )
 
-    @unittest.expectedFailure
-    def test_audit_defaut_remember_accepte_une_requete_cross_origin(self) -> None:
+    def test_remember_accepte_une_requete_cross_origin(self) -> None:
         """DEFAUT CONSTATE (P1) : POST /remember (écriture) sans contrôle d'origine."""
         tmpdir = tempfile.mkdtemp(prefix="miles_audit_web_")
         try:
@@ -207,8 +205,7 @@ class TestAuditWebRoutesCSRF(unittest.TestCase):
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
-    @unittest.expectedFailure
-    def test_audit_defaut_forget_accepte_une_requete_cross_origin(self) -> None:
+    def test_forget_accepte_une_requete_cross_origin(self) -> None:
         """DEFAUT CONSTATE (P1) : POST /forget (suppression) sans contrôle d'origine."""
         tmpdir = tempfile.mkdtemp(prefix="miles_audit_web_")
         try:
@@ -235,25 +232,21 @@ class TestAuditWebRoutesCSRF(unittest.TestCase):
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
-    def test_autorisation_de_mission_sans_identification(self) -> None:
-        """DEFAUT CONSTATE (P1) : POST /mission/<id>/authorize n'exige aucune identité.
+    def test_autorisation_de_mission_exige_identite_et_jeton(self) -> None:
+        """L autorisation de mission exige une session et un jeton d approbation.
 
-        L'endpoint autorise une mission en attente à partir de n'importe quel
-        client HTTP : ni jeton, ni session, ni contrôle d'origine. Le test
-        vérifie que l'endpoint **existe et n'exige rien** — c'est le défaut.
+        Correction P1-6-06 : le controleur de mission verifie
+        systematiquement que le demandeur est le proprietaire de la mission
+        et qu il presente le jeton d approbation de la demande en attente.
         """
         import inspect
 
         from app.interface import web as web_module
 
         source = inspect.getsource(web_module.WebApp.authorize_mission)
-        for marqueur in ("session_id", "token", "authenticate", "Origin", "csrf"):
-            self.assertNotIn(
-                marqueur,
-                source,
-                "L'endpoint d'autorisation exigerait %r : le defaut P1 est "
-                "corrige, ce test doit etre retire." % marqueur,
-            )
+        self.assertIn("session", source)
+        self.assertIn("owner_user_id", source)
+        self.assertIn("approval_token", source)
 
 
 class TestAuditReadFile(unittest.TestCase):

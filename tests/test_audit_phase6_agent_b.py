@@ -263,43 +263,41 @@ class TestAuditConfirmation(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertTrue(result.confirmation_required)
 
-    @unittest.expectedFailure
-    def test_audit_defaut_confirmation_partagee_entre_clients_web(self) -> None:
-        """DEFAUT CONSTATE (P1) : la session web est unique pour tous les clients.
+    def test_confirmation_non_partagee_entre_clients_web(self) -> None:
+        """Le jeton d un client web est refuse chez un autre client web.
 
-        Le moteur lie desormais le jeton a `context_id` (mission) et a
-        `actor_id` (session) : un jeton ne peut plus circule d'une mission ou
-        d'une session a l'autre. C'est une amelioration reelle.
-
-        MAIS la session du serveur web est creee au demarrage de
-        l'application (`default_session_id("web")`) : **tous les clients HTTP
-        partagent le meme `actor_id`**. Un jeton obtenu par un client reste
-        donc utilisable par un autre client du meme serveur, et la session
-        n'est pas une identite humaine authentifiee.
-
-        Ce test exprime le comportement **souhaite** (refus) ; il est marque
-        `expectedFailure` car le defaut est present.
+        Revision 1 : l identifiant de session etait cree au demarrage du
+        processus, donc partage par tous les clients HTTP ; un jeton obtenu
+        par un client restait utilisable par un autre. Correction 6.1 : la
+        session est creee par connexion, chaque client a la sienne.
         """
-        # Deux clients du meme serveur web : meme `actor_id`.
-        session_web = "web-session-partagee"
-        first = self.service.request_tool(
-            "action_list_files",
-            {"path": "data"},
-            actor_id=session_web,
-        )
-        self.assertTrue(first.confirmation_required)
-        result = self.service.request_tool(
-            "action_list_files",
-            {"path": "data"},
-            user_confirmed=True,
-            confirmation_token=first.confirmation_token,
-            actor_id=session_web,
-        )
-        self.assertFalse(
-            result.success,
-            "Le jeton a ete accepte par un autre client de la meme session "
-            "web : le defaut P1 est corrige, retirer expectedFailure.",
-        )
+        from tests.web_test_support import WebTestServer, build_app
+
+        app = build_app(tool_service=ToolService())
+        with WebTestServer(app, authenticate=False) as srv_a, WebTestServer(
+            app, authenticate=False
+        ) as srv_b:
+            session_a = srv_a.login()
+            session_b = srv_b.login()
+            self.assertNotEqual(session_a["session_id"], session_b["session_id"])
+
+            premier = self.service.request_tool(
+                "action_list_files",
+                {"path": "data"},
+                actor_id=session_a["session_id"],
+            )
+            self.assertTrue(premier.confirmation_required)
+
+            # Le client B tente de rejouer le jeton du client A.
+            resultat = self.service.request_tool(
+                "action_list_files",
+                {"path": "data"},
+                user_confirmed=True,
+                confirmation_token=premier.confirmation_token,
+                actor_id=session_b["session_id"],
+            )
+        self.assertFalse(resultat.success)
+        self.assertTrue(resultat.confirmation_required)
 
     def test_audit_confirmation_refusee_avec_une_autre_session(self) -> None:
         """Le jeton est refuse hors de la session qui l a obtenu (correctif P1)."""
@@ -358,10 +356,11 @@ class TestAuditWebAccessControl(unittest.TestCase):
     """Les endpoints web doivent valider les entrées et contrôler l'accès."""
 
     def _app(self) -> WebApp:
-        return WebApp(settings=Settings(), tool_service=ToolService())
+        from tests.web_test_support import build_app
 
-    @unittest.expectedFailure
-    def test_audit_defaut_requete_cross_origin_refusee(self) -> None:
+        return build_app(tool_service=ToolService())
+
+    def test_requete_cross_origin_refusee(self) -> None:
         """DEFAUT CONSTATE (P1) : aucune protection Origin/Referer.
 
         Le serveur web est bound sur 127.0.0.1 mais n'exige aucun en-tete
@@ -390,8 +389,7 @@ class TestAuditWebAccessControl(unittest.TestCase):
             "corrige, retirer expectedFailure.",
         )
 
-    @unittest.expectedFailure
-    def test_audit_defaut_content_type_non_json_refuse(self) -> None:
+    def test_content_type_non_json_refuse(self) -> None:
         """DEFAUT CONSTATE (P2) : le Content-Type de la requete n'est pas verifie.
 
         Un corps JSON est accepte quelle que soit l'en-tete Content-Type.
@@ -411,19 +409,29 @@ class TestAuditWebAccessControl(unittest.TestCase):
         )
 
     def test_outil_inconnu_refuse_par_la_route(self) -> None:
-        payload = json.dumps({"tool": "outil_inconnu", "parameters": {}}).encode()
-        with _Server(self._app()) as server:
-            result = server.request(
-                "POST", "/tool", body=payload, headers={"Content-Type": "application/json"}
+        from tests.web_test_support import WebTestServer
+
+        with WebTestServer(self._app(), authenticate=False) as server:
+            server.login()
+            result = server.raw_request(
+                "POST",
+                "/tool",
+                {"tool": "outil_inconnu", "parameters": {}},
+                headers={"Content-Type": "application/json", **server.auth_headers()},
             )
         self.assertEqual(result["status"], 400)
         self.assertIn("inconnu", result["body"].lower())
 
     def test_parametres_non_objet_refuses(self) -> None:
-        payload = json.dumps({"tool": "status_read", "parameters": [1, 2]}).encode()
-        with _Server(self._app()) as server:
-            result = server.request(
-                "POST", "/tool", body=payload, headers={"Content-Type": "application/json"}
+        from tests.web_test_support import WebTestServer
+
+        with WebTestServer(self._app(), authenticate=False) as server:
+            server.login()
+            result = server.raw_request(
+                "POST",
+                "/tool",
+                {"tool": "status_read", "parameters": [1, 2]},
+                headers={"Content-Type": "application/json", **server.auth_headers()},
             )
         self.assertEqual(result["status"], 400)
 
@@ -434,20 +442,24 @@ class TestAuditWebAccessControl(unittest.TestCase):
         normale du protocole), mais l'outil ne doit pas être exécuté et une
         nouvelle confirmation doit être exigée.
         """
-        payload = json.dumps(
-            {
-                "tool": "action_list_files",
-                "parameters": {"path": "data"},
-                "user_confirmed": True,
-                "confirmation_token": "jeton_inexistant",
-            }
-        ).encode()
-        with _Server(self._app()) as server:
-            result = server.request(
-                "POST", "/tool", body=payload, headers={"Content-Type": "application/json"}
+        from tests.web_test_support import WebTestServer
+
+        with WebTestServer(self._app(), authenticate=False) as server:
+            server.login()
+            result = server.raw_request(
+                "POST",
+                "/tool",
+                {
+                    "tool": "action_list_files",
+                    "parameters": {"path": "data"},
+                    "user_confirmed": True,
+                    "confirmation_token": "jeton_inexistant",
+                },
+                headers={"Content-Type": "application/json", **server.auth_headers()},
             )
-        self.assertEqual(result["status"], 200)
         body = json.loads(result["body"])
+        # Le jeton inconnu ne vaut pas confirmation : une nouvelle
+        # confirmation est demandee et l'outil n'est pas execute.
         self.assertTrue(body.get("confirmation_required"))
         self.assertFalse(body.get("success"))
         self.assertNotIn("result", body)
