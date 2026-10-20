@@ -9,6 +9,7 @@ from app.ai_providers.remote import RemoteProvider
 from app.config.settings import Settings
 from app.interface.cli import CLI
 from app.memory.persistent import PersistentMemory, PersistentMemoryError
+from app.security.paths import PathSecurityError, resolve_authorized_path
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -63,13 +64,17 @@ def main(argv: list[str] | None = None) -> int:
     memory = None
     if settings.memory_enabled:
         try:
+            # Le chemin de la base mémoire est confiné aux racines
+            # autorisées (répertoire du projet et dossier data/). Un chemin
+            # relatif est résolu par rapport à la racine du projet.
+            db_path = resolve_authorized_path(settings.memory_db_path)
             memory = PersistentMemory(
                 enabled=True,
-                db_path=settings.memory_db_path,
+                db_path=str(db_path),
                 max_memories_in_context=settings.memory_max_memories_in_context,
                 max_content_length=settings.memory_max_content_length,
             )
-        except PersistentMemoryError as exc:
+        except (PathSecurityError, PersistentMemoryError) as exc:
             print(f"Avertissement : mémoire persistante non disponible : {exc}", file=sys.stderr)
 
     cli = CLI(settings=settings, provider=provider, memory=memory)

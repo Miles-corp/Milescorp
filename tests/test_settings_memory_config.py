@@ -20,6 +20,7 @@ from unittest import mock
 
 import miles
 from app.config.settings import Settings, SettingsError
+from app.security.paths import project_root
 
 
 class TestMemoryEnabledFromEnv(unittest.TestCase):
@@ -131,7 +132,10 @@ class TestMemoryDisabledPreventsActivation(unittest.TestCase):
             shutil.rmtree(tmpdir, ignore_errors=True)
 
     def test_activation_cree_la_base(self) -> None:
-        tmpdir = tempfile.mkdtemp(prefix="miles_test_settings_")
+        """L'activation crée la base dans une racine autorisée (S-005)."""
+        tmpdir = tempfile.mkdtemp(
+            prefix="miles_test_settings_", dir=str(project_root() / "data")
+        )
         try:
             db_path = os.path.join(tmpdir, "memory.db")
             env = {
@@ -150,6 +154,27 @@ class TestMemoryDisabledPreventsActivation(unittest.TestCase):
             self.assertTrue(memory.is_available)
             memory.close()
             self.assertTrue(os.path.exists(db_path))
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_base_hors_racines_non_creee(self) -> None:
+        """S-005 : une base hors racines autorisées n'est pas créée."""
+        tmpdir = tempfile.mkdtemp(prefix="miles_test_settings_out_")
+        try:
+            db_path = os.path.join(tmpdir, "memory.db")
+            env = {
+                "MILES_MEMORY_ENABLED": "true",
+                "MILES_MEMORY_DB_PATH": db_path,
+            }
+            with mock.patch.dict(os.environ, env):
+                with mock.patch("miles.CLI") as mock_cli:
+                    mock_cli.return_value.run.return_value = None
+                    with mock.patch.object(miles.CLI, "run", return_value=None):
+                        exit_code = miles.main([])
+
+            self.assertEqual(exit_code, 0)
+            self.assertIsNone(mock_cli.call_args.kwargs["memory"])
+            self.assertFalse(os.path.exists(db_path))
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 

@@ -20,6 +20,7 @@ from unittest import mock
 
 import miles
 from app.memory.persistent import PersistentMemory, PersistentMemoryError
+from app.security.paths import project_root
 
 
 class TestMilesMemoryErrorHandling(unittest.TestCase):
@@ -61,8 +62,14 @@ class TestMilesMemoryErrorHandling(unittest.TestCase):
         self.assertIn("mémoire persistante non disponible", stderr.getvalue())
 
     def test_memoire_active_transmise_au_cli(self) -> None:
-        """Comportement nominal inchangé : la mémoire disponible est transmise."""
-        tmpdir = tempfile.mkdtemp(prefix="miles_test_entrypoint_")
+        """Comportement nominal inchangé : la mémoire disponible est transmise.
+
+        La base est créée dans le dossier data/ du projet : c'est l'une des
+        racines autorisées (S-005).
+        """
+        tmpdir = tempfile.mkdtemp(
+            prefix="miles_test_entrypoint_", dir=str(project_root() / "data")
+        )
         try:
             env = {
                 "MILES_MEMORY_ENABLED": "true",
@@ -79,6 +86,30 @@ class TestMilesMemoryErrorHandling(unittest.TestCase):
             self.assertIsInstance(memory, PersistentMemory)
             self.assertTrue(memory.is_available)
             memory.close()
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_base_memoire_hors_racines_refusee(self) -> None:
+        """S-005 : une base mémoire hors des racines autorisées est refusée."""
+        tmpdir = tempfile.mkdtemp(prefix="miles_test_entrypoint_out_")
+        try:
+            env = {
+                "MILES_MEMORY_ENABLED": "true",
+                "MILES_MEMORY_DB_PATH": os.path.join(tmpdir, "memory.db"),
+            }
+            stderr = io.StringIO()
+            with mock.patch.dict(os.environ, env):
+                with mock.patch("miles.CLI") as mock_cli:
+                    mock_cli.return_value.run.return_value = None
+                    with redirect_stderr(stderr):
+                        exit_code = miles.main([])
+
+            self.assertEqual(exit_code, 0)
+            self.assertIsNone(mock_cli.call_args.kwargs["memory"])
+            self.assertIn(
+                "mémoire persistante non disponible", stderr.getvalue()
+            )
+            self.assertFalse(os.path.exists(os.path.join(tmpdir, "memory.db")))
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
