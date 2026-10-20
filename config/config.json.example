@@ -12,5 +12,7 @@
   "memory_enabled": false,
   "memory_db_path": "data/memory.db",
   "memory_max_memories_in_context": 5,
-  "memory_max_content_length": 1000
+  "memory_max_content_length": 1000,
+  "conversation_persist": true,
+  "conversation_db_path": "data/conversations.db"
 }

@@ -65,6 +65,33 @@ MILES_VOICE_ENABLED=false
 
 > **Sécurité** : ne jamais commettre de vraies clés API dans `.env`. Le fichier `.env` est ignoré par Git (voir `.gitignore`).
 
+## 3bis. Persistance de l'historique de conversation (V1)
+
+Depuis la version V1, MILES enregistre l'historique de la conversation dans une
+base SQLite locale (`data/conversations.db` par défaut) afin que la conversation
+survive à un redémarrage du programme.
+
+| Variable | Défaut | Rôle |
+|----------|--------|------|
+| `MILES_CONVERSATION_PERSIST` | `true` | Enregistrer l'historique de conversation sur disque |
+| `MILES_CONVERSATION_DB_PATH` | `data/conversations.db` | Emplacement de la base de transcription |
+
+Le chemin de la base est **confiné aux racines autorisées** (répertoire du
+projet et dossier `data/`) : un chemin hors de ces racines est refusé.
+
+Les secrets ne sont jamais écrits dans l'historique : le contenu des messages
+est expurgé des motifs de clé API, mot de passe et jeton avant écriture
+(marqueur `[REDACTED]`).
+
+Options de ligne de commande :
+```bash
+python miles.py                       # restaure la dernière conversation
+python miles.py --new-conversation    # démarre une nouvelle conversation
+python miles.py --conversation <id>   # restaure une conversation précise
+python miles.py --list-conversations  # liste les conversations enregistrées
+python miles.py --no-persist          # mode éphémère, rien n'est écrit
+```
+
 ## 4. Lancement
 
 ### Mode texte (dépendances standard uniquement)
@@ -98,6 +125,11 @@ python miles.py --help
 | `/quit`, `/q`, `/exit` | Quitter le programme |
 | `/clear` | Effacer l'historique de la conversation |
 | `/provider` | Afficher le fournisseur IA courant |
+| `/remember` | Enregistrer un souvenir explicite (usage : `/remember <texte>`) |
+| `/memory` | Lister les souvenirs persistants |
+| `/forget` | Supprimer un souvenir (usage : `/forget <id>`) |
+| `/conversations` | Lister les conversations enregistrées |
+| `/new` | Démarrer une nouvelle conversation |
 | `/status` | Afficher l'état du programme |
 
 ## 5. Dépendances vocales (optionnelles)

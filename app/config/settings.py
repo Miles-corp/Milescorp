@@ -66,15 +66,20 @@ class Settings:
         "memory_db_path": "data/memory.db",
         "memory_max_memories_in_context": 5,
         "memory_max_content_length": 1000,
+        # Persistance de l'historique de conversation (V1)
+        "conversation_persist": True,
+        "conversation_db_path": "data/conversations.db",
     }
 
     def __init__(self, config_path: str | None = None) -> None:
         self._values: dict[str, Any] = dict(self.DEFAULTS)
 
-        # 1. Chargement du fichier .env (stdlib, pas de dépendance externe).
+        # 1. Fichier .env (stdlib, pas de dépendance externe).
         # Les variables déjà présentes dans l'environnement du processus
-        # sont prioritaires et ne sont pas écrasées.
-        self._load_env_file()
+        # sont prioritaires. Le fichier .env est lu dans un dictionnaire
+        # local : l'environnement du processus n'est PAS modifié (aucun
+        # effet de bord global, suite de tests hermétique).
+        dotenv_values = self._load_env_file()
 
         # 2. Fichier JSON optionnel
         resolved_config = config_path or os.environ.get(
@@ -115,12 +120,19 @@ class Settings:
             "MILES_MEMORY_DB_PATH": "memory_db_path",
             "MILES_MEMORY_MAX_MEMORIES_IN_CONTEXT": "memory_max_memories_in_context",
             "MILES_MEMORY_MAX_CONTENT_LENGTH": "memory_max_content_length",
+            # Persistance de l'historique de conversation (V1)
+            "MILES_CONVERSATION_PERSIST": "conversation_persist",
+            "MILES_CONVERSATION_DB_PATH": "conversation_db_path",
             # Secrets : jamais codés en dur, lus uniquement depuis l'environnement
             "MILES_REMOTE_API_KEY": "remote_api_key",
             "MILES_LOCAL_API_KEY": "local_api_key",
         }
+        # 3. Variables d'environnement : le processus d'abord, puis le
+        # fichier .env (jamais l'inverse).
         for env_name, key in env_mapping.items():
             value = os.environ.get(env_name)
+            if value is None:
+                value = dotenv_values.get(env_name)
             if value is not None:
                 # Conversion de type pour les champs numériques
                 if key in (
@@ -142,22 +154,29 @@ class Settings:
                     # Conversion explicite : "false" ne doit pas être
                     # interprété comme vrai par bool().
                     value = _coerce_bool(value, env_name)
+                elif key == "conversation_persist":
+                    value = _coerce_bool(value, env_name)
                 self._values[key] = value
 
         # Validation
         self._validate()
 
-    def _load_env_file(self) -> None:
-        """Charger les variables d'un fichier .env s'il existe.
+    def _load_env_file(self) -> dict[str, str]:
+        """Lire les variables d'un fichier .env s'il existe.
 
         Utilise uniquement la bibliothèque standard Python (aucun
         python-dotenv). Les variables déjà présentes dans l'environnement
-        du processus sont prioritaires et ne sont pas écrasées. Un fichier
-        .env absent n'empêche pas le démarrage.
+        du processus sont prioritaires : elles sont ignorées ici.
+        Un fichier .env absent n'empêche pas le démarrage.
+
+        Le fichier est lu dans un dictionnaire local : l'environnement du
+        processus n'est pas modifié, ce qui évite tout effet de bord
+        global (notamment entre deux instances de Settings).
         """
+        values: dict[str, str] = {}
         env_path = Path(os.environ.get("MILES_ENV_FILE", ".env"))
         if not env_path.is_file():
-            return
+            return values
         try:
             with env_path.open("r", encoding="utf-8") as fh:
                 for raw_line in fh:
@@ -176,12 +195,14 @@ class Settings:
                         and value[0] in ('"', "'")
                     ):
                         value = value[1:-1]
-                    # Ne pas écraser une variable déjà définie.
+                    # Ne pas écraser une variable déjà définie dans le
+                    # environnement du processus.
                     if key not in os.environ:
-                        os.environ[key] = value
+                        values[key] = value
         except OSError:
             # Fichier .env illisible : on ignore, le démarrage continue.
-            pass
+            return values
+        return values
 
     def _validate(self) -> None:
         provider = self._values.get("provider")
@@ -216,6 +237,14 @@ class Settings:
         if "memory_enabled" in self._values:
             self._values["memory_enabled"] = _coerce_bool(
                 self._values["memory_enabled"], "memory_enabled"
+            )
+
+        # Même normalisation pour la persistance de la conversation : une
+        # chaîne "false" ne doit pas activer silencieusement l'enregistrement
+        # de l'historique sur disque.
+        if "conversation_persist" in self._values:
+            self._values["conversation_persist"] = _coerce_bool(
+                self._values["conversation_persist"], "conversation_persist"
             )
 
     @property
@@ -262,3 +291,17 @@ class Settings:
     @property
     def memory_max_content_length(self) -> int:
         return int(self._values.get("memory_max_content_length", 1000))
+
+    @property
+    def conversation_persist(self) -> bool:
+        """Indiquer si l'historique de conversation doit être persisté.
+
+        La valeur est normalisée en booléen lors de la validation de la
+        configuration : la chaîne "false" ne doit jamais être interprétée
+        comme vraie.
+        """
+        return bool(self._values.get("conversation_persist", True))
+
+    @property
+    def conversation_db_path(self) -> str:
+        return str(self._values.get("conversation_db_path", "data/conversations.db"))

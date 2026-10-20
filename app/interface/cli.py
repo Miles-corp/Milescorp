@@ -23,6 +23,8 @@ HELP_TEXT = """\nCommandes disponibles :
   /remember    Enregistrer un souvenir explicite (usage: /remember <texte>)
   /memory      Lister les souvenirs persistants
   /forget      Supprimer un souvenir (usage: /forget <id>)
+  /conversations Lister les conversations enregistrées
+  /new         Démarrer une nouvelle conversation
 Tapez votre message pour discuter avec l'assistant.
 """
 
@@ -47,6 +49,7 @@ class CLI:
         self.conversation = conversation
         self.validator = validator or ActionValidator()
         self.memory = memory
+        self._restored_message_count = 0
         self._running = True
 
     def run(self) -> None:
@@ -56,8 +59,13 @@ class CLI:
         while self._running:
             try:
                 user_input = self._read_input()
-            except (KeyboardInterrupt, EOFError):
-                print("\n")
+            except EOFError:
+                # Fin de saisie (Ctrl+D) : message explicite, sortie propre.
+                print("\nFin de saisie. Au revoir !")
+                self._running = False
+                break
+            except KeyboardInterrupt:
+                print("\nInterruption par l'utilisateur. Au revoir !")
                 self._running = False
                 break
 
@@ -66,12 +74,22 @@ class CLI:
 
             self._process_input(user_input.strip())
 
+    def set_restored_message_count(self, count: int) -> None:
+        """Indiquer le nombre de messages restaurés au démarrage."""
+        self._restored_message_count = count
+
     def _print_welcome(self) -> None:
         provider_name = self.provider.name if self.provider else "non configuré"
         print("=" * 50)
         print(" MILES — Assistant personnel intelligent (prototype)")
         print("=" * 50)
         print(f"Fournisseur IA : {provider_name}")
+        if self._restored_message_count:
+            print(
+                f"Conversation restaurée : {self._restored_message_count} message(s)."
+            )
+        if self.conversation.is_persistent:
+            print(f"Conversation enregistrée sous l'identifiant {self.conversation.conversation_id}.")
         print("Tapez /help pour l'aide, /quit pour sortir.")
         print("=" * 50)
 
@@ -133,10 +151,38 @@ class CLI:
             print(f"Fournisseur : {provider_name}")
             print(f"Disponible : {'oui' if available else 'non'}")
             print(f"Messages dans l'historique : {len(self.conversation)}")
+            if self.conversation.is_persistent:
+                print(f"Conversation persistée : {self.conversation.conversation_id}")
+            else:
+                print("Conversation persistée : non")
             if self.memory is not None:
                 print(
                     f"Mémoire persistante : {'activée' if self.memory.is_available else 'désactivée/indisponible'}"
                 )
+        elif cmd == "/conversations":
+            transcript = self.conversation.transcript
+            if transcript is None or not transcript.is_available:
+                print("Aucune conversation enregistrée (persistance désactivée).")
+                return
+            conversations = transcript.list_conversations(limit=20)
+            if not conversations:
+                print("Aucune conversation enregistrée.")
+                return
+            print("Conversations enregistrées :")
+            for conv in conversations:
+                marker = " (courante)" if conv["id"] == self.conversation.conversation_id else ""
+                print(
+                    f"  {conv['id']}  {conv['message_count']:>4} message(s){marker}"
+                )
+        elif cmd == "/new":
+            if not self.conversation.is_persistent:
+                print("Persistance désactivée : la conversation reste éphémère.")
+                return
+            new_id = self.conversation.new_conversation()
+            if new_id:
+                print(f"Nouvelle conversation : {new_id}")
+            else:
+                print("Impossible de créer une nouvelle conversation.")
         elif cmd == "/remember":
             if self.memory is None or not self.memory.is_available:
                 print("Mémoire persistante indisponible ou désactivée.")

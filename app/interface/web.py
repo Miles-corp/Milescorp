@@ -22,6 +22,7 @@ from app.ai_providers.base import AIProvider, AIProviderError
 from app.config.settings import Settings
 from app.core.conversation import Conversation
 from app.memory.persistent import PersistentMemory, PersistentMemoryError
+from app.utilities.redaction import REDACTED, sanitize_text
 
 logger = logging.getLogger("miles.web")
 if not logger.handlers:
@@ -30,7 +31,19 @@ if not logger.handlers:
     # n'écrit rien sur stderr par défaut.
     logger.addHandler(logging.NullHandler())
 
-REDACTED = "[REDACTED]"
+__all__ = [
+    "REDACTED",
+    "sanitize_text",
+    "public_provider_error",
+    "LOCAL_ONLY_HOST",
+    "MAX_BODY_BYTES",
+    "WebServerSecurityError",
+    "RequestBodyError",
+    "assert_local_host",
+    "WebApp",
+    "MilesHandler",
+    "MilesWebServer",
+]
 
 # Adresse d'écoute du serveur web. Elle est imposée par le code et n'est
 # pas configurable : le service MILES doit rester strictement local, jamais
@@ -39,7 +52,9 @@ LOCAL_ONLY_HOST = "127.0.0.1"
 
 # Taille maximale du corps d'une requête HTTP, en octets (64 KiB).
 # Au-delà, la requête est refusée avec HTTP 413 sans que les données
-# annoncées soient lues ou allouées.
+# annoncées soient lues ou allouées. Le corps n'est JAMAIS lu au-delà de
+# cette limite : c'est une invariant de sécurité (un client ne peut pas
+# forcer le serveur à consommer de la mémoire en annonçant une taille).
 MAX_BODY_BYTES = 65536
 
 
@@ -78,36 +93,8 @@ def assert_local_host(host: str) -> str:
         )
     return host
 
-# Motifs de secrets qui ne doivent jamais quitter le processus.
-_SECRET_PATTERNS = (
-    # Clés de type "sk-..." (fournisseur IA distant).
-    re.compile(r"sk-[A-Za-z0-9_\-]{4,}"),
-    # En-têtes d'authentification "Bearer ..." / "Basic ...".
-    re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._\-]{4,}"),
-    # Paires "cle=valeur" pour les noms de secrets connus.
-    re.compile(
-        r"(?i)\b(?:api[_-]?key|apikey|token|secret|password|passwd|pwd"
-        r"|credential|private[_-]?key|access[_-]?key)\b"
-        r"\s*[:=]\s*[\"']?[^\s\"',;]+"
-    ),
-    # Valeurs isolées de type "password: monmotdepasse".
-    re.compile(
-        r"(?i)\b(?:password|passwd|pwd|secret|token|api[_-]?key)\b"
-        r"\s*[:=]\s*[\"']?[^\s\"',;]{4,}"
-    ),
-)
-
-
-def sanitize_text(text: object) -> str:
-    """Remplacer les secrets potentiels d'un message par un marqueur.
-
-    Appliqué avant toute écriture dans les journaux internes. Le texte
-    d'origine n'est jamais renvoyé au client HTTP.
-    """
-    sanitized = str(text)
-    for pattern in _SECRET_PATTERNS:
-        sanitized = pattern.sub(REDACTED, sanitized)
-    return sanitized
+# Motifs de secrets : définis dans app/utilities/redaction.py (source unique
+# de vérité, partagée avec la persistance des conversations).
 
 
 def public_provider_error(exc: Exception) -> str:
@@ -327,6 +314,12 @@ class MilesHandler(BaseHTTPRequestHandler):
                 )
             if length > MAX_BODY_BYTES:
                 # Refus immédiat : les données annoncées ne sont pas lues.
+                # Le corps n'est jamais consommé au-delà de la limite, même
+                # en partie : c'est ce qui garantit qu'un client ne peut pas
+                # forcer une allocation mémoire côté serveur.
+                # Conséquence assumée : le client peut voir sa connexion
+                # réinitialisée au lieu de lire la réponse 413, s'il
+                # écrivait encore son corps au moment du refus.
                 raise RequestBodyError(
                     413,
                     "Requête trop volumineuse : le corps dépasse la limite autorisée.",

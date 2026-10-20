@@ -27,7 +27,13 @@ class TestMemoryEnabledFromEnv(unittest.TestCase):
     """Conversion de MILES_MEMORY_ENABLED."""
 
     def _settings_with(self, value: str | None) -> Settings:
-        env: dict[str, str] = {}
+        # MILES_ENV_FILE est pointé vers un fichier inexistant : le test ne
+        # doit pas dépendre du fichier .env local du développeur.
+        env: dict[str, str] = {
+            "MILES_ENV_FILE": os.path.join(
+                tempfile.gettempdir(), "miles_no_such_env_file"
+            )
+        }
         if value is not None:
             env["MILES_MEMORY_ENABLED"] = value
         with mock.patch.dict(os.environ, env):
@@ -84,7 +90,14 @@ class TestMemoryEnabledFromConfigFile(unittest.TestCase):
     def _settings_with_file(self, payload: dict) -> Settings:
         with open(self.config_path, "w", encoding="utf-8") as fh:
             json.dump(payload, fh)
-        return Settings(config_path=self.config_path)
+        # Le test ne doit pas dépendre du fichier .env local du développeur.
+        env = {
+            "MILES_ENV_FILE": os.path.join(
+                tempfile.gettempdir(), "miles_no_such_env_file"
+            )
+        }
+        with mock.patch.dict(os.environ, env):
+            return Settings(config_path=self.config_path)
 
     def test_fichier_avec_booleen_vrai(self) -> None:
         settings = self._settings_with_file({"memory_enabled": True})
