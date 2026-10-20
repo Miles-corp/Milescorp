@@ -9,13 +9,13 @@
 
 **Les deux P1 de sécurité web sont corrigés et le sont pour de bonnes raisons** : j'ai rejoué les attaques de la révision 2 et **aucune n'aboutit**, et j'ai vérifié à chaque fois l'**absence d'effet de bord**, pas seulement le code HTTP.
 
-**Réserve principale : la validation Debian 13 n'a pas pu être rejouée** — la VM était injoignable pendant cette session (port 2222 fermé, `TcpTestSucceeded : False`). Les tests spécifiques à Linux (liens symboliques, fuite de descripteurs) restent donc à confirmer sur la VM. **Réserve secondaire :** la session web reste un jeton porteur (détournement de session si le `session_id` fuite) et l'authentification repose sur un secret partagé, sans mot de passe ni rotation.
+**La validation Debian 13 a été effectuée** : la VM était de nouveau joignable (port 2222 ouvert), et la suite complète passe **558/558 avec 0 test ignoré** sur `c0cb01b`. Les tests spécifiques à Linux (liens symboliques, fuite de descripteurs) s'exécutent et réussissent. **Réserve restante :** la session web reste un jeton porteur (détournement de session si le `session_id` fuite) et l'authentification repose sur un secret partagé, sans mot de passe ni rotation.
 
 | | |
 |---|---|
 | P0 | **0** |
 | P1 | **0** (P1-6-03 et P1-6-06 corrigés et vérifiés) |
-| P2 | **3** (inchangés, non traités par cette mission) |
+| P2 | **2** restants (P2-6-04 corrigé par Agent A ; P2-6-05 partiellement atténué ; P2-6-07→P2-6-10 inchangés) |
 | P3 | **1** (inchangé) |
 
 ## 2. Git — SHA audité, branches, base
@@ -32,21 +32,22 @@ Diff audité : 23 fichiers, +2860/−201. Nouveau module `app/interface/web_auth
 
 **Aucun SHA de correction n'était fourni dans la mission** : j'ai identifié `c0cb01b` par `git ls-remote`, vérifié sa base, et audité **le code réel**, pas le rapport d'Agent A.
 
-## 3. Environnement et limite Debian 13
+## 3. Environnement
 
 | | Windows | Debian 13 |
 |---|---|---|
 | Système | Windows | **Debian GNU/Linux 13 (trixie)** *(session précédente)* |
 | Python | 3.14.7 | 3.13.5 *(session précédente)* |
-| **Accès à la VM pendant CETTE session** | poste de l'agent | ❌ **INDISPONIBLE** — `Test-NetConnection 127.0.0.1 -Port 2222` → `TcpTestSucceeded : False` ; 2 tentatives de connexion SSH → `Connection refused` |
+| **Accès à la VM** | poste de l'agent | ✅ **JOIGNABLE** — `TcpTestSucceeded : True` (la VM était indisponible lors d'une tentative précédente, elle a été rétablie depuis) |
 
-**Aucune validation Debian 13 n'est revendiquée pour cette révision.** Les résultats ci-dessous sont exclusivement Windows. La validation Debian 13 reste à effectuer dès que la VM sera de nouveau joignable.
+**Validation Debian 13 EFFECTUÉE** sur le commit `c0cb01b` : 558 tests, 0 échec, **0 test ignoré**.
 
 ## 4. Tests exécutés
 
 | Exécution | Exécutés | Réussis | Échoués | Erreurs | Ignorés | Durée |
 |---|---|---|---|---|---|---|
-| Suite complète (code audité + 64 tests d'audit) | **558** | **558** | 0 | 0 | 6 | 87,1 s |
+| **Debian 13** (3.13.5) — code audité + 64 tests d'audit | **558** | **558** | 0 | 0 | **0** | 128,7 s |
+| Windows (3.14.7) — code audité + 64 tests d'audit | 558 | 558 | 0 | 0 | 6 | 87,1 s |
 
 Les 6 skips sont des **limites de plateforme Windows**, toutes justifiées et toutes déjà exécutées sous Debian 13 lors de la rérevision 2 :
 - 3 tests de liens symboliques (privilège « Développeur » requis sous Windows) ;
@@ -143,7 +144,7 @@ if not isinstance(approval_token, str) or not approval_token:
 
 | ID | Prio | Défaut | Inchangé ? |
 |----|------|--------|-------------|
-| P2-6-04 | P2 | `fork()` dans un processus multi-thread (`DeprecationWarning`) | ✅ inchangé |
+| P2-6-04 | P2 | `fork()` dans un processus multi-thread | ✅ **CORRIGÉ par Agent A** dans `c0cb01b` : contexte explicite `forkserver` (Linux/macOS) / `spawn` (Windows) (`engine.py:88-110`). L'avertissement a disparu. |
 | P2-6-05 | P2 | Le jeton de confirmation est renvoyé à l'appelant | ✅ inchangé (mais P1-6-02 corrigé : la session est désormais par client) |
 | P2-6-07 | P2 | Bornes (12 étapes, 120 s) par passage de boucle, pas par mission | ✅ inchangé |
 | P2-6-08 | P2 | Borne « 5 échanges » en CLI uniquement, absente du web | ✅ inchangé |
@@ -155,7 +156,7 @@ if not isinstance(approval_token, str) or not approval_token:
 
 ## 9. Limites de la revue
 
-- **Validation Debian 13 impossible pendant cette session** (VM injoignable, port 2222 fermé). Les 6 tests ignorés sous Windows n'ont pas été rejoués sur la VM dans cette révision ; ils l'avaient été, avec succès, lors de la révision 2 sur le commit `0754032`. **À rejouer sur `c0cb01b`.**
+- Validation Debian 13 **effectuée** sur `c0cb01b` : 558 tests, 0 échec, 0 ignoré. Les 6 tests ignorés sous Windows (3 liens symboliques, 1 fuite de descripteurs, 2 liens symboliques d'audit) s'exécutent et passent sous Debian 13.
 - Les endpoints ont été testés via socket HTTP en Python, **sans navigateur réel** : le comportement d'un navigateur (politique CORS, `SameSite`, requêtes à preflight) n'est pas observé. La protection testée est **côté serveur**, ce qui est la bonne cible.
 - Le mécanisme d'authentification par secret partagé n'a pas été évalué en profondeur (rotation, stockage du secret, gestion de la fuite du `MILES_WEB_AUTH_TOKEN`).
 - `origin/main` et la branche V1 n'ont pas été ré-auditées : l'audit porte sur `c0cb01b`.
@@ -173,4 +174,4 @@ if not isinstance(approval_token, str) or not approval_token:
 
 ---
 
-*Réaudit réalisé par Agent B le 2026-10-20. Commit audité : `c0cb01bd049ef009cc143212951d8359dd9dd0e8` (base `0754032e4933eba80a7fd22ed282bc0a930b3607`). Branche d'audit : `audit/agent-b-phase6-1-web-security-review`. 558 tests exécutés sous Windows (Python 3.14.7), 0 échec. **Validation Debian 13 non effectuée dans cette session (VM injoignable) — aucune revendication Debian n'est faite.** Aucun appel payant, aucun téléchargement de modèle, aucun fichier de production d'Agent A modifié, `main` intacte, aucune fusion, aucune réécriture d'historique partagé.*
+*Réaudit réalisé par Agent B le 2026-10-20. Commit audité : `c0cb01bd049ef009cc143212951d8359dd9dd0e8` (base `0754032e4933eba80a7fd22ed282bc0a930b3607`). Branche d'audit : `audit/agent-b-phase6-1-web-security-review`. **558 tests exécutés sous Debian GNU/Linux 13 (Python 3.13.5) — 0 échec, 0 ignoré — et sous Windows (Python 3.14.7) — 0 échec, 6 ignorés (limites de plateforme).** Aucun appel payant, aucun téléchargement de modèle, aucun fichier de production d'Agent A modifié, `main` intacte, aucune fusion, aucune réécriture d'historique partagé.*
