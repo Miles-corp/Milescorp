@@ -21,6 +21,7 @@ from app.ai_providers.base import AIProvider, AIProviderError
 from app.config.settings import Settings
 from app.core.conversation import Conversation
 from app.interface.web import MilesHandler, MilesWebServer, WebApp
+from tests.web_test_support import TEST_TOKEN, build_app
 
 
 class SimulatedProvider(AIProvider):
@@ -51,7 +52,12 @@ class SimulatedProvider(AIProvider):
 
 
 class _FreePortServer:
-    """Lance un ThreadingHTTPServer sur un port libre et l'arrête à la fin."""
+    """Lance un ThreadingHTTPServer sur un port libre et l'arrête à la fin.
+
+    L'interface web exige une authentification par jeton (Phase 6.1) :
+    une session est ouverte automatiquement et les en-têtes de session et
+    de jeton CSRF sont joints à chaque requête.
+    """
 
     def __init__(self, handler_class, app: WebApp) -> None:
         MilesHandler.app = app
@@ -59,34 +65,46 @@ class _FreePortServer:
         self._port = self._server.server_address[1]
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
+        self._session: dict | None = None
+        self._login()
 
     @property
     def port(self) -> int:
         return self._port
 
-    def __enter__(self) -> "_FreePortServer":
-        return self
+    def _login(self) -> None:
+        """Ouvrir une session authentifiée auprès du serveur."""
+        self._session = self._send(
+            "POST",
+            "/session",
+            {"token": TEST_TOKEN},
+            {},
+            authenticated=False,
+        ).get("_json")
 
-    def __exit__(self, *args: object) -> None:
-        self.stop()
-
-    def stop(self) -> None:
-        self._server.shutdown()
-        self._server.server_close()
-
-    def request(self, method: str, path: str, body: dict | None = None, expect_json: bool = True) -> dict:
+    def _send(
+        self,
+        method: str,
+        path: str,
+        body: dict | None,
+        extra_headers: dict,
+        authenticated: bool = True,
+    ) -> dict:
         url = f"http://127.0.0.1:{self.port}{path}"
         data = None
-        headers = {}
+        headers = dict(extra_headers)
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
+        if authenticated and self._session:
+            headers["X-MILES-Session"] = self._session["session_id"]
+            headers["X-MILES-CSRF"] = self._session["csrf_token"]
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 body_text = resp.read().decode("utf-8")
                 result: dict = {"_status": resp.status, "_body": body_text}
-                if expect_json and body_text.strip():
+                if body_text.strip():
                     try:
                         result["_json"] = json.loads(body_text)
                     except json.JSONDecodeError:
@@ -102,12 +120,25 @@ class _FreePortServer:
                     result["_json"] = None
             return result
 
+    def __enter__(self) -> "_FreePortServer":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.stop()
+
+    def stop(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+
+    def request(self, method: str, path: str, body: dict | None = None, expect_json: bool = True) -> dict:
+        return self._send(method, path, body, {})
+
 
 class TestWebIndex(unittest.TestCase):
     """Tests de la page d'accueil."""
 
     def test_index_returns_200_with_html(self) -> None:
-        app = WebApp(settings=Settings())
+        app = build_app(settings=Settings())
         with _FreePortServer(MilesHandler, app) as server:
             result = server.request("GET", "/", expect_json=False)
             self.assertEqual(result["_status"], 200)
@@ -119,7 +150,7 @@ class TestWebStatus(unittest.TestCase):
 
     def test_status_shows_provider(self) -> None:
         provider = SimulatedProvider("remote-test")
-        app = WebApp(settings=Settings(), provider=provider)
+        app = build_app(settings=Settings(), provider=provider)
         with _FreePortServer(MilesHandler, app) as server:
             result = server.request("GET", "/status")
             self.assertEqual(result["_status"], 200)
@@ -127,7 +158,7 @@ class TestWebStatus(unittest.TestCase):
             self.assertTrue(result["_json"]["available"])
 
     def test_status_no_provider(self) -> None:
-        app = WebApp(settings=Settings())
+        app = build_app(settings=Settings())
         with _FreePortServer(MilesHandler, app) as server:
             result = server.request("GET", "/status")
             self.assertEqual(result["_status"], 200)
@@ -140,14 +171,14 @@ class TestWebMessage(unittest.TestCase):
 
     def test_message_with_provider(self) -> None:
         provider = SimulatedProvider("remote-test")
-        app = WebApp(settings=Settings(), provider=provider)
+        app = build_app(settings=Settings(), provider=provider)
         with _FreePortServer(MilesHandler, app) as server:
             result = server.request("POST", "/message", {"message": "bonjour"})
             self.assertEqual(result["_status"], 200)
             self.assertIn("Réponse simulée de remote-test à : bonjour", result["_json"]["response"])
 
     def test_message_without_provider(self) -> None:
-        app = WebApp(settings=Settings())
+        app = build_app(settings=Settings())
         with _FreePortServer(MilesHandler, app) as server:
             result = server.request("POST", "/message", {"message": "bonjour"})
             self.assertEqual(result["_status"], 400)
@@ -155,7 +186,7 @@ class TestWebMessage(unittest.TestCase):
 
     def test_message_empty(self) -> None:
         provider = SimulatedProvider("remote-test")
-        app = WebApp(settings=Settings(), provider=provider)
+        app = build_app(settings=Settings(), provider=provider)
         with _FreePortServer(MilesHandler, app) as server:
             result = server.request("POST", "/message", {"message": "   "})
             self.assertEqual(result["_status"], 400)
@@ -163,7 +194,7 @@ class TestWebMessage(unittest.TestCase):
 
     def test_provider_failure_preserves_context(self) -> None:
         failing = SimulatedProvider("failing", should_fail=True)
-        app = WebApp(settings=Settings(), provider=failing)
+        app = build_app(settings=Settings(), provider=failing)
         with _FreePortServer(MilesHandler, app) as server:
             result = server.request("POST", "/message", {"message": "test"})
             self.assertEqual(result["_status"], 400)
@@ -184,7 +215,7 @@ class TestWebMessage(unittest.TestCase):
             def chat(self, messages: list[dict[str, str]]) -> str:
                 raise AIProviderError("Réponse invalide (non-JSON) du fournisseur distant.")
 
-        app = WebApp(settings=Settings(), provider=BrokenProvider())
+        app = build_app(settings=Settings(), provider=BrokenProvider())
         with _FreePortServer(MilesHandler, app) as server:
             result = server.request("POST", "/message", {"message": "test"})
             self.assertEqual(result["_status"], 400)
@@ -207,7 +238,7 @@ class TestWebMemory(unittest.TestCase):
         from app.memory.persistent import PersistentMemory
 
         memory = PersistentMemory(enabled=True, db_path=self.db_path)
-        app = WebApp(settings=Settings(), memory=memory)
+        app = build_app(settings=Settings(), memory=memory)
         with _FreePortServer(MilesHandler, app) as server:
             result = server.request("GET", "/memory")
             self.assertEqual(result["_status"], 200)
@@ -218,7 +249,7 @@ class TestWebMemory(unittest.TestCase):
         from app.memory.persistent import PersistentMemory
 
         memory = PersistentMemory(enabled=True, db_path=self.db_path)
-        app = WebApp(settings=Settings(), memory=memory)
+        app = build_app(settings=Settings(), memory=memory)
         with _FreePortServer(MilesHandler, app) as server:
             add = server.request("POST", "/remember", {"content": "Je préfère le thé."})
             self.assertEqual(add["_status"], 200)
@@ -234,7 +265,7 @@ class TestWebMemory(unittest.TestCase):
         from app.memory.persistent import PersistentMemory
 
         memory = PersistentMemory(enabled=True, db_path=self.db_path)
-        app = WebApp(settings=Settings(), memory=memory)
+        app = build_app(settings=Settings(), memory=memory)
         with _FreePortServer(MilesHandler, app) as server:
             add = server.request("POST", "/remember", {"content": "À supprimer"})
             mem_id = add["_json"]["id"]
@@ -248,7 +279,7 @@ class TestWebMemory(unittest.TestCase):
         memory.close()
 
     def test_memory_disabled(self) -> None:
-        app = WebApp(settings=Settings())  # memory_enabled=False par défaut
+        app = build_app(settings=Settings())  # memory_enabled=False par défaut
         with _FreePortServer(MilesHandler, app) as server:
             result = server.request("POST", "/remember", {"content": "test"})
             self.assertEqual(result["_status"], 400)
@@ -258,7 +289,7 @@ class TestWebMemory(unittest.TestCase):
         from app.memory.persistent import PersistentMemory
 
         memory = PersistentMemory(enabled=True, db_path=self.db_path)
-        app = WebApp(settings=Settings(), memory=memory)
+        app = build_app(settings=Settings(), memory=memory)
         with _FreePortServer(MilesHandler, app) as server:
             result = server.request("POST", "/forget", {"id": "abc"})
             self.assertEqual(result["_status"], 400)
@@ -266,7 +297,7 @@ class TestWebMemory(unittest.TestCase):
         memory.close()
 
     def test_unknown_route_returns_404(self) -> None:
-        app = WebApp(settings=Settings())
+        app = build_app(settings=Settings())
         with _FreePortServer(MilesHandler, app) as server:
             result = server.request("GET", "/inconnu")
             self.assertEqual(result["_status"], 404)

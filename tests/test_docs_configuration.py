@@ -56,9 +56,9 @@ class TestDocumentedVariablesMatchCode(unittest.TestCase):
             self.install = fh.read()
 
     def test_nombre_de_variables_reconnues(self) -> None:
-        # 23 variables de configuration + 2 variables de chemin de fichier.
-        self.assertEqual(len(self.variables), 25)
-        self.assertEqual(len(_mapping_variables()), 23)
+        # 26 variables de configuration + 2 variables de chemin de fichier.
+        self.assertEqual(len(self.variables), 28)
+        self.assertEqual(len(_mapping_variables()), 26)
         # Les deux variables de chemin de fichier sont bien reconnues.
         self.assertIn("MILES_ENV_FILE", self.variables)
         self.assertIn("MILES_CONFIG", self.variables)

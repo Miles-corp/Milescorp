@@ -22,6 +22,7 @@ import hashlib
 import json
 import logging
 import multiprocessing
+import queue
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -81,6 +82,46 @@ class _PendingConfirmation:
     expires_at: float
     context_id: str = ""
     actor_id: str = ""
+
+
+def _select_start_context() -> Any:
+    """Choisir explicitement le contexte de démarrage des sous-processus.
+
+    Le contexte par défaut de ``multiprocessing`` est ``fork`` sous Linux :
+    dans un processus multi-thread (le serveur web est un
+    ``ThreadingHTTPServer``), ``fork`` provoke un ``DeprecationWarning`` et
+    peut provoquer des interblocages dans l'enfant. Python 3.14 changera de
+    toute façon ce défaut.
+
+    On impose donc :
+    - ``forkserver`` quand il est disponible (Linux, macOS) ;
+    - ``spawn`` sinon (Windows).
+
+    Les handlers doivent rester picklables : c'est déjà une contrainte du
+    moteur (voir :func:`_run_handler_in_process`).
+    """
+    try:
+        methods = multiprocessing.get_all_start_methods()
+    except Exception:  # noqa: BLE001 — repli sur le contexte par défaut
+        return multiprocessing
+    for method in ("forkserver", "spawn"):
+        if method in methods:
+            return multiprocessing.get_context(method)
+    return multiprocessing
+
+
+#: Contexte multiprocessing utilisé par le moteur (explicite et stable).
+_MP_CONTEXT = _select_start_context()
+
+
+def _make_queue() -> "multiprocessing.Queue[Any]":
+    """Créer une file de résultat dans le contexte multiprocessing du moteur.
+
+    Point d'entrée unique (et point de substitution pour les tests de
+    non-régression sur la fermeture des files) : la file et le processus
+    enfant doivent impérativement appartenir au même contexte.
+    """
+    return _MP_CONTEXT.Queue()
 
 
 def _run_handler_in_process(
@@ -419,20 +460,56 @@ class ToolEngine:
         de ne pas laisser de descripteurs de fichiers ni de threads
         derrière soi.
         """
-        result_queue: "multiprocessing.Queue[Any]" = multiprocessing.Queue()
-        error_queue: "multiprocessing.Queue[str]" = multiprocessing.Queue()
+        result_queue: "multiprocessing.Queue[Any]" = _make_queue()
+        error_queue: "multiprocessing.Queue[str]" = _make_queue()
 
         try:
-            process = multiprocessing.Process(
+            process = _MP_CONTEXT.Process(
                 target=_run_handler_in_process,
                 args=(tool.handler, parameters, result_queue, error_queue),
                 daemon=True,
             )
             process.start()
-            process.join(timeout=tool.timeout_seconds)
 
-            if process.is_alive():
-                # Le processus est toujours en cours : arrêt effectif
+            # Le résultat est récupéré PENDANT l'exécution du processus
+            # enfant, et non après : le tampon d'un tube fait 8 Kio sous
+            # Windows. Un résultat plus volumineux que ce tampon bloquerait
+            # l'enfant (qui attend l'écriture dans le tube) pendant que le
+            # parent attend la fin du processus : le délai d'attente
+            # expirerait à tort. Le parent doit donc consommer la file en
+            # continu.
+            deadline = time.monotonic() + tool.timeout_seconds
+            outcome: Optional[tuple] = None
+            timed_out = False
+
+            while True:
+                try:
+                    outcome = result_queue.get(timeout=0.05)
+                    break
+                except queue.Empty:
+                    pass
+                try:
+                    outcome = error_queue.get(timeout=0.01)
+                    break
+                except queue.Empty:
+                    pass
+                if not process.is_alive():
+                    # Le processus est terminé : dernière lecture possible
+                    # (les données peuvent être encore en transit).
+                    try:
+                        outcome = result_queue.get(timeout=0.2)
+                    except queue.Empty:
+                        try:
+                            outcome = error_queue.get(timeout=0.1)
+                        except queue.Empty:
+                            outcome = None
+                    break
+                if time.monotonic() >= deadline:
+                    timed_out = True
+                    break
+
+            if timed_out:
+                # Arrêt effectif du processus enfant (invariant S-006).
                 process.terminate()
                 process.join(timeout=5)
                 if process.is_alive():
@@ -448,24 +525,25 @@ class ToolEngine:
                     ),
                 )
 
-            # Récupérer le résultat ou l'erreur
-            if not result_queue.empty():
-                kind, value = result_queue.get()
+            # Le processus a produit son résultat : on le recueille.
+            process.join(timeout=5)
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5)
+                if process.is_alive():
+                    process.kill()
+                    process.join(timeout=5)
+
+            if outcome is not None:
+                kind, value = outcome
                 if kind == "ok":
                     return ToolResult(
                         tool_id=tool.tool_id,
                         success=True,
                         data=value,
                     )
-                # Ne devrait pas arriver, mais on gère
-                return ToolResult(
-                    tool_id=tool.tool_id,
-                    success=False,
-                    error_message="Erreur interne lors de l'exécution.",
-                )
-
-            if not error_queue.empty():
-                _kind, error_msg = error_queue.get()
+                # Erreur levée par le handler : message générique, jamais
+                # l'exception brute.
                 return ToolResult(
                     tool_id=tool.tool_id,
                     success=False,

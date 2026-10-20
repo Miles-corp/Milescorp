@@ -393,7 +393,9 @@ class CLI:
         # appel ne doit pas produire deux exécutions.
         mission = self.mission_runner.find_running(objective)
         if mission is None:
-            mission = self.mission_runner.create(objective)
+            mission = self.mission_runner.create(
+                objective, owner_session_id=self.session_id
+            )
         mission = self.mission_runner.run(mission.mission_id)
         self._drive_mission(mission)
 
@@ -423,10 +425,17 @@ class CLI:
             if pending.kind == "authorization":
                 approved = answer.lower() in ("o", "oui", "y", "yes", "ok")
                 mission = self.mission_runner.authorize(
-                    mission.mission_id, approved=approved
+                    mission.mission_id,
+                    approved=approved,
+                    requester_session_id=self.session_id,
+                    # Le jeton d'approbation lie la décision à CETTE
+                    # demande précise (mission, périmètre, expiration).
+                    approval_token=pending.approval_token,
                 )
             else:
-                mission = self.mission_runner.answer(mission.mission_id, answer)
+                mission = self.mission_runner.answer(
+                    mission.mission_id, answer, requester_session_id=self.session_id
+                )
 
         if mission is not None:
             print()

@@ -214,7 +214,11 @@ class Executor:
                 tool_id=step.tool_id,
                 parameters=parameters,
                 context_id=mission.mission_id,
-                actor_id=self._session_id,
+                # L'acteur est la session du client propriétaire de la
+                # mission (et non une session partagée par processus) :
+                # un jeton de confirmation n'est ainsi utilisable que par
+                # le client qui a reçu l'autorisation.
+                actor_id=mission.session_id or self._session_id,
             )
         except Exception as exc:  # noqa: BLE001 — une exception ne doit pas tuer la mission
             logger.warning(

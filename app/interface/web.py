@@ -17,7 +17,7 @@ import os
 import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 from app.ai_providers.base import AIProvider, AIProviderError
 from app.ai_providers.public_errors import public_provider_error as _public_provider_error
@@ -25,9 +25,17 @@ from app.config.settings import Settings
 from app.core.conversation import Conversation
 from app.memory.persistent import PersistentMemory, PersistentMemoryError
 from app.orchestration.models import Mission, MissionState
-from app.orchestration.runner import MissionRunner
+from app.orchestration.runner import MissionAuthorizationError, MissionRunner
 from app.tools.grants import default_session_id
 from app.tools.service import ToolService
+from app.interface.web_auth import (
+    CSRF_HEADER,
+    SESSION_HEADER,
+    OriginPolicy,
+    WebAuthError,
+    WebAuthenticator,
+    WebSession,
+)
 from app.utilities.redaction import REDACTED, sanitize_text
 
 logger = logging.getLogger("miles.web")
@@ -131,6 +139,8 @@ class WebApp:
         tool_service: Optional[ToolService] = None,
         mission_runner: Optional[MissionRunner] = None,
         session_id: Optional[str] = None,
+        authenticator: Optional[WebAuthenticator] = None,
+        allowed_origins: Optional[Iterable[str]] = None,
     ) -> None:
         self.settings = settings
         self.provider = provider
@@ -142,9 +152,21 @@ class WebApp:
         # logique métier (validation, permissions, confirmation, audit).
         self.tool_service = tool_service
         self.mission_runner = mission_runner
-        # Identité de session : les jetons de confirmation et les
-        # autorisations de mission ne sont valables que dans cette session.
+        # Identité technique de l'application (utilisée hors interface web,
+        # par exemple par un intégrateur). Elle n'est **jamais** utilisée
+        # comme identité d'un client web : chaque client dispose de sa
+        # propre session authentifiée.
         self.session_id = session_id or default_session_id("web")
+        # Authentification : si aucun identifiant n'est configuré,
+        # l'interface web est fermée (les routes sensibles répondent 403).
+        self.authenticator = authenticator or WebAuthenticator.from_settings(
+            settings
+        )
+        origins = allowed_origins
+        if origins is None:
+            raw = str(settings.get("web_allowed_origins", "") or "")
+            origins = [o.strip() for o in raw.split(",") if o.strip()]
+        self.origin_policy = OriginPolicy(origins)
         self._mission_threads: dict[str, threading.Thread] = {}
         self._mission_lock = threading.Lock()
 
@@ -156,11 +178,13 @@ class WebApp:
             return {"tools": [], "error": "Aucun service d'outils disponible."}
         return {"tools": self.tool_service.list_tools()}
 
-    def run_tool(self, data: dict[str, Any]) -> dict[str, Any]:
+    def run_tool(self, data: dict[str, Any], session: WebSession) -> dict[str, Any]:
         """Exécuter un outil via le service partagé (même moteur que le CLI).
 
         Le client peut transmettre ``confirmation_token`` et
-        ``user_confirmed`` pour confirmer une action à effet externe.
+        ``user_confirmed`` pour confirmer une action à effet externe. Le
+        jeton n'est valide que pour la session qui l'a reçu : une autre
+        session ne peut pas le rejouer.
         """
         if self.tool_service is None:
             return {"error": "Aucun service d'outils disponible."}
@@ -186,28 +210,36 @@ class WebApp:
             parameters=parameters,
             user_confirmed=user_confirmed,
             confirmation_token=confirmation_token,
-            actor_id=self.session_id,
+            # Acteur = session authentifiée du client : le jeton de
+            # confirmation est lié à ce client et à lui seul.
+            actor_id=session.session_id,
         )
         return self.tool_service.describe_result(result)
 
     # --- Missions ---
 
-    def list_missions(self) -> dict[str, Any]:
-        """Retourner la liste des missions connues."""
+    def list_missions(self, session: WebSession) -> dict[str, Any]:
+        """Retourner la liste des missions de l'utilisateur connecté."""
         if self.mission_runner is None:
             return {"missions": [], "error": "Orchestrateur indisponible."}
-        return {"missions": self.mission_runner.list_missions(limit=50)}
+        return {
+            "missions": self.mission_runner.list_missions(
+                limit=50, owner_user_id=session.user_id
+            )
+        }
 
-    def mission_detail(self, mission_id: str) -> dict[str, Any]:
-        """Retourner l'état détaillé d'une mission."""
+    def mission_detail(self, mission_id: str, session: WebSession) -> dict[str, Any]:
+        """Retourner l'état détaillé d'une mission de l'utilisateur."""
         if self.mission_runner is None:
             return {"error": "Orchestrateur indisponible."}
-        mission = self.mission_runner.get(mission_id)
+        mission = self.mission_runner.get(
+            mission_id, owner_user_id=session.user_id
+        )
         if mission is None:
             return {"error": f"Mission inconnue : {mission_id}"}
         return self._mission_payload(mission)
 
-    def create_mission(self, objective: Any) -> dict[str, Any]:
+    def create_mission(self, objective: Any, session: WebSession) -> dict[str, Any]:
         """Créer une mission et lancer son exécution en arrière-plan.
 
         Une mission identique déjà en cours n'est pas relancée : un double
@@ -219,21 +251,32 @@ class WebApp:
             return {"error": "Objectif de mission manquant."}
 
         existing = self.mission_runner.find_running(objective.strip())
-        if existing is not None:
+        if existing is not None and existing.owner_user_id == session.user_id:
             payload = self._mission_payload(existing)
             payload["already_running"] = True
             return payload
 
         try:
-            mission = self.mission_runner.create(objective.strip())
+            mission = self.mission_runner.create(
+                objective.strip(),
+                owner_user_id=session.user_id,
+                owner_session_id=session.session_id,
+            )
         except ValueError as exc:
             return {"error": str(exc)}
 
         self._start_mission_thread(mission.mission_id, self.mission_runner.run)
         return self._mission_payload(mission)
 
-    def authorize_mission(self, mission_id: str, data: dict[str, Any]) -> dict[str, Any]:
-        """Accorder ou refuser l'autorisation demandée par une mission."""
+    def authorize_mission(
+        self, mission_id: str, data: dict[str, Any], session: WebSession
+    ) -> dict[str, Any]:
+        """Accorder ou refuser l'autorisation demandée par une mission.
+
+        Le demandeur doit être l'utilisateur propriétaire de la mission et
+        présenter le jeton d'approbation de la demande en attente. Une
+        simple valeur booléenne fournie par le client ne suffit pas.
+        """
         if self.mission_runner is None:
             return {"error": "Orchestrateur indisponible."}
         mission = self.mission_runner.get(mission_id)
@@ -241,18 +284,41 @@ class WebApp:
             return {"error": f"Mission inconnue : {mission_id}"}
         if mission.pending is None or mission.pending.kind != "authorization":
             return {"error": "Aucune autorisation en attente pour cette mission."}
+        if (
+            mission.owner_user_id
+            and mission.owner_user_id != session.user_id
+        ):
+            return {"error": "Cette mission appartient a un autre utilisateur."}
+
+        approval_token = data.get("approval_token")
+        if not isinstance(approval_token, str) or not approval_token:
+            return {"error": "Jeton d'autorisation manquant."}
+
         approved = bool(data.get("approved", False))
-        self._start_mission_thread(
-            mission_id,
-            lambda mid: self.mission_runner.authorize(mid, approved=approved),
-        )
+        try:
+            self._start_mission_thread(
+                mission_id,
+                lambda mid: self.mission_runner.authorize(
+                    mid,
+                    approved=approved,
+                    requester_user_id=session.user_id,
+                    requester_session_id=session.session_id,
+                    approval_token=approval_token,
+                ),
+            )
+        except MissionAuthorizationError as exc:
+            return {"error": str(exc)}
         return {"mission_id": mission_id, "approved": approved, "started": True}
 
-    def answer_mission(self, mission_id: str, data: dict[str, Any]) -> dict[str, Any]:
+    def answer_mission(
+        self, mission_id: str, data: dict[str, Any], session: WebSession
+    ) -> dict[str, Any]:
         """Transmettre une réponse à une demande en attente."""
         if self.mission_runner is None:
             return {"error": "Orchestrateur indisponible."}
-        mission = self.mission_runner.get(mission_id)
+        mission = self.mission_runner.get(
+            mission_id, owner_user_id=session.user_id
+        )
         if mission is None:
             return {"error": f"Mission inconnue : {mission_id}"}
         if mission.pending is None:
@@ -260,16 +326,29 @@ class WebApp:
         answer = data.get("answer", "")
         if not isinstance(answer, str) or not answer.strip():
             return {"error": "Réponse vide."}
-        self._start_mission_thread(
-            mission_id,
-            lambda mid: self.mission_runner.answer(mid, answer.strip()),
-        )
+        try:
+            self._start_mission_thread(
+                mission_id,
+                lambda mid: self.mission_runner.answer(
+                    mid,
+                    answer.strip(),
+                    requester_user_id=session.user_id,
+                    requester_session_id=session.session_id,
+                ),
+            )
+        except MissionAuthorizationError as exc:
+            return {"error": str(exc)}
         return {"mission_id": mission_id, "answered": True, "started": True}
 
-    def cancel_mission(self, mission_id: str) -> dict[str, Any]:
+    def cancel_mission(self, mission_id: str, session: WebSession) -> dict[str, Any]:
         """Demander l'arrêt d'une mission."""
         if self.mission_runner is None:
             return {"error": "Orchestrateur indisponible."}
+        mission = self.mission_runner.get(
+            mission_id, owner_user_id=session.user_id
+        )
+        if mission is None:
+            return {"error": f"Mission {mission_id} introuvable ou déjà terminée."}
         cancelled = self.mission_runner.cancel(mission_id)
         if not cancelled:
             return {"error": f"Mission {mission_id} introuvable ou déjà terminée."}
@@ -325,6 +404,11 @@ class WebApp:
                 "question": sanitize_text(mission.pending.question),
                 "tool_ids": list(mission.pending.tool_ids),
                 "allowed_roots": list(mission.pending.allowed_roots),
+                # Jeton d'approbation : propre à cette demande et à ce
+                # client (la charge utile n'est servie qu'au propriétaire
+                # de la mission).
+                "approval_token": mission.pending.approval_token,
+                "expires_at": mission.pending.expires_at,
             }
         return {
             "mission_id": mission.mission_id,
@@ -482,6 +566,9 @@ class MilesHandler(BaseHTTPRequestHandler):
     # L'application métier est attachée au serveur via server.miles_app.
     app: Optional[WebApp] = None
 
+    #: Vrai lorsque le corps de la requête a déjà été consommé.
+    _body_consumed: bool = False
+
     def log_message(self, format: str, *args: Any) -> None:
         """Désactiver les logs de requête HTTP par défaut pour éviter
         l'exposition accidentelle de données sensibles dans les logs."""
@@ -506,6 +593,7 @@ class MilesHandler(BaseHTTPRequestHandler):
             RequestBodyError: en-tête Content-Length absent, négatif, non
                 numérique, corps trop volumineux (413) ou incomplet.
         """
+        self._body_consumed = False
         raw_length = self.headers.get("Content-Length")
         if raw_length is None:
             length = 0
@@ -556,6 +644,9 @@ class MilesHandler(BaseHTTPRequestHandler):
             raise RequestBodyError(
                 400, "Requête mal formée : corps JSON invalide."
             )
+        # Le corps a été intégralement consommé : un refus ultérieur ne
+        # doit pas tenter de le relire (ce qui bloquerait la connexion).
+        self._body_consumed = True
         return data
 
     def _html_escape(self, text: str) -> str:
@@ -567,22 +658,49 @@ class MilesHandler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
 
         if path == "/":
+            # Page publique : elle ne contient aucune donnée, seulement la
+            # coque de l'interface et le formulaire de connexion.
             self._serve_index()
-        elif path == "/status":
+            return
+
+        session = self._require_session()
+        if session is None:
+            return
+
+        if path == "/status":
             self._handle_status()
         elif path == "/memory":
             self._handle_list_memories()
         elif path == "/tools":
             self._handle_list_tools()
         elif path == "/missions":
-            self._handle_list_missions()
+            self._handle_list_missions(session)
         elif path.startswith("/mission/"):
-            self._handle_mission_detail(path)
+            self._handle_mission_detail(path, session)
         else:
             self._send_json(404, {"error": "Not found", "path": path})
 
     def do_POST(self) -> None:  # noqa: N802
         path = self.path.split("?")[0]
+
+        # 1. Origine de la requête (contrôle CSRF de premier niveau).
+        #    Ce contrôle est effectué AVANT toute lecture de corps et
+        #    AVANT toute action : une requête refusée n'a aucun effet de
+        #    bord.
+        allowed, reason = self._check_origin()
+        if not allowed:
+            self._reject(403, reason)
+            return
+
+        # 2. Type de contenu : seules les requêtes JSON sont admises.
+        if not self._check_content_type():
+            self._reject(
+                415,
+                "Type de contenu non supporté : application/json est requis.",
+            )
+            return
+
+        # 3. Lecture du corps (après les contrôles précédents).
         try:
             data = self._read_body()
         except RequestBodyError as exc:
@@ -592,6 +710,22 @@ class MilesHandler(BaseHTTPRequestHandler):
             self._send_json(exc.status, {"error": exc.message})
             return
 
+        # 4. Authentification. La connexion (POST /session) est le seul
+        #    point d'entrée public : c'est elle qui échange un jeton
+        #    d'accès contre une session.
+        if path == "/session":
+            self._handle_login(data)
+            return
+
+        session = self._require_session()
+        if session is None:
+            return
+
+        # 5. Jeton CSRF : obligatoire sur toute requête modifiante.
+        if not self._check_csrf(session):
+            self._reject(403, "Jeton CSRF absent ou invalide.")
+            return
+
         if path == "/message":
             self._handle_message(data)
         elif path == "/remember":
@@ -599,15 +733,15 @@ class MilesHandler(BaseHTTPRequestHandler):
         elif path == "/forget":
             self._handle_forget(data)
         elif path == "/tool":
-            self._handle_run_tool(data)
+            self._handle_run_tool(data, session)
         elif path == "/mission":
-            self._handle_create_mission(data)
+            self._handle_create_mission(data, session)
         elif re.match(r"^/mission/[^/]+/authorize$", path):
-            self._handle_mission_authorize(path, data)
+            self._handle_mission_authorize(path, data, session)
         elif re.match(r"^/mission/[^/]+/answer$", path):
-            self._handle_mission_answer(path, data)
+            self._handle_mission_answer(path, data, session)
         elif re.match(r"^/mission/[^/]+/cancel$", path):
-            self._handle_mission_cancel(path)
+            self._handle_mission_cancel(path, session)
         else:
             self._send_json(404, {"error": "Not found", "path": path})
 
@@ -653,11 +787,24 @@ button.secondary:hover {{ background: #616161; }}
 .tools li {{ margin: 0.35rem 0; padding: 0.35rem; background: #f5f5f5; border-radius: 4px; font-size: 0.9rem; }}
 .tools code {{ background: #e0e0e0; padding: 0 0.25rem; border-radius: 3px; }}
 .tools input[type="text"] {{ width: auto; padding: 0.25rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem; }}
+.login {{ margin: 1rem 0; padding: 1rem; background: #fff8e1; border: 1px solid #ffe082; border-radius: 6px; }}
+.login input[type="password"] {{ width: 60%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; }}
 </style>
 </head>
 <body>
 <h1>MILES — Assistant personnel</h1>
 
+<div id="login" class="login">
+<strong>Connexion requise</strong>
+<p>L'interface web exige un jeton d'accès. Saisissez le jeton affiché au démarrage du serveur MILES.</p>
+<form id="loginForm" onsubmit="return login(event)">
+<input type="password" id="token" placeholder="Jeton d'accès" autocomplete="off">
+<button type="submit">Se connecter</button>
+</form>
+<div id="loginError" class="msg error" style="display:none"></div>
+</div>
+
+<div id="app" style="display:none">
 <div class="status">
 <strong>Fournisseur :</strong> {self._html_escape(str(provider_state.get('name', '—')))}<br>
 <strong>Disponible :</strong> {'oui' if provider_state.get('available') else 'non'}<br>
@@ -680,8 +827,60 @@ button.secondary:hover {{ background: #616161; }}
 <strong>Outils :</strong>
 <div id="toolsList"><p>Chargement…</p></div>
 </div>
+</div>
 
 <script>
+// Session authentifiée : le jeton de session et le jeton CSRF ne sont
+// conservés qu'en mémoire (jamais dans un cookie ni dans le stockage local).
+let sessionId = null;
+let csrfToken = null;
+
+function authHeaders() {{
+  const headers = {{ 'Content-Type': 'application/json' }};
+  if (sessionId) headers['X-MILES-Session'] = sessionId;
+  if (csrfToken) headers['X-MILES-CSRF'] = csrfToken;
+  return headers;
+}}
+
+function showLogin() {{
+  document.getElementById('login').style.display = 'block';
+  document.getElementById('app').style.display = 'none';
+}}
+
+function showApp() {{
+  document.getElementById('login').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+}}
+
+async function login(e) {{
+  e.preventDefault();
+  const token = document.getElementById('token').value.trim();
+  const errorBox = document.getElementById('loginError');
+  errorBox.style.display = 'none';
+  try {{
+    const res = await fetch('/session', {{
+      method: 'POST',
+      headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify({{ token: token }})
+    }});
+    const data = await res.json();
+    if (!res.ok) {{
+      errorBox.textContent = data.error || 'Connexion refusee.';
+      errorBox.style.display = 'block';
+      return false;
+    }}
+    sessionId = data.session_id;
+    csrfToken = data.csrf_token;
+    document.getElementById('token').value = '';
+    showApp();
+    loadStatus();
+  }} catch (err) {{
+    errorBox.textContent = 'Erreur reseau : ' + err;
+    errorBox.style.display = 'block';
+  }}
+  return false;
+}}
+
 async function sendMessage(e) {{
   e.preventDefault();
   const input = document.getElementById('input');
@@ -692,9 +891,10 @@ async function sendMessage(e) {{
   try {{
     const res = await fetch('/message', {{
       method: 'POST',
-      headers: {{ 'Content-Type': 'application/json' }},
+      headers: authHeaders(),
       body: JSON.stringify({{ message: text }})
     }});
+    if (res.status === 401) {{ showLogin(); return false; }}
     const data = await res.json();
     if (data.response) appendMessage('assistant', data.response);
     if (data.error) appendMessage('error', 'Erreur : ' + data.error);
@@ -706,7 +906,8 @@ async function sendMessage(e) {{
 
 async function loadStatus() {{
   try {{
-    const res = await fetch('/status');
+    const res = await fetch('/status', {{ headers: authHeaders() }});
+    if (res.status === 401) {{ showLogin(); return; }}
     const data = await res.json();
     document.querySelector('.status').innerHTML =
       '<strong>Fournisseur :</strong> ' + escapeHtml(data.name) + '<br>' +
@@ -718,7 +919,7 @@ async function loadStatus() {{
 
 async function loadMemories() {{
   try {{
-    const res = await fetch('/memory');
+    const res = await fetch('/memory', {{ headers: authHeaders() }});
     const data = await res.json();
     const container = document.getElementById('memories');
     if (!Array.isArray(data) || data.length === 0) {{
@@ -734,7 +935,8 @@ async function loadMemories() {{
 async function loadTools() {{
   const container = document.getElementById('toolsList');
   try {{
-    const res = await fetch('/tools');
+    const res = await fetch('/tools', {{ headers: authHeaders() }});
+    if (res.status === 401) {{ showLogin(); return; }}
     const data = await res.json();
     if (!Array.isArray(data.tools) || data.tools.length === 0) {{
       container.innerHTML = '<p>Aucun outil disponible.</p>';
@@ -784,7 +986,7 @@ async function postTool(toolId, params, userConfirmed, token) {{
   }}
   const res = await fetch('/tool', {{
     method: 'POST',
-    headers: {{ 'Content-Type': 'application/json' }},
+    headers: authHeaders(),
     body: JSON.stringify(body)
   }});
   return await res.json();
@@ -831,8 +1033,9 @@ function escapeHtml(text) {{
   return div.innerHTML;
 }}
 
-loadStatus();
-loadTools();
+// L'interface démarre en mode connecté : les requêtes sont refusées
+// (401) tant qu'aucune session n'a été ouverte.
+showLogin();
 </script>
 </body>
 </html>"""
@@ -853,11 +1056,11 @@ loadTools();
         status = 200 if "error" not in payload else 503
         self._send_json(status, payload)
 
-    def _handle_run_tool(self, data: dict[str, Any]) -> None:
+    def _handle_run_tool(self, data: dict[str, Any], session: WebSession) -> None:
         if self.app is None:
             self._send_json(500, {"error": "Application non initialisée"})
             return
-        payload = self.app.run_tool(data)
+        payload = self.app.run_tool(data, session)
         # Une demande de confirmation est une réponse normale du protocole
         # (200 + jeton), pas une erreur : le client doit pouvoir confirmer.
         if payload.get("confirmation_required"):
@@ -869,15 +1072,148 @@ loadTools();
             return
         self._send_json(200, payload)
 
-    def _handle_list_missions(self) -> None:
+    def _reject(self, status: int, message: str) -> None:
+        """Refuser une requête sans effet de bord.
+
+        Le corps de la requête est d'abord **consommé et jeté** (dans la
+        limite de taille autorisée) : sans cela, le client qui écrit encore
+        son corps voit sa connexion réinitialisée et ne peut pas lire la
+        réponse de refus. La requête reste sans effet de bord : le corps
+        n'est jamais interprété.
+
+        La connexion est ensuite fermée pour éviter qu'une requête suivante
+        ne soit interprétée à partir d'octets non consommés.
+        """
+        self._drain_body()
+        self.close_connection = True
+        self._send_json(status, {"error": message})
+
+    def _drain_body(self) -> None:
+        """Lire et jeter le corps annoncé, dans la limite de taille autorisée.
+
+        Appelé uniquement lorsqu'un refus intervient **avant** la lecture du
+        corps (contrôle d'origine, type de contenu) : le client peut ainsi
+        lire la réponse de refus au lieu de voir sa connexion réinitialisée.
+
+        Un corps plus volumineux que la limite n'est **pas** lu : le
+        serveur refuse alors avant toute lecture (invariant S-004).
+        """
+        if getattr(self, "_body_consumed", False):
+            # Le corps a déjà été lu : il ne reste rien à consommer.
+            return
+        raw_length = self.headers.get("Content-Length")
+        if raw_length is None:
+            return
+        try:
+            length = int(raw_length)
+        except (TypeError, ValueError):
+            return
+        if length <= 0 or length > MAX_BODY_BYTES:
+            return
+        remaining = length
+        try:
+            while remaining > 0:
+                chunk = self.rfile.read(min(remaining, 65536))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except (TimeoutError, OSError):
+            return
+        self._body_consumed = True
+
+    def _check_origin(self) -> tuple[bool, str]:
+        """Vérifier l'origine de la requête (protection CSRF de niveau 1).
+
+        - un ``Origin`` présent doit figurer dans la liste des origines
+          autorisées ;
+        - à défaut, un ``Referer`` présent doit l'être aussi ;
+        - en l'absence des deux, la requête est admise **à ce stade** : elle
+          doit alors satisfaire les contrôles de session authentifiée et de
+          jeton CSRF, qu'un site tiers ne peut pas obtenir.
+        """
+        if self.app is None:
+            return False, "Application non initialisée."
+        origin = self.headers.get("Origin")
+        referer = self.headers.get("Referer")
+        host = self.headers.get("Host")
+        return self.app.origin_policy.check(origin, referer, host)
+
+    def _check_content_type(self) -> bool:
+        """Vérifier que le corps de la requête est du JSON.
+
+        Un contenu de type ``text/plain`` (ou absent) permet à un navigateur
+        d'émettre une requête « simple » sans préflight CORS : c'est
+        précisément le vecteur utilisé par l'attaque P1-6-03.
+        """
+        raw = self.headers.get("Content-Type") or ""
+        media_type = raw.split(";", 1)[0].strip().lower()
+        return media_type == "application/json"
+
+    def _require_session(self) -> Optional[WebSession]:
+        """Exiger une session web authentifiée.
+
+        Retourne la session, ou None après avoir envoyé un refus.
+        """
+        if self.app is None:
+            self._reject(500, "Application non initialisée.")
+            return None
+        if not self.app.authenticator.is_configured:
+            # Fermé par défaut : sans identifiant configuré, aucune route
+            # sensible n'est accessible.
+            self._reject(
+                403,
+                "Authentification non configuree : l'interface web est fermee.",
+            )
+            return None
+        session_id = self.headers.get(SESSION_HEADER) or ""
+        session = self.app.authenticator.authenticate(session_id)
+        if session is None:
+            self._reject(401, "Session absente ou expiree : connectez-vous.")
+            return None
+        return session
+
+    def _check_csrf(self, session: WebSession) -> bool:
+        """Vérifier le jeton CSRF présenté par le client."""
+        if self.app is None:
+            return False
+        token = self.headers.get(CSRF_HEADER) or ""
+        return self.app.authenticator.verify_csrf(session, token)
+
+    def _handle_login(self, data: dict[str, Any]) -> None:
+        """Échanger un jeton d'accès contre une session web authentifiée."""
         if self.app is None:
             self._send_json(500, {"error": "Application non initialisée"})
             return
-        payload = self.app.list_missions()
+        token = data.get("token", "")
+        if not isinstance(token, str) or not token.strip():
+            self._send_json(400, {"error": "Jeton d'accès manquant."})
+            return
+        try:
+            session = self.app.authenticator.login(
+                token.strip(), client_address=self.client_address[0]
+            )
+        except WebAuthError as exc:
+            self._send_json(401, {"error": str(exc)})
+            return
+        self._send_json(
+            200,
+            {
+                "session_id": session.session_id,
+                "csrf_token": session.csrf_token,
+                "user_id": session.user_id,
+                "expires_at": session.expires_at,
+            },
+        )
+
+    def _handle_list_missions(self, session: WebSession) -> None:
+        if self.app is None:
+            self._send_json(500, {"error": "Application non initialisée"})
+            return
+        payload = self.app.list_missions(session)
         status = 200 if "error" not in payload else 503
         self._send_json(status, payload)
 
-    def _handle_mission_detail(self, path: str) -> None:
+    def _handle_mission_detail(self, path: str, session: WebSession) -> None:
         if self.app is None:
             self._send_json(500, {"error": "Application non initialisée"})
             return
@@ -885,42 +1221,48 @@ loadTools();
         if not mission_id:
             self._send_json(404, {"error": "Mission inconnue"})
             return
-        payload = self.app.mission_detail(mission_id)
+        payload = self.app.mission_detail(mission_id, session)
         status = 200 if "error" not in payload else 404
         self._send_json(status, payload)
 
-    def _handle_create_mission(self, data: dict[str, Any]) -> None:
+    def _handle_create_mission(
+        self, data: dict[str, Any], session: WebSession
+    ) -> None:
         if self.app is None:
             self._send_json(500, {"error": "Application non initialisée"})
             return
-        payload = self.app.create_mission(data.get("objective", ""))
+        payload = self.app.create_mission(data.get("objective", ""), session)
         status = 200 if "error" not in payload else 400
         self._send_json(status, payload)
 
-    def _handle_mission_authorize(self, path: str, data: dict[str, Any]) -> None:
+    def _handle_mission_authorize(
+        self, path: str, data: dict[str, Any], session: WebSession
+    ) -> None:
         if self.app is None:
             self._send_json(500, {"error": "Application non initialisée"})
             return
         mission_id = path.split("/")[2]
-        payload = self.app.authorize_mission(mission_id, data)
-        status = 200 if "error" not in payload else 400
+        payload = self.app.authorize_mission(mission_id, data, session)
+        status = 200 if "error" not in payload else 403
         self._send_json(status, payload)
 
-    def _handle_mission_answer(self, path: str, data: dict[str, Any]) -> None:
+    def _handle_mission_answer(
+        self, path: str, data: dict[str, Any], session: WebSession
+    ) -> None:
         if self.app is None:
             self._send_json(500, {"error": "Application non initialisée"})
             return
         mission_id = path.split("/")[2]
-        payload = self.app.answer_mission(mission_id, data)
-        status = 200 if "error" not in payload else 400
+        payload = self.app.answer_mission(mission_id, data, session)
+        status = 200 if "error" not in payload else 403
         self._send_json(status, payload)
 
-    def _handle_mission_cancel(self, path: str) -> None:
+    def _handle_mission_cancel(self, path: str, session: WebSession) -> None:
         if self.app is None:
             self._send_json(500, {"error": "Application non initialisée"})
             return
         mission_id = path.split("/")[2]
-        payload = self.app.cancel_mission(mission_id)
+        payload = self.app.cancel_mission(mission_id, session)
         status = 200 if "error" not in payload else 404
         self._send_json(status, payload)
 

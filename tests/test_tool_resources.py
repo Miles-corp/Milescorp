@@ -19,7 +19,7 @@ from multiprocessing.queues import Queue as QueueClass
 from unittest import mock
 
 from app.tools.audit import AuditLogger
-from app.tools.engine import ToolEngine
+from app.tools.engine import ToolEngine, _make_queue
 from app.tools.policy import ToolPolicy
 from app.tools.registry import ToolDefinition, ToolRegistry
 
@@ -53,12 +53,17 @@ def _engine_with(tool: ToolDefinition) -> ToolEngine:
 
 
 class _QueueTracker:
-    """Enregistre les files créées et leur fermeture."""
+    """Enregistre les files créées et leur fermeture.
+
+    Le moteur crée ses files via ``app.tools.engine._make_queue`` : c'est
+    ce point d'entrée qui est substitué, afin que la file testée et le
+    processus enfant appartiennent bien au même contexte multiprocessing.
+    """
 
     def __init__(self) -> None:
         self.created: list[object] = []
         self.closed: list[object] = []
-        self._real_factory = multiprocessing.Queue
+        self._real_factory = _make_queue
         self._real_close = QueueClass.close
 
     def _factory(self, *args: object, **kwargs: object):
@@ -77,7 +82,7 @@ class _QueueTracker:
             real_close(queue_obj)  # type: ignore[arg-type]
 
         self._patcher_factory = mock.patch(
-            "app.tools.engine.multiprocessing.Queue", self._factory
+            "app.tools.engine._make_queue", self._factory
         )
         self._patcher_close = mock.patch.object(
             QueueClass, "close", tracking_close

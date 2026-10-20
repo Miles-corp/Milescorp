@@ -76,6 +76,10 @@ class Settings:
         "mission_max_steps": 12,
         "mission_max_attempts": 2,
         "mission_max_duration_seconds": 120,
+        # Interface web : authentification et contrôle d'origine (Phase 6.1)
+        "web_auth_token": "",
+        "web_users_file": "",
+        "web_allowed_origins": "",
     }
 
     def __init__(self, config_path: str | None = None) -> None:
@@ -137,6 +141,10 @@ class Settings:
             "MILES_MISSION_MAX_STEPS": "mission_max_steps",
             "MILES_MISSION_MAX_ATTEMPTS": "mission_max_attempts",
             "MILES_MISSION_MAX_DURATION_SECONDS": "mission_max_duration_seconds",
+            # Interface web : authentification et contrôle d'origine (Phase 6.1)
+            "MILES_WEB_AUTH_TOKEN": "web_auth_token",
+            "MILES_WEB_USERS_FILE": "web_users_file",
+            "MILES_WEB_ALLOWED_ORIGINS": "web_allowed_origins",
             # Secrets : jamais codés en dur, lus uniquement depuis l'environnement
             "MILES_REMOTE_API_KEY": "remote_api_key",
             "MILES_LOCAL_API_KEY": "local_api_key",

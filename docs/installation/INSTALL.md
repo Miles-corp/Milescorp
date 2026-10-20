@@ -127,6 +127,43 @@ humaine explicite**, liée à la session courante et à la mission. Cette
 autorisation expire, son nombre d'utilisations est borné et elle ne peut pas
 être rejouée dans un autre contexte.
 
+## 3quinquies. Interface web : authentification et contrôle d'origine (Phase 6.1)
+
+Depuis la Phase 6.1, l'interface web **exige une authentification**. Le
+contrôle d'origine seul n'est pas une protection CSRF suffisante : un site
+tiers ouvert dans le navigateur de l'utilisateur pouvait émettre des requêtes
+« simples » (`Content-Type: text/plain`, sans préflight CORS) vers les routes
+locales et déclencher l'exécution d'un outil ou l'écriture d'un souvenir.
+
+| Variable | Défaut | Rôle |
+|----------|--------|------|
+| `MILES_WEB_AUTH_TOKEN` | vide | Jeton d'accès de l'interface web (utilisateur « local ») |
+| `MILES_WEB_USERS_FILE` | vide | Fichier JSON `{"utilisateur": "jeton"}` pour plusieurs utilisateurs |
+| `MILES_WEB_ALLOWED_ORIGINS` | vide | Origines autorisées, séparées par des virgules |
+
+**Comportement :**
+
+- `POST /session` échange un jeton d'accès contre une **session par client**
+  (identifiant opaque, jeton CSRF distinct, expiration de 30 minutes). Les
+  requêtes suivantes doivent porter les en-têtes `X-MILES-Session` et
+  `X-MILES-CSRF`.
+- Les requêtes modifiantes doivent être en `application/json` et provenir
+  d'une origine autorisée (`Origin`, ou `Referer` à défaut). Une origine
+  étrangère est refusée (403).
+- Les routes de mission ne sont visibles et approuvables que par
+  l'**utilisateur propriétaire** de la mission, et l'approbation exige le
+  jeton d'approbation lié à la demande (à usage unique, expirant).
+- **Si aucun jeton n'est configuré, l'interface web est fermée** : les routes
+  sensibles répondent `403`. `python miles.py --web` génère alors un jeton
+  et l'affiche une seule fois dans le terminal.
+- Le fichier d'utilisateurs est confiné aux racines autorisées (répertoire du
+  projet et dossier `data/`).
+
+L'interface web reste **strictement locale** (`127.0.0.1` uniquement) et
+n'expose **aucun** en-tête CORS : le contrôle d'origine est une défense
+complémentaire, la protection principale est le jeton CSRF lié à la session
+authentifiée.
+
 ## 3ter. Sources de configuration et variables reconnues
 
 MILES lit sa configuration depuis quatre sources. En cas de conflit, la
@@ -150,6 +187,7 @@ Seules les variables `MILES_*` listées ci-dessous sont lues depuis le fichier `
 | Mémoire de souvenirs (4) | `MILES_MEMORY_ENABLED`, `MILES_MEMORY_DB_PATH`, `MILES_MEMORY_MAX_MEMORIES_IN_CONTEXT`, `MILES_MEMORY_MAX_CONTENT_LENGTH` |
 | Historique de conversation (2) | `MILES_CONVERSATION_PERSIST`, `MILES_CONVERSATION_DB_PATH` |
 | Orchestrateur de missions (6) | `MILES_MISSION_ENABLED`, `MILES_MISSION_PERSIST`, `MILES_MISSION_DB_PATH`, `MILES_MISSION_MAX_STEPS`, `MILES_MISSION_MAX_ATTEMPTS`, `MILES_MISSION_MAX_DURATION_SECONDS` |
+| Interface web : accès et origine (3) | `MILES_WEB_AUTH_TOKEN`, `MILES_WEB_USERS_FILE`, `MILES_WEB_ALLOWED_ORIGINS` |
 
 ### Variables de chemin de fichier (lues uniquement de l'environnement)
 
