@@ -15,6 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional
 
+from app.memory.transcript import TranscriptError
+
 if TYPE_CHECKING:  # pragma: no cover — import de type uniquement
     # Import différé : app.memory ré-exporte Conversation, ce qui créerait un
     # cycle si l'import était fait à l'exécution.
@@ -77,22 +79,41 @@ class Conversation:
         self,
         transcript: "ConversationTranscript",
         conversation_id: Optional[str] = None,
-    ) -> None:
+    ) -> str:
         """Adosser la conversation à un transcripteur.
 
-        Si ``conversation_id`` est fourni, la conversation correspondante est
-        restaurée en mémoire. Sinon, une nouvelle conversation est créée.
+        Si ``conversation_id`` est fourni et correspond à une conversation
+        existante, elle est restaurée en mémoire. Si l'identifiant est
+        fourni mais n'existe pas, une **nouvelle** conversation est créée
+        avec un véritable identifiant : un identifiant fantôme n'est
+        jamais conservé, afin qu'aucun message ne puisse être écrit dans
+        une conversation inexistante.
+
+        Retourne :
+            "unavailable" : aucun transcripteur utilisable ;
+            "created"     : une nouvelle conversation a été créée ;
+            "restored"    : la conversation demandée a été restaurée ;
+            "recreated"   : l'identifiant demandé était inconnu, une
+                            nouvelle conversation a été créée.
         """
         self.transcript = transcript
         if transcript is None or not transcript.is_available:
             self.conversation_id = None
-            return
+            return "unavailable"
 
         if conversation_id is None:
             self.conversation_id = transcript.create_conversation()
-        else:
-            self.conversation_id = conversation_id
-            self.restore()
+            return "created"
+
+        # L'identifiant doit correspondre à une conversation EXISTANTE.
+        existing = transcript.get_conversation(conversation_id)
+        if existing is None:
+            self.conversation_id = transcript.create_conversation()
+            return "recreated"
+
+        self.conversation_id = conversation_id
+        self.restore()
+        return "restored"
 
     def restore(self, conversation_id: Optional[str] = None) -> int:
         """Restaurer une conversation depuis la persistance.
@@ -125,23 +146,46 @@ class Conversation:
 
     # --- Messages ---
 
-    def add_user_message(self, content: str) -> None:
-        """Ajouter un message de l'utilisateur à l'historique."""
+    def add_user_message(self, content: str) -> bool:
+        """Ajouter un message de l'utilisateur à l'historique.
+
+        Retourne True si le message a pu être persisté (ou si aucune
+        persistance n'est active), False si l'enregistrement a échoué :
+        l'appelant peut alors informer l'utilisateur plutôt que de
+        prétendre que le message a été enregistré.
+        """
         self._messages.append(Message(role="user", content=content))
-        self._persist("user", content)
+        return self._persist("user", content)
 
-    def add_assistant_message(self, content: str) -> None:
-        """Ajouter un message de l'assistant à l'historique."""
+    def add_assistant_message(self, content: str) -> bool:
+        """Ajouter un message de l'assistant à l'historique.
+
+        Retourne True si le message a pu être persisté, False sinon.
+        """
         self._messages.append(Message(role="assistant", content=content))
-        self._persist("assistant", content)
+        return self._persist("assistant", content)
 
-    def _persist(self, role: str, content: str) -> None:
-        """Enregistrer un message dans la transcription, si elle est active."""
+    def _persist(self, role: str, content: str) -> bool:
+        """Enregistrer un message dans la transcription, si elle est active.
+
+        Retourne False si l'enregistrement a échoué. Aucune exception n'est
+        laissée remonter : une erreur de persistance ne doit pas terminer
+        la session de conversation.
+        """
         if not self.is_persistent:
-            return
+            return True
         assert self.transcript is not None
         assert self.conversation_id is not None
-        self.transcript.save_message(self.conversation_id, role, content)
+        try:
+            message_id = self.transcript.save_message(
+                self.conversation_id, role, content
+            )
+        except TranscriptError:
+            # Rôle invalide ou anomalie de persistance : le message reste
+            # en mémoire, mais il n'est PAS enregistré. L'appelant est
+            # informé du retour False.
+            return False
+        return message_id is not None
 
     def get_context(self) -> list[dict[str, str]]:
         """Retourner le contexte à transmettre au fournisseur IA.
@@ -158,13 +202,27 @@ class Conversation:
         context.extend(m.to_dict() for m in recent)
         return context
 
-    def clear(self) -> None:
+    def clear(self) -> bool:
         """Vider l'historique de la session.
 
-        L'historique persisté n'est pas modifié : la conversation reste
-        restaurable après un redémarrage.
+        Les messages sont également supprimés de la transcription : sinon
+        ils réapparaîtraient au redémarrage, ce qui donnerait l'illusion
+        d'un effacement incomplet. La conversation elle-même est conservée
+        et reste sélectionnable (vide).
+
+        Retourne True si l'effacement a réussi, False si la suppression
+        persistée a échoué.
         """
         self._messages.clear()
+        if not self.is_persistent:
+            return True
+        assert self.transcript is not None
+        assert self.conversation_id is not None
+        try:
+            self.transcript.delete_messages(self.conversation_id)
+        except Exception:  # noqa: BLE001 — l'effacement mémoire reste effectif
+            return False
+        return True
 
     def __len__(self) -> int:
         return len(self._messages)

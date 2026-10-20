@@ -29,7 +29,8 @@
 | TASK-DEV-005 | MILESTONE-005 : Assistant personnel hybride distant/local | DONE | Agent A |
 | TASK-DEV-006 | MILESTONE-006 : Mémoire persistante locale | DONE | Agent A |
 | TASK-DEV-007 | MILESTONE-007 : Fournisseur local hors ligne (RTX 3050) | TODO | Agent A |
-| TASK-DEV-009 | MILES V1 : Persistance de conversation + fournisseur distant connecté | IN_PROGRESS | Agent A |
+| TASK-DEV-009 | MILES V1 : Persistance de conversation + fournisseur distant connecté | DONE | Agent A |
+| TASK-DEV-010 | Corrections des défauts D-B1 à D-B5 (audit Agent B) | DONE | Agent A |
 | TASK-DEV-008 | Phase 4 : Moteur d'outils sécurisé | DONE | Agent A |
 | TASK-DEV-008 | Phase 3B : validation fonctionnelle (terminal, web, mémoire) | DONE | Agent B |
 

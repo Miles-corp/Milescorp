@@ -154,16 +154,18 @@ def main(argv: list[str] | None = None) -> int:
     restored = 0
     if transcript is not None and transcript.is_available:
         if args.conversation:
-            conversation.attach_transcript(
+            status = conversation.attach_transcript(
                 transcript, conversation_id=args.conversation
             )
-            restored = len(conversation)
-            if restored == 0:
+            if status == "recreated":
                 print(
-                    f"Avertissement : conversation '{args.conversation}' introuvable, "
-                    "une nouvelle conversation est créée.",
+                    f"Avertissement : conversation '{args.conversation}' "
+                    "introuvable. Une nouvelle conversation a été créée : "
+                    f"{conversation.conversation_id}.",
                     file=sys.stderr,
                 )
+            elif status == "restored":
+                restored = len(conversation)
         elif args.new_conversation:
             conversation.attach_transcript(transcript)
         else:
@@ -193,6 +195,11 @@ def main(argv: list[str] | None = None) -> int:
         print("\nFin de saisie. Au revoir !")
         return 0
     finally:
+        # Libération des ressources dans tous les cas (sortie normale,
+        # exception, interruption). La mémoire est fermée après la
+        # conversation : elle n'est plus utilisée à ce stade.
+        if memory is not None:
+            memory.close()
         if transcript is not None:
             transcript.close()
 

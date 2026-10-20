@@ -323,15 +323,23 @@ class TestConversationWithTranscript(_TranscriptFixture):
         self.assertEqual(len(transcript.load_messages(first_id)), 1)
         transcript.close()
 
-    def test_clear_ne_supprime_pas_la_persistance(self) -> None:
+    def test_clear_purge_la_persistance(self) -> None:
+        """/clear efface aussi l'historique persisté.
+
+        Sinon les messages effacés réapparaîtraient au redémarrage, ce qui
+        donnerait l'illusion d'un effacement incomplet.
+        """
         transcript = self._transcript()
         conv = Conversation(history_limit=10)
         conv.attach_transcript(transcript)
         conv.add_user_message("conserve")
-        conv.clear()
-        self.assertEqual(len(conv), 0)
-        # Le message reste restaurable après redémarrage
         self.assertEqual(len(transcript.load_messages(conv.conversation_id)), 1)
+
+        self.assertTrue(conv.clear())
+        self.assertEqual(len(conv), 0)
+        # La conversation existe toujours mais elle est vide
+        self.assertIsNotNone(transcript.get_conversation(conv.conversation_id))
+        self.assertEqual(len(transcript.load_messages(conv.conversation_id)), 0)
         transcript.close()
 
     def test_comportement_apres_echec_de_requete(self) -> None:

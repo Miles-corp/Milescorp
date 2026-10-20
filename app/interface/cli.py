@@ -128,7 +128,11 @@ class CLI:
             return
 
         print(f"\r{response}")
-        self.conversation.add_assistant_message(response)
+        if not self.conversation.add_assistant_message(response):
+            print(
+                "\nAvertissement : la réponse n'a pas pu être enregistrée "
+                "dans l'historique persistant."
+            )
 
     def _handle_command(self, text: str) -> None:
         cmd = text.lower().split()[0] if text.split() else ""
@@ -140,8 +144,13 @@ class CLI:
         elif cmd == "/help":
             print(HELP_TEXT)
         elif cmd == "/clear":
-            self.conversation.clear()
-            print("Historique effacé.")
+            if self.conversation.clear():
+                print("Historique effacé.")
+            else:
+                print(
+                    "Historique effacé en mémoire, mais la suppression de "
+                    "l'historique persisté a échoué."
+                )
         elif cmd == "/provider":
             name = self.provider.name if self.provider else "non configuré"
             print(f"Fournisseur courant : {name}")

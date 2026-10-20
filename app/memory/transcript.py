@@ -18,6 +18,7 @@ Garanties :
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import threading
@@ -26,6 +27,12 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from app.utilities.redaction import sanitize_text
+
+logger = logging.getLogger("miles.transcript")
+if not logger.handlers:
+    # Handler neutre : l'application reste libre de configurer la
+    # journalisation. N'écrit rien par défaut.
+    logger.addHandler(logging.NullHandler())
 
 #: Rôles autorisés dans une transcription.
 VALID_ROLES = ("user", "assistant", "system")
@@ -68,8 +75,18 @@ class ConversationTranscript:
             if db_dir and not os.path.isdir(db_dir):
                 os.makedirs(db_dir, exist_ok=True)
 
-            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            # isolation_level=None : mode autocommit. Les transactions sont
+            # alors explicites (BEGIN IMMEDIATE / COMMIT), ce qui rend le
+            # comportement déterministe et évite les transactions
+            # implicites imbriquées.
+            self._conn = sqlite3.connect(
+                self.db_path, check_same_thread=False, isolation_level=None
+            )
             self._conn.row_factory = sqlite3.Row
+            # Les clés étrangères sont DÉSACTIVÉES par défaut dans SQLite.
+            # Sans ce PRAGMA, la clause "ON DELETE CASCADE" du schéma est
+            # décorative et l'intégrité référentielle n'est pas garantie.
+            self._conn.execute("PRAGMA foreign_keys = ON")
             self._create_schema()
             self._available = True
         except (sqlite3.Error, OSError):
@@ -227,12 +244,17 @@ class ConversationTranscript:
         return str(conversations[0]["id"])
 
     def delete_conversation(self, conversation_id: str) -> bool:
-        """Supprimer une conversation et tous ses messages."""
+        """Supprimer une conversation et tous ses messages.
+
+        L'opération est atomique : la suppression des messages et celle de
+        la conversation ont lieu dans une seule transaction.
+        """
         if not self.is_available:
             return False
         with self._lock:
             assert self._conn is not None
             try:
+                self._conn.execute("BEGIN IMMEDIATE")
                 cursor = self._conn.execute(
                     "DELETE FROM transcript_messages WHERE conversation_id = ?",
                     (conversation_id,),
@@ -243,8 +265,37 @@ class ConversationTranscript:
                 )
                 self._conn.commit()
             except sqlite3.Error:
+                try:
+                    self._conn.rollback()
+                except sqlite3.Error:
+                    pass
                 return False
             return cursor.rowcount > 0
+
+    def delete_messages(self, conversation_id: str) -> int:
+        """Supprimer tous les messages d'une conversation, sans la supprimer.
+
+        Retourne le nombre de messages supprimés. La conversation elle-même
+        est conservée : elle reste sélectionnable et restaurable (vide).
+        """
+        if not self.is_available:
+            return 0
+        with self._lock:
+            assert self._conn is not None
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                cursor = self._conn.execute(
+                    "DELETE FROM transcript_messages WHERE conversation_id = ?",
+                    (conversation_id,),
+                )
+                self._conn.commit()
+                return cursor.rowcount
+            except sqlite3.Error:
+                try:
+                    self._conn.rollback()
+                except sqlite3.Error:
+                    pass
+                return 0
 
     # --- Messages ---
 
@@ -299,11 +350,29 @@ class ConversationTranscript:
                 )
                 self._conn.commit()
                 return int(cursor.lastrowid)
+            except sqlite3.IntegrityError as exc:
+                # Conversation inexistante (violation de clé étrangère) ou
+                # collision de séquence : rien n'est écrit, le message n'est
+                # pas perdu silencieusement car l'appelant reçoit None.
+                try:
+                    self._conn.rollback()
+                except sqlite3.Error:
+                    pass
+                logger.error(
+                    "Refus d'enregistrement d'un message : integrite de la base "
+                    "viollee (%s).",
+                    type(exc).__name__,
+                )
+                return None
             except sqlite3.Error:
                 try:
                     self._conn.rollback()
                 except sqlite3.Error:
                     pass
+                logger.error(
+                    "Erreur SQLite lors de l'enregistrement d'un message : echec "
+                    "de l'ecriture."
+                )
                 return None
 
     def load_messages(self, conversation_id: str) -> list[dict[str, Any]]:

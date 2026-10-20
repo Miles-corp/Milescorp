@@ -84,7 +84,9 @@ class TestMilesMemoryErrorHandling(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             memory = mock_cli.call_args.kwargs["memory"]
             self.assertIsInstance(memory, PersistentMemory)
-            self.assertTrue(memory.is_available)
+            # La mémoire est fermée à la sortie du programme (cycle de vie) :
+            # on vérifie donc l'effet observable, la création de la base.
+            self.assertTrue(os.path.exists(memory.db_path))
             memory.close()
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
