@@ -81,6 +81,32 @@ class TestDocumentedVariablesMatchCode(unittest.TestCase):
             f"Variables reconnues mais non documentées : {sorted(manquantes)}",
         )
 
+    def test_variables_de_chemin_documentees_separement(self) -> None:
+        """D-C2 : les variables de chemin doivent être distinguées des variables
+        lues depuis le fichier `.env`."""
+        self.assertIn("### Variables de chemin de fichier", self.install)
+        # Elles ne doivent pas figurer dans le tableau des variables du .env
+        bloc_env = self.install.split("### Variables de chemin de fichier")[0]
+        # La section des variables lues depuis le .env est celle du tableau
+        # "Variables reconnues" jusqu'a la section des variables de chemin
+        debut_tableau = bloc_env.find("### Variables reconnues")
+        fin_tableau = bloc_env.find("### Variables de chemin de fichier")
+        if debut_tableau >= 0 and fin_tableau >= 0:
+            tableau = bloc_env[debut_tableau:fin_tableau]
+            self.assertNotIn("MILES_ENV_FILE", tableau)
+            self.assertNotIn("MILES_CONFIG", tableau)
+
+    def test_variables_de_chemin_exclusives_environnement_processus(self) -> None:
+        """La documentation doit dire que ces deux variables sont lues
+        exclusivement depuis l'environnement du processus."""
+        for mention in (
+            "exclusivement",
+            "jamais",
+        ):
+            self.assertIn(mention, self.install)
+        section = self.install.split("### Variables de chemin de fichier")[1][:1200]
+        self.assertIn("environnement du processus", section)
+
     def test_sources_de_configuration_documentationnees(self) -> None:
         for mention in (
             "MILES_ENV_FILE",
@@ -157,6 +183,41 @@ class TestConfigurationPriority(unittest.TestCase):
             settings = Settings(config_path=os.path.join(self.tmpdir, "absent.json"))
             self.assertEqual(settings.provider, "remote")
             self.assertEqual(settings.get("history_limit"), 10)
+
+    def test_miles_config_dans_env_ignore(self) -> None:
+        """D-C2 : `MILES_CONFIG` écrit dans le `.env` est sans effet."""
+        import json as _json
+
+        autre = os.path.join(self.tmpdir, "autre.json")
+        with open(autre, "w", encoding="utf-8") as fh:
+            _json.dump({"history_limit": 42}, fh)
+        self._write_env("MILES_CONFIG=%s\n" % autre.replace("\\", "/"))
+        env = {"MILES_ENV_FILE": self.env_path}
+        with mock.patch.dict(os.environ, env):
+            settings = Settings()
+            # Le .env est lu, mais MILES_CONFIG ne l'est pas :
+            # le JSON par défaut est utilisé, pas celui du .env.
+            self.assertEqual(settings.get("history_limit"), 10)
+
+    def test_miles_env_file_dans_env_ignore(self) -> None:
+        """D-C2 : `MILES_ENV_FILE` écrit dans le `.env` est sans effet.
+
+        Le fichier réellement lu est celui désigné par la variable
+        d'environnement du processus, pas celui désigné par le `.env`.
+        """
+        secondaire = os.path.join(self.tmpdir, "secondaire.env")
+        with open(secondaire, "w", encoding="utf-8") as fh:
+            fh.write("MILES_PROVIDER=remote\n")
+        self._write_env(
+            "MILES_PROVIDER=local\nMILES_ENV_FILE=%s\n"
+            % secondaire.replace("\\", "/")
+        )
+        env = {"MILES_ENV_FILE": self.env_path}
+        with mock.patch.dict(os.environ, env):
+            settings = Settings()
+            # Le .env lu est celui de l'environnement du processus,
+            # donc MILES_PROVIDER vaut "local" et non "remote".
+            self.assertEqual(settings.provider, "local")
 
     def test_variable_non_reconnue_ignoree(self) -> None:
         """Une variable non MILES_* du .env n'est ni lue ni injectée."""

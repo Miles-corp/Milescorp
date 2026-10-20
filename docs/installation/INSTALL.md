@@ -114,7 +114,26 @@ Seules les variables `MILES_*` listées ci-dessous sont lues depuis le fichier `
 | Voix (facultative) (1) | `MILES_VOICE_ENABLED` |
 | Mémoire de souvenirs (4) | `MILES_MEMORY_ENABLED`, `MILES_MEMORY_DB_PATH`, `MILES_MEMORY_MAX_MEMORIES_IN_CONTEXT`, `MILES_MEMORY_MAX_CONTENT_LENGTH` |
 | Historique de conversation (2) | `MILES_CONVERSATION_PERSIST`, `MILES_CONVERSATION_DB_PATH` |
-| Chemin des fichiers (2) | `MILES_ENV_FILE` (chemin du `.env`), `MILES_CONFIG` (chemin du JSON) |
+
+### Variables de chemin de fichier (lues uniquement de l'environnement)
+
+Deux variables pilotent le chemin des fichiers de configuration. Elles sont lues
+**exclusivement depuis l'environnement du processus** et ne sont **jamais**
+lues depuis le fichier `.env` :
+
+| Variable | Rôle | Valeur par défaut |
+|----------|------|--------------------|
+| `MILES_ENV_FILE` | Chemin du fichier `.env` | `.env` à la racine du projet |
+| `MILES_CONFIG` | Chemin du fichier de configuration JSON | `config/config.json` |
+
+Pourquoi cette restriction ? `MILES_ENV_FILE` sert à *localiser* le fichier
+`.env` : il doit être connu avant que le `.env` ne soit lu, il ne peut donc
+pas y figurer. `MILES_CONFIG` suit la même logique de cohérence.
+
+Conséquence : écrire `MILES_ENV_FILE` ou `MILES_CONFIG` dans le `.env` est
+**sans effet** — ces valeurs sont ignorées. Pour changer le chemin du JSON
+depuis le `.env`, il faut définir `MILES_CONFIG` dans l'environnement du
+processus (ou passer `--config` au lancement).
 
 ### Variables non reconnues
 
@@ -123,6 +142,10 @@ lue par MILES, ni injectée dans l'environnement du processus, ni transmise
 aux sous-processus. Ce comportement est volontaire (herméneuticité et
 isolation des tests) : le `.env` ne peut pas modifier l'environnement du
 programme.
+
+Sont concernées au premier chef les deux variables de chemin de fichier
+(`MILES_ENV_FILE`, `MILES_CONFIG`) : même écrites dans le `.env`, elles
+restent sans effet.
 
 ### Proxy HTTP/HTTPS
 
@@ -152,8 +175,9 @@ avant de lancer MILES.
 ### Limites de la prise en charge des variables d'environnement
 
 - MILES lit au total 19 variables `MILES_*` : 17 variables de configuration
-  (tableau ci-dessus) et 2 variables de chemin de fichier (`MILES_ENV_FILE`,
-  `MILES_CONFIG`). Aucune autre variable n'est prise en compte.
+  lues depuis le `.env` (tableau ci-dessus) et 2 variables de chemin de fichier
+  (`MILES_ENV_FILE`, `MILES_CONFIG`) lues **uniquement** depuis
+  l'environnement du processus. Aucune autre variable n'est prise en compte.
 - Le fichier `.env` ne sert qu'à fournir ces variables : il ne modifie pas
   l'environnement du processus.
 - Les secrets (`MILES_REMOTE_API_KEY`, `MILES_LOCAL_API_KEY`) ne sont jamais
