@@ -6,13 +6,21 @@ indication de chargement et traitement propre de Ctrl+C / fin de saisie.
 
 from __future__ import annotations
 
+import logging
 import sys
 from typing import Any
 
 from app.ai_providers.base import AIProvider, AIProviderError
+from app.ai_providers.public_errors import public_provider_error, technical_detail
 from app.core.conversation import Conversation
 from app.memory.persistent import PersistentMemory, PersistentMemoryError
 from app.security.validator import ActionValidator, ActionResult
+
+logger = logging.getLogger("miles.cli")
+if not logger.handlers:
+    # Handler neutre : l'application reste libre de configurer la
+    # journalisation. N'écrit rien par défaut.
+    logger.addHandler(logging.NullHandler())
 
 HELP_TEXT = """\nCommandes disponibles :
   /help        Afficher cette aide
@@ -119,12 +127,19 @@ class CLI:
         try:
             response = self.provider.chat(context)
         except AIProviderError as exc:
-            print(f"\nErreur du fournisseur IA : {exc}")
+            # Message public : aucun détail technique ni secret affiché.
+            # Le détail technique est conservé dans les journaux locaux,
+            # expurgé de tout secret.
+            logger.error(
+                "Echec de l'appel au fournisseur IA : %s", technical_detail(exc)
+            )
+            print(f"\n{public_provider_error(exc)}")
             print("La conversation est conservée. Vous pouvez réessayer ou changer de fournisseur.")
             # Ne pas retirer le message utilisateur de l'historique : la session est préservée
             return
         except Exception as exc:  # noqa: BLE001 — ne pas faire planter l'interface
-            print(f"\nErreur inattendue : {exc}")
+            logger.error("Erreur interne : %s", technical_detail(exc))
+            print("\nErreur interne du service.")
             return
 
         print(f"\r{response}")

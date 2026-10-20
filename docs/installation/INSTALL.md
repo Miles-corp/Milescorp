@@ -92,6 +92,76 @@ python miles.py --list-conversations  # liste les conversations enregistrées
 python miles.py --no-persist          # mode éphémère, rien n'est écrit
 ```
 
+## 3ter. Sources de configuration et variables reconnues
+
+MILES lit sa configuration depuis quatre sources. En cas de conflit, la
+priorité est la suivante (de la plus forte à la plus faible) :
+
+1. **Variables d'environnement du processus** (priorité la plus haute)
+2. **Fichier `.env`** (chemin : `MILES_ENV_FILE`, défaut `.env` à la racine du projet)
+3. **Fichier JSON** (`--config <chemin>`, sinon `MILES_CONFIG`, sinon `config/config.json`)
+4. **Valeurs par défaut** intégrées au code
+
+### Variables reconnues
+
+Seules les variables `MILES_*` listées ci-dessous sont lues depuis le fichier `.env` :
+
+| Catégorie | Variables |
+|-----------|-----------|
+| Fournisseur (7) | `MILES_PROVIDER`, `MILES_REMOTE_BASE_URL`, `MILES_REMOTE_MODEL`, `MILES_REMOTE_TIMEOUT`, `MILES_LOCAL_BASE_URL`, `MILES_LOCAL_MODEL`, `MILES_LOCAL_TIMEOUT` |
+| Secrets (2) | `MILES_REMOTE_API_KEY`, `MILES_LOCAL_API_KEY` |
+| Contexte (1) | `MILES_HISTORY_LIMIT` |
+| Voix (facultative) (1) | `MILES_VOICE_ENABLED` |
+| Mémoire de souvenirs (4) | `MILES_MEMORY_ENABLED`, `MILES_MEMORY_DB_PATH`, `MILES_MEMORY_MAX_MEMORIES_IN_CONTEXT`, `MILES_MEMORY_MAX_CONTENT_LENGTH` |
+| Historique de conversation (2) | `MILES_CONVERSATION_PERSIST`, `MILES_CONVERSATION_DB_PATH` |
+| Chemin des fichiers (2) | `MILES_ENV_FILE` (chemin du `.env`), `MILES_CONFIG` (chemin du JSON) |
+
+### Variables non reconnues
+
+Toute autre variable présente dans le `.env` est **ignorée** : elle n'est ni
+lue par MILES, ni injectée dans l'environnement du processus, ni transmise
+aux sous-processus. Ce comportement est volontaire (herméneuticité et
+isolation des tests) : le `.env` ne peut pas modifier l'environnement du
+programme.
+
+### Proxy HTTP/HTTPS
+
+Le proxy doit être défini dans l'**environnement du processus**, pas dans le
+`.env` : les requêtes HTTP de MILES passent par `urllib`, qui lit les
+variables `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` de l'environnement.
+
+```bash
+# Linux / Debian
+export HTTP_PROXY=http://proxy.exemple:3128
+export HTTPS_PROXY=http://proxy.exemple:3128
+python3 miles.py
+```
+
+```powershell
+# Windows
+$env:HTTP_PROXY="http://proxy.exemple:3128"
+$env:HTTPS_PROXY="http://proxy.exemple:3128"
+python miles.py
+```
+
+Une variable `HTTP_PROXY` écrite dans `.env` sera **sans effet**. Si un proxy
+doit être configuré de façon persistante sans passer par le shell, il faut
+utiliser la variable d'environnement du système ou un wrapper qui l'exporte
+avant de lancer MILES.
+
+### Limites de la prise en charge des variables d'environnement
+
+- MILES lit au total 19 variables `MILES_*` : 17 variables de configuration
+  (tableau ci-dessus) et 2 variables de chemin de fichier (`MILES_ENV_FILE`,
+  `MILES_CONFIG`). Aucune autre variable n'est prise en compte.
+- Le fichier `.env` ne sert qu'à fournir ces variables : il ne modifie pas
+  l'environnement du processus.
+- Les secrets (`MILES_REMOTE_API_KEY`, `MILES_LOCAL_API_KEY`) ne sont jamais
+  journalisés ni écrits dans l'historique de conversation.
+- Une variable booléenne doit valoir l'une des valeurs `true` / `1` / `yes` /
+  `on` (ou `false` / `0` / `no` / `off`) ; toute autre valeur provoque une
+  erreur de configuration explicite au démarrage.
+
 ## 4. Lancement
 
 ### Mode texte (dépendances standard uniquement)

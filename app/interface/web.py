@@ -19,6 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Optional
 
 from app.ai_providers.base import AIProvider, AIProviderError
+from app.ai_providers.public_errors import public_provider_error as _public_provider_error
 from app.config.settings import Settings
 from app.core.conversation import Conversation
 from app.memory.persistent import PersistentMemory, PersistentMemoryError
@@ -95,21 +96,17 @@ def assert_local_host(host: str) -> str:
 
 # Motifs de secrets : définis dans app/utilities/redaction.py (source unique
 # de vérité, partagée avec la persistance des conversations).
+# La classification publique des erreurs fournisseur est définie dans
+# app/ai_providers/public_errors.py (source unique, partagée avec le CLI).
 
 
 def public_provider_error(exc: Exception) -> str:
     """Retourner un message public sûr pour une erreur de fournisseur.
 
-    Le message d'origine n'est jamais transmis : il peut contenir une clé
-    d'API, un jeton ou une URL interne. Seule une classification contrôlée
-    est exposée au client.
+    Ré-exporté depuis ``app.ai_providers.public_errors`` afin que l'interface
+    terminal et l'interface web exposent exactement le même message.
     """
-    detail = str(exc).lower()
-    if "invalide" in detail:
-        return "Erreur du fournisseur IA : réponse invalide du fournisseur."
-    if "indisponible" in detail:
-        return "Erreur du fournisseur IA : fournisseur indisponible."
-    return "Erreur du fournisseur IA : échec de la communication avec le fournisseur."
+    return _public_provider_error(exc)
 
 
 class WebApp:
