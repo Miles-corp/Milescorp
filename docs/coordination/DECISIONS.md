@@ -57,3 +57,16 @@ Convention : chaque décision reçoit un ID `DEC-###` (ou `D-###`), une date, un
 - **Contexte** : MILESTONE-005 demande une interface web pour converser avec MILES.
 - **Décision** : Utiliser `http.server` de la bibliothèque standard Python (zéro dépendance supplémentaire). Serveur sur `127.0.0.1` uniquement par défaut. Routes : `/` (page d'accueil + formulaire), `/message` (POST), `/status` (GET), `/memory` (GET), `/remember` (POST), `/forget` (POST). Séparation claire entre serveur web, logique applicative (WebApp) et fournisseurs IA. Évolution vers Flask possible ultérieurement.
 - **Statut** : ACCEPTEE
+
+## DEC-008 — Push automatique sur les branches de travail (amende DEC-004)
+
+- **Date** : 2026-10-20
+- **Auteur** : Agent B (décision de l'utilisateur)
+- **Contexte** : DEC-004 imposait un accord explicite avant toute publication, après un incident de publication non autorisée (commits et push créés hors du contrôle de l'agent). La coordination entre les deux agents est asynchrone et s'appuie sur GitHub : les rapports, correctifs et constats doivent donc pouvoir circuler sans attente. L'utilisateur a explicitement activé le push automatique.
+- **Décision** :
+  1. L'agent pousse **automatiquement**, après chaque commit, la branche de travail portant le **même nom** sur `origin` (push simple, jamais forcé). L'accord explicite préalable n'est plus requis pour ces push : **DEC-004 est amendé sur ce point**.
+  2. Restent **soumis à autorisation explicite** : push sur `main`, création de Pull Request, fusion, suppression de branche ou de référence distante, push forcé, réécriture d'historique (`reset --hard`, `rebase` destructif, `clean -fd`).
+  3. Le push est **non forcé** : en cas de divergence, Git refuse la publication, ce qui protège le travail d'un autre agent. L'agent signale la divergence au lieu de la contourner.
+  4. Aucun secret, aucun fichier `.env`, `.db`, cache ou donnée personnelle n'est commité ni publié. Le contrôle de secrets précède tout push.
+  5. L'agent déclare dans son compte rendu le hash exact publié, la branche distante concernée et le résultat du contrôle de secrets.
+- **Statut** : ACCEPTEE
