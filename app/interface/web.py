@@ -32,6 +32,35 @@ if not logger.handlers:
 
 REDACTED = "[REDACTED]"
 
+# Adresse d'écoute du serveur web. Elle est imposée par le code et n'est
+# pas configurable : le service MILES doit rester strictement local, jamais
+# joignable depuis le réseau local ou Internet.
+LOCAL_ONLY_HOST = "127.0.0.1"
+
+
+class WebServerSecurityError(Exception):
+    """Refus de démarrer le serveur web sur une adresse non locale."""
+
+
+def assert_local_host(host: str) -> str:
+    """Vérifier qu'une adresse d'écoute est strictement locale.
+
+    Seule l'adresse 127.0.0.1 est acceptée. Toute autre adresse est
+    refusée explicitement, y compris 0.0.0.0, :: et les adresses du
+    réseau local.
+    """
+    if not isinstance(host, str):
+        raise WebServerSecurityError(
+            f"Adresse d'écoute invalide : {host!r}. Le serveur web MILES "
+            f"n'écoute que sur {LOCAL_ONLY_HOST}."
+        )
+    if host != LOCAL_ONLY_HOST:
+        raise WebServerSecurityError(
+            f"Adresse d'écoute refusée : {host!r}. Le serveur web MILES est "
+            f"strictement local et n'écoute que sur {LOCAL_ONLY_HOST}."
+        )
+    return host
+
 # Motifs de secrets qui ne doivent jamais quitter le processus.
 _SECRET_PATTERNS = (
     # Clés de type "sk-..." (fournisseur IA distant).
@@ -473,23 +502,46 @@ loadStatus();
 
 
 class MilesWebServer:
-    """Serveur web MILES sur 127.0.0.1 par défaut."""
+    """Serveur web MILES, strictement local (127.0.0.1 uniquement).
+
+    L'adresse d'écoute est imposée par le code et n'est pas configurable.
+    Toute tentative de démarrage sur une adresse non locale est refusée
+    explicitement, que ce soit via le constructeur ou via une affectation
+    directe de l'attribut `host`.
+    """
+
+    #: Adresse d'écoute autorisée.
+    ALLOWED_HOST = LOCAL_ONLY_HOST
 
     def __init__(
         self,
         app: WebApp,
-        host: str = "127.0.0.1",
+        host: str = LOCAL_ONLY_HOST,
         port: int = 8080,
     ) -> None:
         self.app = app
+        # Passe par la propriété de validation : toute adresse non locale
+        # est refusée dès la construction.
         self.host = host
         self.port = port
         self._server: Optional[ThreadingHTTPServer] = None
 
+    @property
+    def host(self) -> str:
+        """Adresse d'écoute du serveur (toujours locale)."""
+        return self._host
+
+    @host.setter
+    def host(self, value: str) -> None:
+        self._host = assert_local_host(value)
+
     def start(self) -> None:
+        # Revalidation avant toute liaison : `host` est un attribut public,
+        # il pourrait avoir été modifié par affectation directe.
+        host = assert_local_host(self.host)
         MilesHandler.app = self.app
-        self._server = ThreadingHTTPServer((self.host, self.port), MilesHandler)
-        print(f"Interface web MILES sur http://{self.host}:{self.port}")
+        self._server = ThreadingHTTPServer((host, self.port), MilesHandler)
+        print(f"Interface web MILES sur http://{host}:{self.port}")
         self._server.serve_forever()
 
     def stop(self) -> None:

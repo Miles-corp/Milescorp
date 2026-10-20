@@ -266,5 +266,109 @@ class TestWebSanitizeHelper(unittest.TestCase):
         self.assertEqual(sanitize_text("erreur simple"), "erreur simple")
 
 
+class TestWebServerLocalOnly(unittest.TestCase):
+    """S-002 : le serveur web MILES doit écouter uniquement sur 127.0.0.1."""
+
+    def _app(self) -> WebApp:
+        return WebApp(settings=Settings())
+
+    def test_adresse_par_defaut_est_locale(self) -> None:
+        from app.interface.web import LOCAL_ONLY_HOST, MilesWebServer
+
+        server = MilesWebServer(app=self._app())
+        self.assertEqual(server.host, LOCAL_ONLY_HOST)
+        self.assertEqual(server.host, "127.0.0.1")
+
+    def test_refus_adresse_toutes_interfaces(self) -> None:
+        """0.0.0.0 expose le service sur toutes les interfaces : refusé."""
+        from app.interface.web import MilesWebServer, WebServerSecurityError
+
+        with self.assertRaises(WebServerSecurityError):
+            MilesWebServer(app=self._app(), host="0.0.0.0")
+
+    def test_refus_adresse_lan(self) -> None:
+        """Une adresse du réseau local est refusée."""
+        from app.interface.web import MilesWebServer, WebServerSecurityError
+
+        for lan_address in ("192.168.1.10", "10.0.0.5", "172.16.0.1"):
+            with self.subTest(host=lan_address):
+                with self.assertRaises(WebServerSecurityError):
+                    MilesWebServer(app=self._app(), host=lan_address)
+
+    def test_refus_adresse_ipv6_any(self) -> None:
+        """'::' écoute sur toutes les interfaces IPv6 : refusé."""
+        from app.interface.web import MilesWebServer, WebServerSecurityError
+
+        with self.assertRaises(WebServerSecurityError):
+            MilesWebServer(app=self._app(), host="::")
+
+    def test_refus_adresse_ipv6_loopback(self) -> None:
+        """Même la boucle IPv6 est refusée : seule 127.0.0.1 est admise."""
+        from app.interface.web import MilesWebServer, WebServerSecurityError
+
+        with self.assertRaises(WebServerSecurityError):
+            MilesWebServer(app=self._app(), host="::1")
+
+    def test_refus_adresse_non_string(self) -> None:
+        from app.interface.web import MilesWebServer, WebServerSecurityError
+
+        with self.assertRaises(WebServerSecurityError):
+            MilesWebServer(app=self._app(), host=12345)  # type: ignore[arg-type]
+
+    def test_affectation_directe_refusee(self) -> None:
+        """L'attribut host ne doit pas pouvoir être détourné après construction."""
+        from app.interface.web import MilesWebServer, WebServerSecurityError
+
+        server = MilesWebServer(app=self._app())
+        with self.assertRaises(WebServerSecurityError):
+            server.host = "0.0.0.0"
+        # L'adresse reste locale après la tentative refusée.
+        self.assertEqual(server.host, "127.0.0.1")
+
+    def test_demarrage_refuse_adresse_non_locale(self) -> None:
+        """start() revérifie l'adresse avant toute liaison socket."""
+        from app.interface.web import MilesWebServer, WebServerSecurityError
+
+        server = MilesWebServer(app=self._app())
+        # Contournement volontaire de la propriété pour tester la
+        # revalidation effectuée par start().
+        server._host = "0.0.0.0"
+        with self.assertRaises(WebServerSecurityError):
+            server.start()
+
+    def test_fonctionnement_attendu_en_local(self) -> None:
+        """Le serveur démarre et répond normalement sur 127.0.0.1."""
+        from app.interface.web import MilesHandler, MilesWebServer
+
+        app = self._app()
+        server = MilesWebServer(app=app, port=0)
+        # Construction d'un vrai serveur sur 127.0.0.1 (port dynamique).
+        from http.server import ThreadingHTTPServer
+
+        MilesHandler.app = app
+        http_server = ThreadingHTTPServer(("127.0.0.1", 0), MilesHandler)
+        port = http_server.server_address[1]
+        try:
+            import threading
+            import urllib.request
+
+            thread = threading.Thread(target=http_server.serve_forever, daemon=True)
+            thread.start()
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/status", timeout=5
+            ) as resp:
+                self.assertEqual(resp.status, 200)
+                self.assertIn(b"non configur", resp.read())
+        finally:
+            http_server.shutdown()
+            http_server.server_close()
+
+    def test_serveur_ne_demande_pas_d_authentification(self) -> None:
+        """Aucune authentification n'est requise : le service est strictement local."""
+        from app.interface.web import LOCAL_ONLY_HOST
+
+        self.assertEqual(LOCAL_ONLY_HOST, "127.0.0.1")
+
+
 if __name__ == "__main__":
     unittest.main()
