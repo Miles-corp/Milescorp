@@ -95,3 +95,12 @@ Convention : chaque décision reçoit un ID `DEC-###` (ou `D-###`), une date, un
   5. **Correction du blocage « résultat volumineux »** : le moteur consomme la file de résultats pendant l'exécution de l'enfant (le tampon d'un tube fait 8 Kio sous Windows) ; sans cela, tout résultat supérieur à 8 Kio expiraient à tort.
 - **Conséquences** : les routes web sensibles ne sont plus atteignables sans jeton ; les 5 tests d'audit d'Agent B exprimant les P1 passent désormais ; 488 tests OK. Restent à traiter séparément : bornes par mission et non par passage de boucle (P2-6-07/08), rotation des secrets et 2FA.
 - **Statut** : ACCEPTEE
+
+## DEC-011 - Durcissement de la session web (duree, glissement, duree de vie maximale, liaison au client)
+
+- **Date** : 2026-10-20
+- **Auteur** : Agent A
+- **Contexte** : le reaudit Phase 6.1 d'Agent B (`ac627df`) a valide le commit `c0cb01b` **sous reserve** : le `session_id` est un jeton porteur valable 1800 s, et le jeton CSRF ne protege que les requetes *modifiantes* - un jeton de session vole suffisait donc a lire les donnees de l'utilisateur.
+- **Decision** : (1) duree d'INACTIVITE de session ramenee de 1800 s a **900 s**, avec renouvellement glissant a chaque requete authentifiee ; (2) duree de vie **maximale de 8 h**, non renouvelable ; (3) **liaison de la session a l'agent utilisateur** du client (empreinte SHA-256) : un `session_id` presente depuis une autre pile cliente est refuse, y compris sur les routes de lecture ; (4) les tests d'audit d'Agent B ne sont ni supprimes ni affaiblis - deux *clients* de test ont ete adaptes pour presenter le meme agent.
+- **Consequences** : la fenetre d'exploitation d'un jeton vole est reduite et le rejeu simple est bloque. Ce mecanisme **reste une authentification minimale par secret partage** : ni mot de passe, ni 2FA, ni rotation. L'absence de ces elements est explicitement documentee ; l'interface web reste locale et sans authentification multi-utilisateur reelle.
+- **Statut** : ACCEPTEE
