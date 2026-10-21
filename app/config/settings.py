@@ -69,6 +69,13 @@ class Settings:
         # Persistance de l'historique de conversation (V1)
         "conversation_persist": True,
         "conversation_db_path": "data/conversations.db",
+        # Orchestrateur de missions (Phase 6)
+        "mission_enabled": True,
+        "mission_persist": True,
+        "mission_db_path": "data/missions.db",
+        "mission_max_steps": 12,
+        "mission_max_attempts": 2,
+        "mission_max_duration_seconds": 120,
     }
 
     def __init__(self, config_path: str | None = None) -> None:
@@ -123,6 +130,13 @@ class Settings:
             # Persistance de l'historique de conversation (V1)
             "MILES_CONVERSATION_PERSIST": "conversation_persist",
             "MILES_CONVERSATION_DB_PATH": "conversation_db_path",
+            # Orchestrateur de missions (Phase 6)
+            "MILES_MISSION_ENABLED": "mission_enabled",
+            "MILES_MISSION_PERSIST": "mission_persist",
+            "MILES_MISSION_DB_PATH": "mission_db_path",
+            "MILES_MISSION_MAX_STEPS": "mission_max_steps",
+            "MILES_MISSION_MAX_ATTEMPTS": "mission_max_attempts",
+            "MILES_MISSION_MAX_DURATION_SECONDS": "mission_max_duration_seconds",
             # Secrets : jamais codés en dur, lus uniquement depuis l'environnement
             "MILES_REMOTE_API_KEY": "remote_api_key",
             "MILES_LOCAL_API_KEY": "local_api_key",
@@ -141,6 +155,9 @@ class Settings:
                     "history_limit",
                     "memory_max_memories_in_context",
                     "memory_max_content_length",
+                    "mission_max_steps",
+                    "mission_max_attempts",
+                    "mission_max_duration_seconds",
                 ):
                     try:
                         value = int(value)
@@ -155,6 +172,8 @@ class Settings:
                     # interprété comme vrai par bool().
                     value = _coerce_bool(value, env_name)
                 elif key == "conversation_persist":
+                    value = _coerce_bool(value, env_name)
+                elif key in ("mission_enabled", "mission_persist"):
                     value = _coerce_bool(value, env_name)
                 self._values[key] = value
 
@@ -247,6 +266,24 @@ class Settings:
                 self._values["conversation_persist"], "conversation_persist"
             )
 
+        # Même normalisation pour l'orchestrateur de missions.
+        for key in ("mission_enabled", "mission_persist"):
+            if key in self._values:
+                self._values[key] = _coerce_bool(self._values[key], key)
+
+        # Bornes de l'orchestrateur : des valeurs aberrantes doivent être
+        # refusées, pas corrigées silencieusement.
+        for key, minimum in (
+            ("mission_max_steps", 1),
+            ("mission_max_attempts", 1),
+            ("mission_max_duration_seconds", 1),
+        ):
+            value = self._values.get(key)
+            if not isinstance(value, int) or value < minimum:
+                raise SettingsError(
+                    f"{key} doit être un entier >= {minimum}, valeur reçue : {value!r}"
+                )
+
     @property
     def provider(self) -> str:
         return str(self._values["provider"])
@@ -305,3 +342,29 @@ class Settings:
     @property
     def conversation_db_path(self) -> str:
         return str(self._values.get("conversation_db_path", "data/conversations.db"))
+
+    @property
+    def mission_enabled(self) -> bool:
+        """Indiquer si l'orchestrateur de missions est activé."""
+        return bool(self._values.get("mission_enabled", True))
+
+    @property
+    def mission_persist(self) -> bool:
+        """Indiquer si les missions doivent être persistées."""
+        return bool(self._values.get("mission_persist", True))
+
+    @property
+    def mission_db_path(self) -> str:
+        return str(self._values.get("mission_db_path", "data/missions.db"))
+
+    @property
+    def mission_max_steps(self) -> int:
+        return int(self._values.get("mission_max_steps", 12))
+
+    @property
+    def mission_max_attempts(self) -> int:
+        return int(self._values.get("mission_max_attempts", 2))
+
+    @property
+    def mission_max_duration_seconds(self) -> int:
+        return int(self._values.get("mission_max_duration_seconds", 120))

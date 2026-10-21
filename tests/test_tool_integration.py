@@ -113,7 +113,7 @@ class TestToolDiscovery(unittest.TestCase):
     def test_service_liste_le_catalogue(self) -> None:
         service = ToolService()
         catalogue = service.list_tools()
-        self.assertEqual(len(catalogue), 4)
+        self.assertEqual(len(catalogue), 5)
         for tool in catalogue:
             self.assertIn("id", tool)
             self.assertIn("description", tool)
@@ -323,7 +323,7 @@ class TestWebToolIntegration(unittest.TestCase):
         with _WebFixture(self.app) as web:
             status, payload = web.request("GET", "/tools")
         self.assertEqual(status, 200)
-        self.assertEqual(len(payload["tools"]), 4)
+        self.assertEqual(len(payload["tools"]), 5)
 
     def test_route_tool_execute_un_outil_valide(self) -> None:
         with _WebFixture(self.app) as web:
@@ -529,7 +529,8 @@ class TestNoRealActionExecuted(unittest.TestCase):
             avant = sorted(os.listdir(tmpdir))
 
             resultat = list_files_handler(path=tmpdir)
-            self.assertIn("fichier.txt", resultat)
+            noms = [entry["name"] for entry in resultat["entries"]]
+            self.assertIn("fichier.txt", noms)
             # Aucun fichier créé ni supprimé
             self.assertEqual(sorted(os.listdir(tmpdir)), avant)
         finally:

@@ -14,7 +14,9 @@ from app.ai_providers.base import AIProvider, AIProviderError
 from app.ai_providers.public_errors import public_provider_error, technical_detail
 from app.core.conversation import Conversation
 from app.memory.persistent import PersistentMemory, PersistentMemoryError
+from app.orchestration.runner import MissionRunner
 from app.security.validator import ActionValidator, ActionResult
+from app.tools.grants import default_session_id
 from app.tools.service import ToolService
 
 logger = logging.getLogger("miles.cli")
@@ -36,6 +38,12 @@ HELP_TEXT = """\nCommandes disponibles :
   /new         Démarrer une nouvelle conversation
   /tools       Lister les outils disponibles
   /tool        Exécuter un outil (usage: /tool <id> [cle=valeur ...])
+  /mission     Lancer une mission (usage: /mission <objectif>)
+  /missions    Lister les missions
+  /mission-status Consulter une mission (usage: /mission-status <id>)
+  /mission-answer Répondre à une demande (usage: /mission-answer <id> <texte>)
+  /mission-cancel Arrêter une mission (usage: /mission-cancel <id>)
+  /mission-resume Reprendre une mission (usage: /mission-resume <id>)
 Tapez votre message pour discuter avec l'assistant.
 """
 
@@ -51,6 +59,8 @@ class CLI:
         validator: ActionValidator | None = None,
         memory: PersistentMemory | None = None,
         tool_service: ToolService | None = None,
+        mission_runner: MissionRunner | None = None,
+        session_id: str | None = None,
     ) -> None:
         self.settings = settings
         self.provider = provider
@@ -62,6 +72,11 @@ class CLI:
         self.validator = validator or ActionValidator()
         self.memory = memory
         self.tool_service = tool_service
+        self.mission_runner = mission_runner
+        # Identité de session : le jeton de confirmation d'un outil sensible
+        # n'est valable que dans cette session (correctif du défaut relevé
+        # par le rapport de la Phase 5).
+        self.session_id = session_id or default_session_id("cli")
         self._restored_message_count = 0
         self._running = True
 
@@ -216,6 +231,18 @@ class CLI:
             self._handle_tools_command()
         elif cmd == "/tool":
             self._handle_tool_command(args)
+        elif cmd == "/mission":
+            self._handle_mission_command(args)
+        elif cmd == "/missions":
+            self._handle_missions_command()
+        elif cmd == "/mission-status":
+            self._handle_mission_status_command(args)
+        elif cmd == "/mission-answer":
+            self._handle_mission_answer_command(args)
+        elif cmd == "/mission-cancel":
+            self._handle_mission_cancel_command(args)
+        elif cmd == "/mission-resume":
+            self._handle_mission_resume_command(args)
         elif cmd == "/remember":
             if self.memory is None or not self.memory.is_available:
                 print("Mémoire persistante indisponible ou désactivée.")
@@ -300,7 +327,9 @@ class CLI:
             return
 
         result = self.tool_service.request_tool(
-            tool_id=tool_id, parameters=parameters
+            tool_id=tool_id,
+            parameters=parameters,
+            actor_id=self.session_id,
         )
 
         if result.confirmation_required:
@@ -319,6 +348,7 @@ class CLI:
                 parameters=parameters,
                 user_confirmed=True,
                 confirmation_token=token,
+                actor_id=self.session_id,
             )
 
         if not result.success:
@@ -346,6 +376,155 @@ class CLI:
                 return None
             parameters[key] = value
         return parameters
+
+    # --- Missions ---
+
+    def _handle_mission_command(self, args: list[str]) -> None:
+        """Lancer une mission depuis un objectif en langage naturel."""
+        if self.mission_runner is None:
+            print("Orchestrateur de missions indisponible.")
+            return
+        if not args:
+            print("Usage : /mission <objectif>")
+            return
+
+        objective = " ".join(args)
+        # Une mission identique déjà en cours n'est pas relancée : un double
+        # appel ne doit pas produire deux exécutions.
+        mission = self.mission_runner.find_running(objective)
+        if mission is None:
+            mission = self.mission_runner.create(objective)
+        mission = self.mission_runner.run(mission.mission_id)
+        self._drive_mission(mission)
+
+    def _drive_mission(self, mission: Any) -> None:
+        """Conduire une mission jusqu'à son terme ou jusqu'à un refus.
+
+        Les demandes adressées à l'utilisateur (clarification, autorisation)
+        sont posées dans le terminal. Le nombre d'échanges est borné : une
+        boucle de questions ne peut pas bloquer le programme.
+        """
+        interactions = 0
+        max_interactions = 5
+        while (
+            mission is not None
+            and mission.pending is not None
+            and interactions < max_interactions
+        ):
+            interactions += 1
+            pending = mission.pending
+            print()
+            print(pending.question)
+            try:
+                answer = input("> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nMission laissée en attente.")
+                return
+            if pending.kind == "authorization":
+                approved = answer.lower() in ("o", "oui", "y", "yes", "ok")
+                mission = self.mission_runner.authorize(
+                    mission.mission_id, approved=approved
+                )
+            else:
+                mission = self.mission_runner.answer(mission.mission_id, answer)
+
+        if mission is not None:
+            print()
+            print(mission.report)
+
+    def _handle_missions_command(self) -> None:
+        """Lister les missions connues."""
+        if self.mission_runner is None:
+            print("Orchestrateur de missions indisponible.")
+            return
+        missions = self.mission_runner.list_missions(limit=20)
+        if not missions:
+            print("Aucune mission.")
+            return
+        print("Missions :")
+        for mission in missions:
+            print(
+                f"  {mission['mission_id']}  {mission['state']:<22}  "
+                f"{mission['objective']}"
+            )
+
+    def _handle_mission_status_command(self, args: list[str]) -> None:
+        """Afficher l'état détaillé d'une mission."""
+        if self.mission_runner is None:
+            print("Orchestrateur de missions indisponible.")
+            return
+        if not args:
+            print("Usage : /mission-status <id>")
+            return
+        mission = self.mission_runner.get(args[0])
+        if mission is None:
+            print(f"Mission inconnue : {args[0]}")
+            return
+        print(f"Mission {mission.mission_id} — état : {mission.state.value}")
+        print(f"Objectif : {mission.objective}")
+        if mission.pending is not None:
+            print(f"Demande en attente ({mission.pending.kind}) : {mission.pending.question}")
+        if mission.plan is not None:
+            print("Plan :")
+            for step in mission.plan.steps:
+                print(f"  {step.step_id} [{step.tool_id}] {step.status.value} : {step.objective}")
+        if mission.facts:
+            print("Faits observés :")
+            for fact in mission.facts:
+                print(f"  - {fact}")
+        if mission.errors:
+            print("Erreurs :")
+            for error in mission.errors:
+                print(f"  - {error}")
+        if mission.unfinished:
+            print("Étapes non terminées :")
+            for item in mission.unfinished:
+                print(f"  - {item}")
+
+    def _handle_mission_answer_command(self, args: list[str]) -> None:
+        """Répondre à une demande en attente (clarification ou autorisation)."""
+        if self.mission_runner is None:
+            print("Orchestrateur de missions indisponible.")
+            return
+        if len(args) < 2:
+            print("Usage : /mission-answer <id> <texte>")
+            return
+        mission = self.mission_runner.get(args[0])
+        if mission is None:
+            print(f"Mission inconnue : {args[0]}")
+            return
+        if mission.pending is None:
+            print("Cette mission n'a aucune demande en attente.")
+            return
+        mission = self.mission_runner.answer(args[0], " ".join(args[1:]))
+        self._drive_mission(mission)
+
+    def _handle_mission_cancel_command(self, args: list[str]) -> None:
+        """Demander l'arrêt d'une mission."""
+        if self.mission_runner is None:
+            print("Orchestrateur de missions indisponible.")
+            return
+        if not args:
+            print("Usage : /mission-cancel <id>")
+            return
+        if self.mission_runner.cancel(args[0]):
+            print(f"Mission {args[0]} arrêtée.")
+        else:
+            print(f"Mission {args[0]} introuvable ou déjà terminée.")
+
+    def _handle_mission_resume_command(self, args: list[str]) -> None:
+        """Reprendre une mission interrompue."""
+        if self.mission_runner is None:
+            print("Orchestrateur de missions indisponible.")
+            return
+        if not args:
+            print("Usage : /mission-resume <id>")
+            return
+        mission = self.mission_runner.resume(args[0])
+        if mission is None:
+            print(f"Mission inconnue : {args[0]}")
+            return
+        self._drive_mission(mission)
 
     def propose_action(self, action_name: str, arguments: dict[str, Any]) -> None:
         """Proposer une action, la valider et l'exécuter si autorisée.
