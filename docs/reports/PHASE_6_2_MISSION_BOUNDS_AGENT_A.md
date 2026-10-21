@@ -219,7 +219,7 @@ plateforme qui les ignore.
 |---------|--------|
 | Branche de travail | `fix/miles-mission-bounds` |
 | Base | `69bf670` (`integration/miles-phases-5-6-6-1`) |
-| SHA **à auditer** | **`615b0abd984f3c2d03d891276c6a0c3c03e3a706`** (`615b0ab`) — poussé sur `origin/fix/miles-mission-bounds` |
+| SHA **à auditer** | **`615b0abd984f3c2d03d891276c6a0c3c03e3a706`** (`615b0ab`) — commit de code, poussé sur `origin/fix/miles-mission-bounds`. La tête de branche est `632e7a1` : un commit de documentation au-dessus, **contenu de code identique**. |
 | Branche d'intégration auditée | `origin/integration/miles-phases-5-6-6-1` = `69bf670` — **non modifiée** |
 | `main` | `b9b7e7d` — **non modifiée** |
 | Fichier non suivi | `tatus --short --branch` — **préservé, non committé** |
