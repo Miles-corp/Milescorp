@@ -149,6 +149,23 @@ Procédure à suivre par chaque agent à la fin de sa session de travail, afin q
 **Prochaine action recommandée :** Agent B prend TASK-DEV-034 ; à la fusion, D3 touche les mêmes fichiers de schéma d'outils (`app/tools/registry.py`, `app/tools/builtin.py`) que cette branche — hunks différents, à vérifier ; ne pas fusionner sans décision explicite.
 
 
+### H-010 — 2026-10-21 — Agent A → Agent B
+
+**Tâche :** TASK-DEV-035 (frontières `read_only`, branche de tests), TASK-DEV-036 (correctif minimal) ; TASK-DEV-037 (audit) transférée.
+
+**Travail réalisé :** examen préalable (aucun test équivalent n'existait) ; vérification sur le code des six frontières de confiance réelles (modèle, immuabilité du schéma, origine applicative de la propriété, outil inconnu, propriété absente, propriété invalide) ; 11 tests de frontière **sans aucune modification de production** (branche de tests) ; confirmation d'un **défaut réel** sur la seule frontière non garantie (une valeur non booléenne vraie était traitée comme une déclaration « sans effet », la chaîne `"false"` comprise) et correctif minimal d'une ligne (seule la valeur booléenne `True` vaut déclaration) ; 1 test de régression couvrant 6 valeurs invalides.
+
+**Fichiers modifiés :** branche de tests : `tests/test_read_only_trust_boundaries.py` (nouveau) + `docs/coordination/*`. Branche de correctif : `app/orchestration/runner.py` (+11/−1), `tests/test_read_only_trust_boundaries.py` (+26), `docs/reports/PHASE_6_3K_READ_ONLY_TRUST_BOUNDARIES_AGENT_A.md` (nouveau) + `docs/coordination/*`.
+
+**Commits :** `test/miles-read-only-trust-boundaries` = `155dab3` (base `54bd138`) ; `fix/miles-read-only-prudent-type` (base `155dab3`) — les deux poussées sur `origin`. **Aucune fusion** ; `main`, l'intégration, D1, D2, D1-bis, D3, A-α/B-α, D-B05 et D-B05-restants inchangés. Deux worktrees isolés ; artefact non suivi du checkout principal préservé, aucune base du développeur écrite.
+
+**Tests exécutés :** 11 tests (branche de tests) et 12 tests (branche de correctif) — **6 échouent sans le correctif** ; suites complètes **665 tests OK (4 ignorés)** et **666 tests OK (4 ignorés)** ; **70 tests d'audit Agent B rejoués tels quels : OK (2 ignorés)** ; non-régression orchestrateur (73), bornes (20), D1-bis (20), sécurité web (35), moteur (26), intégration outils (40), registre (6), politique (11), D3 (40), reprise (12), persistance (9). Non exécuté : Debian 13 (environnement indisponible). Aucun appel API payant, aucune donnée réelle lue ni écrite.
+
+**Problèmes restants :** la déclaration `read_only` reste une assertion de l'application (le défaut est « à effet ») ; un outil déclaré sans effet mais qui en a un serait rejoué ; l'énumération stricte (plutôt qu'un booléen) reste une option non appliquée.
+
+**Prochaine action recommandée :** Agent B prend TASK-DEV-037 (audit des deux branches) et tranche l'option de l'énumération stricte ; ne pas fusionner sans décision explicite ; à la fusion, traiter `test/miles-read-only-trust-boundaries` avant `fix/miles-read-only-prudent-type` (cette dernière l'empile).
+
+
 ## 3. Transmission de la main
 
 - Prévenir l'autre agent (par le canal convenu hors dépôt, ex. message) qu'une mise à jour est disponible sur GitHub ou dans le clone partagé.

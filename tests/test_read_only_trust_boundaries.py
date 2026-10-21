@@ -296,6 +296,32 @@ class TestProprieteAbsenteOuInvalide(_BaseFrontiere):
         )
         self.assertEqual(_appels("outil"), 0)
 
+    def test_une_propriete_de_type_incorrect_ne_declenche_pas_de_rejeu(
+        self,
+    ) -> None:
+        """Une valeur de type incorrect est traitée comme non déclarée.
+
+        Régression : `bool(read_only)` faisait passer une chaîne non vide
+        (par exemple ``"false"``) ou un entier pour une déclaration
+        « sans effet » : une opération susceptible d'avoir un effet pouvait
+        alors être rejouée automatiquement. Seule la valeur booléenne
+        ``True`` vaut déclaration.
+        """
+        for valeur in ("oui", "false", 1, -1, ["oui"], {"read_only": True}):
+            with self.subTest(valeur=valeur):
+                outil = self._outil()
+                object.__setattr__(outil, "read_only", valeur)
+                runner = self._runner(outil)
+                mission = self._mission_interrompue(runner, outil.tool_id)
+                runner.resume(mission.mission_id)
+                self.assertEqual(
+                    self._statut(runner, mission.mission_id),
+                    StepStatus.UNCERTAIN,
+                    f"une valeur de type incorrect ({valeur!r}) a declenche "
+                    "une reprise automatique",
+                )
+                self.assertEqual(_appels("outil"), 0)
+
 
 class TestLesProprietesViennentDeLApplication(_BaseFrontiere):
     """4. La propriété est lue dans la définition approuvée."""

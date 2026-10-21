@@ -988,9 +988,18 @@ class MissionRunner:
         La déclaration est portée par l'application (le schéma des outils) ;
         elle est fausse par défaut : un outil non déclaré n'est jamais rejoué
         automatiquement après une interruption.
+
+        Seule la valeur booléenne ``True`` vaut déclaration : une valeur
+        absente, ``None`` ou de type incorrect (une chaîne, un entier) est
+        traitée comme **non déclarée**. Le comportement est donc prudent
+        dans tous les cas douteux : une déclaration malformée ne peut pas
+        autoriser la reprise automatique d'une opération susceptible d'avoir
+        un effet.
         """
         tool = self.tool_service.registry.get_tool(tool_id)
-        return bool(tool is not None and getattr(tool, "read_only", False))
+        if tool is None:
+            return False
+        return getattr(tool, "read_only", False) is True
 
     def _skip_dependents(self, mission: Mission, step_id: str) -> None:
         """Marquer comme sautées les étapes qui dépendent d'une étape échouée."""
