@@ -6,16 +6,25 @@ indication de chargement et traitement propre de Ctrl+C / fin de saisie.
 
 from __future__ import annotations
 
+import logging
 import sys
-from typing import Any
+from typing import Any, Optional
 
 from app.ai_providers.base import AIProvider, AIProviderError
+from app.ai_providers.public_errors import public_provider_error, technical_detail
 from app.core.conversation import Conversation
 from app.memory.persistent import PersistentMemory, PersistentMemoryError
 from app.security.validator import ActionValidator, ActionResult
+from app.tools.service import ToolService
+
+logger = logging.getLogger("miles.cli")
+if not logger.handlers:
+    # Handler neutre : l'application reste libre de configurer la
+    # journalisation. N'écrit rien par défaut.
+    logger.addHandler(logging.NullHandler())
 
 HELP_TEXT = """\nCommandes disponibles :
-  /help        Afficher cette aide
+  /help        Afficher l'aide
   /quit ou /q  Quitter le programme
   /clear       Effacer l'historique de la conversation
   /provider    Afficher le fournisseur IA courant
@@ -23,6 +32,10 @@ HELP_TEXT = """\nCommandes disponibles :
   /remember    Enregistrer un souvenir explicite (usage: /remember <texte>)
   /memory      Lister les souvenirs persistants
   /forget      Supprimer un souvenir (usage: /forget <id>)
+  /conversations Lister les conversations enregistrées
+  /new         Démarrer une nouvelle conversation
+  /tools       Lister les outils disponibles
+  /tool        Exécuter un outil (usage: /tool <id> [cle=valeur ...])
 Tapez votre message pour discuter avec l'assistant.
 """
 
@@ -37,6 +50,7 @@ class CLI:
         conversation: Conversation | None = None,
         validator: ActionValidator | None = None,
         memory: PersistentMemory | None = None,
+        tool_service: ToolService | None = None,
     ) -> None:
         self.settings = settings
         self.provider = provider
@@ -47,6 +61,8 @@ class CLI:
         self.conversation = conversation
         self.validator = validator or ActionValidator()
         self.memory = memory
+        self.tool_service = tool_service
+        self._restored_message_count = 0
         self._running = True
 
     def run(self) -> None:
@@ -56,8 +72,13 @@ class CLI:
         while self._running:
             try:
                 user_input = self._read_input()
-            except (KeyboardInterrupt, EOFError):
-                print("\n")
+            except EOFError:
+                # Fin de saisie (Ctrl+D) : message explicite, sortie propre.
+                print("\nFin de saisie. Au revoir !")
+                self._running = False
+                break
+            except KeyboardInterrupt:
+                print("\nInterruption par l'utilisateur. Au revoir !")
                 self._running = False
                 break
 
@@ -66,12 +87,22 @@ class CLI:
 
             self._process_input(user_input.strip())
 
+    def set_restored_message_count(self, count: int) -> None:
+        """Indiquer le nombre de messages restaurés au démarrage."""
+        self._restored_message_count = count
+
     def _print_welcome(self) -> None:
         provider_name = self.provider.name if self.provider else "non configuré"
         print("=" * 50)
         print(" MILES — Assistant personnel intelligent (prototype)")
         print("=" * 50)
         print(f"Fournisseur IA : {provider_name}")
+        if self._restored_message_count:
+            print(
+                f"Conversation restaurée : {self._restored_message_count} message(s)."
+            )
+        if self.conversation.is_persistent:
+            print(f"Conversation enregistrée sous l'identifiant {self.conversation.conversation_id}.")
         print("Tapez /help pour l'aide, /quit pour sortir.")
         print("=" * 50)
 
@@ -101,16 +132,27 @@ class CLI:
         try:
             response = self.provider.chat(context)
         except AIProviderError as exc:
-            print(f"\nErreur du fournisseur IA : {exc}")
+            # Message public : aucun détail technique ni secret affiché.
+            # Le détail technique est conservé dans les journaux locaux,
+            # expurgé de tout secret.
+            logger.error(
+                "Echec de l'appel au fournisseur IA : %s", technical_detail(exc)
+            )
+            print(f"\n{public_provider_error(exc)}")
             print("La conversation est conservée. Vous pouvez réessayer ou changer de fournisseur.")
             # Ne pas retirer le message utilisateur de l'historique : la session est préservée
             return
         except Exception as exc:  # noqa: BLE001 — ne pas faire planter l'interface
-            print(f"\nErreur inattendue : {exc}")
+            logger.error("Erreur interne : %s", technical_detail(exc))
+            print("\nErreur interne du service.")
             return
 
         print(f"\r{response}")
-        self.conversation.add_assistant_message(response)
+        if not self.conversation.add_assistant_message(response):
+            print(
+                "\nAvertissement : la réponse n'a pas pu être enregistrée "
+                "dans l'historique persistant."
+            )
 
     def _handle_command(self, text: str) -> None:
         cmd = text.lower().split()[0] if text.split() else ""
@@ -122,8 +164,13 @@ class CLI:
         elif cmd == "/help":
             print(HELP_TEXT)
         elif cmd == "/clear":
-            self.conversation.clear()
-            print("Historique effacé.")
+            if self.conversation.clear():
+                print("Historique effacé.")
+            else:
+                print(
+                    "Historique effacé en mémoire, mais la suppression de "
+                    "l'historique persisté a échoué."
+                )
         elif cmd == "/provider":
             name = self.provider.name if self.provider else "non configuré"
             print(f"Fournisseur courant : {name}")
@@ -133,10 +180,42 @@ class CLI:
             print(f"Fournisseur : {provider_name}")
             print(f"Disponible : {'oui' if available else 'non'}")
             print(f"Messages dans l'historique : {len(self.conversation)}")
+            if self.conversation.is_persistent:
+                print(f"Conversation persistée : {self.conversation.conversation_id}")
+            else:
+                print("Conversation persistée : non")
             if self.memory is not None:
                 print(
                     f"Mémoire persistante : {'activée' if self.memory.is_available else 'désactivée/indisponible'}"
                 )
+        elif cmd == "/conversations":
+            transcript = self.conversation.transcript
+            if transcript is None or not transcript.is_available:
+                print("Aucune conversation enregistrée (persistance désactivée).")
+                return
+            conversations = transcript.list_conversations(limit=20)
+            if not conversations:
+                print("Aucune conversation enregistrée.")
+                return
+            print("Conversations enregistrées :")
+            for conv in conversations:
+                marker = " (courante)" if conv["id"] == self.conversation.conversation_id else ""
+                print(
+                    f"  {conv['id']}  {conv['message_count']:>4} message(s){marker}"
+                )
+        elif cmd == "/new":
+            if not self.conversation.is_persistent:
+                print("Persistance désactivée : la conversation reste éphémère.")
+                return
+            new_id = self.conversation.new_conversation()
+            if new_id:
+                print(f"Nouvelle conversation : {new_id}")
+            else:
+                print("Impossible de créer une nouvelle conversation.")
+        elif cmd == "/tools":
+            self._handle_tools_command()
+        elif cmd == "/tool":
+            self._handle_tool_command(args)
         elif cmd == "/remember":
             if self.memory is None or not self.memory.is_available:
                 print("Mémoire persistante indisponible ou désactivée.")
@@ -180,8 +259,100 @@ class CLI:
         else:
             print(f"Commande inconnue : {cmd}. Tapez /help pour l'aide.")
 
+    # --- Outils ---
+
+    def _handle_tools_command(self) -> None:
+        """Lister les outils disponibles (catalogue, sans exécution)."""
+        if self.tool_service is None:
+            print("Aucun service d'outils disponible.")
+            return
+        catalogue = self.tool_service.list_tools()
+        if not catalogue:
+            print("Aucun outil enregistré.")
+            return
+        print("Outils disponibles :")
+        for tool in catalogue:
+            confirmation = (
+                " (confirmation requise)"
+                if tool["requires_confirmation"]
+                else ""
+            )
+            print(f"  {tool['id']}  [risque {tool['risk_level']}]{confirmation}")
+            print(f"      {tool['description']}")
+
+    def _handle_tool_command(self, args: list[str]) -> None:
+        """Exécuter un outil via le service partagé.
+
+        La validation, les permissions, la confirmation et les délais sont
+        entièrement gérés par le moteur : cette méthode ne fait qu'acheminer
+        la demande et présenter le résultat.
+        """
+        if self.tool_service is None:
+            print("Aucun service d'outils disponible.")
+            return
+        if not args:
+            print("Usage : /tool <id> [cle=valeur ...]")
+            return
+
+        tool_id = args[0]
+        parameters = self._parse_tool_parameters(args[1:])
+        if parameters is None:
+            return
+
+        result = self.tool_service.request_tool(
+            tool_id=tool_id, parameters=parameters
+        )
+
+        if result.confirmation_required:
+            token = result.confirmation_token
+            print(f"Confirmation humaine requise pour l'outil '{tool_id}'.")
+            try:
+                answer = input("Confirmer ? (o/N) ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print("\nAction annulée.")
+                return
+            if answer not in ("o", "oui", "y", "yes"):
+                print("Action annulée.")
+                return
+            result = self.tool_service.request_tool(
+                tool_id=tool_id,
+                parameters=parameters,
+                user_confirmed=True,
+                confirmation_token=token,
+            )
+
+        if not result.success:
+            print(f"[Outil refusé ou en échec] {tool_id} : {result.error_message}")
+            return
+        print(f"[Outil exécuté] {tool_id}")
+        if result.data is not None:
+            print(result.data)
+
+    @staticmethod
+    def _parse_tool_parameters(args: list[str]) -> Optional[dict[str, str]]:
+        """Analyser les arguments `cle=valeur` d'une commande d'outil.
+
+        Retourne None si un argument est mal formé (message affiché).
+        """
+        parameters: dict[str, str] = {}
+        for arg in args:
+            if "=" not in arg:
+                print(f"Argument invalide : '{arg}'. Format attendu : cle=valeur")
+                return None
+            key, value = arg.split("=", 1)
+            key = key.strip()
+            if not key:
+                print(f"Argument invalide : '{arg}'. La clé ne peut pas être vide.")
+                return None
+            parameters[key] = value
+        return parameters
+
     def propose_action(self, action_name: str, arguments: dict[str, Any]) -> None:
-        """Proposer une action, la valider et l'exécuter si autorisée."""
+        """Proposer une action, la valider et l'exécuter si autorisée.
+
+        Note : chemin historique conservé pour compatibilité. Les nouveaux
+        usages passent par le service d'outils (commande /tool).
+        """
         result: ActionResult = self.validator.execute(action_name, arguments)
         if not result.allowed:
             print(f"[Action refusée] {action_name} : {result.reason}")

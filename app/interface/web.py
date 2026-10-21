@@ -12,14 +12,102 @@ from __future__ import annotations
 
 import html
 import json
+import logging
 import os
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Optional
 
 from app.ai_providers.base import AIProvider, AIProviderError
+from app.ai_providers.public_errors import public_provider_error as _public_provider_error
 from app.config.settings import Settings
 from app.core.conversation import Conversation
-from app.memory.persistent import PersistentMemory
+from app.memory.persistent import PersistentMemory, PersistentMemoryError
+from app.tools.service import ToolService
+from app.utilities.redaction import REDACTED, sanitize_text
+
+logger = logging.getLogger("miles.web")
+if not logger.handlers:
+    # Handler neutre : l'application reste libre de configurer la
+    # journalisation. Évite la sortie "No handlers could be found" et
+    # n'écrit rien sur stderr par défaut.
+    logger.addHandler(logging.NullHandler())
+
+__all__ = [
+    "REDACTED",
+    "sanitize_text",
+    "public_provider_error",
+    "LOCAL_ONLY_HOST",
+    "MAX_BODY_BYTES",
+    "WebServerSecurityError",
+    "RequestBodyError",
+    "assert_local_host",
+    "WebApp",
+    "MilesHandler",
+    "MilesWebServer",
+]
+
+# Adresse d'écoute du serveur web. Elle est imposée par le code et n'est
+# pas configurable : le service MILES doit rester strictement local, jamais
+# joignable depuis le réseau local ou Internet.
+LOCAL_ONLY_HOST = "127.0.0.1"
+
+# Taille maximale du corps d'une requête HTTP, en octets (64 KiB).
+# Au-delà, la requête est refusée avec HTTP 413 sans que les données
+# annoncées soient lues ou allouées. Le corps n'est JAMAIS lu au-delà de
+# cette limite : c'est une invariant de sécurité (un client ne peut pas
+# forcer le serveur à consommer de la mémoire en annonçant une taille).
+MAX_BODY_BYTES = 65536
+
+
+class WebServerSecurityError(Exception):
+    """Refus de démarrer le serveur web sur une adresse non locale."""
+
+
+class RequestBodyError(Exception):
+    """Corps de requête HTTP invalide (en-tête ou taille).
+
+    Le statut HTTP à renvoyer au client est porté par l'exception.
+    """
+
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.message = message
+
+
+def assert_local_host(host: str) -> str:
+    """Vérifier qu'une adresse d'écoute est strictement locale.
+
+    Seule l'adresse 127.0.0.1 est acceptée. Toute autre adresse est
+    refusée explicitement, y compris 0.0.0.0, :: et les adresses du
+    réseau local.
+    """
+    if not isinstance(host, str):
+        raise WebServerSecurityError(
+            f"Adresse d'écoute invalide : {host!r}. Le serveur web MILES "
+            f"n'écoute que sur {LOCAL_ONLY_HOST}."
+        )
+    if host != LOCAL_ONLY_HOST:
+        raise WebServerSecurityError(
+            f"Adresse d'écoute refusée : {host!r}. Le serveur web MILES est "
+            f"strictement local et n'écoute que sur {LOCAL_ONLY_HOST}."
+        )
+    return host
+
+# Motifs de secrets : définis dans app/utilities/redaction.py (source unique
+# de vérité, partagée avec la persistance des conversations).
+# La classification publique des erreurs fournisseur est définie dans
+# app/ai_providers/public_errors.py (source unique, partagée avec le CLI).
+
+
+def public_provider_error(exc: Exception) -> str:
+    """Retourner un message public sûr pour une erreur de fournisseur.
+
+    Ré-exporté depuis ``app.ai_providers.public_errors`` afin que l'interface
+    terminal et l'interface web exposent exactement le même message.
+    """
+    return _public_provider_error(exc)
 
 
 class WebApp:
@@ -36,6 +124,7 @@ class WebApp:
         provider: Optional[AIProvider] = None,
         conversation: Optional[Conversation] = None,
         memory: Optional[PersistentMemory] = None,
+        tool_service: Optional[ToolService] = None,
     ) -> None:
         self.settings = settings
         self.provider = provider
@@ -43,6 +132,50 @@ class WebApp:
             history_limit=settings.get("history_limit", 10)
         )
         self.memory = memory
+        # Même service d'outils que le CLI : aucune duplication de la
+        # logique métier (validation, permissions, confirmation, audit).
+        self.tool_service = tool_service
+
+    # --- Outils ---
+
+    def list_tools(self) -> dict[str, Any]:
+        """Retourner le catalogue des outils disponibles."""
+        if self.tool_service is None:
+            return {"tools": [], "error": "Aucun service d'outils disponible."}
+        return {"tools": self.tool_service.list_tools()}
+
+    def run_tool(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Exécuter un outil via le service partagé (même moteur que le CLI).
+
+        Le client peut transmettre ``confirmation_token`` et
+        ``user_confirmed`` pour confirmer une action à effet externe.
+        """
+        if self.tool_service is None:
+            return {"error": "Aucun service d'outils disponible."}
+
+        tool_id = data.get("tool", data.get("tool_id", ""))
+        if not isinstance(tool_id, str) or not tool_id.strip():
+            return {"error": "Identifiant d'outil manquant."}
+
+        raw_parameters = data.get("parameters", {})
+        if raw_parameters is None:
+            raw_parameters = {}
+        if not isinstance(raw_parameters, dict):
+            return {"error": "Paramètres invalides."}
+        parameters = {str(k): v for k, v in raw_parameters.items()}
+
+        user_confirmed = bool(data.get("user_confirmed", False))
+        confirmation_token = data.get("confirmation_token")
+        if confirmation_token is not None and not isinstance(confirmation_token, str):
+            return {"error": "Jeton de confirmation invalide."}
+
+        result = self.tool_service.request_tool(
+            tool_id=tool_id.strip(),
+            parameters=parameters,
+            user_confirmed=user_confirmed,
+            confirmation_token=confirmation_token,
+        )
+        return self.tool_service.describe_result(result)
 
     # --- Fournisseur ---
 
@@ -78,14 +211,27 @@ class WebApp:
             response = self.provider.chat(context)
         except AIProviderError as exc:
             # La conversation est conservée : le message utilisateur reste.
+            # Le détail technique reste interne et assaini de tout secret.
+            logger.error(
+                "Échec de l'appel au fournisseur IA : %s", sanitize_text(exc)
+            )
             return {
-                "error": f"Erreur du fournisseur IA : {exc}",
+                "error": public_provider_error(exc),
                 "provider": self.settings.provider,
                 "context_preserved": True,
             }
         except Exception as exc:  # noqa: BLE001 — ne pas faire tomber le serveur
+            # Aucune trace brute n'est journalisée : la trace d'appels
+            # contiendrait le message d'origine de l'exception, donc
+            # potentiellement un secret de format inconnu. Seul le nom de
+            # la classe et le message assaini sont conservés.
+            logger.error(
+                "Erreur interne lors de l'appel au fournisseur IA (%s) : %s",
+                type(exc).__name__,
+                sanitize_text(exc),
+            )
             return {
-                "error": f"Erreur inattendue : {exc}",
+                "error": "Erreur interne du service.",
                 "provider": self.settings.provider,
                 "context_preserved": True,
             }
@@ -121,8 +267,20 @@ class WebApp:
         try:
             mem_id = self.memory.add_memory(content)
             return {"id": mem_id, "content": content}
-        except Exception as exc:  # noqa: BLE001 — ne pas faire tomber le serveur
+        except PersistentMemoryError as exc:
+            # Message produit par MILES lui-même (texte fixe) : ne contient
+            # aucune valeur sensible, il peut être renvoyé au client.
+            logger.error(
+                "Refus d'enregistrement d'un souvenir : %s", sanitize_text(exc)
+            )
             return {"error": str(exc)}
+        except Exception as exc:  # noqa: BLE001 — ne pas faire tomber le serveur
+            logger.error(
+                "Erreur interne lors de l'enregistrement d'un souvenir (%s) : %s",
+                type(exc).__name__,
+                sanitize_text(exc),
+            )
+            return {"error": "Erreur interne du service."}
 
     def delete_memory(self, memory_id: int) -> dict[str, Any]:
         """Supprimer un souvenir ciblé."""
@@ -133,12 +291,28 @@ class WebApp:
             if deleted:
                 return {"id": memory_id, "deleted": True}
             return {"error": f"Aucun souvenir avec l'id {memory_id}."}
-        except Exception as exc:  # noqa: BLE001
+        except PersistentMemoryError as exc:
+            # Message produit par MILES lui-même (texte fixe) : ne contient
+            # aucune valeur sensible, il peut être renvoyé au client.
+            logger.error(
+                "Refus de suppression d'un souvenir : %s", sanitize_text(exc)
+            )
             return {"error": str(exc)}
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "Erreur interne lors de la suppression d'un souvenir (%s) : %s",
+                type(exc).__name__,
+                sanitize_text(exc),
+            )
+            return {"error": "Erreur interne du service."}
 
 
 class MilesHandler(BaseHTTPRequestHandler):
     """Gestionnaire des requêtes HTTP pour MILES."""
+
+    # Délai maximal d'attente d'une requête. Évite qu'un client qui annonce
+    # une taille puis n'envoie rien ne bloque un thread indéfiniment.
+    timeout = 30
 
     # L'application métier est attachée au serveur via server.miles_app.
     app: Optional[WebApp] = None
@@ -157,12 +331,67 @@ class MilesHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _read_body(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length", 0))
-        raw = self.rfile.read(length) if length > 0 else b""
+        """Lire et valider le corps de la requête.
+
+        Le corps ne doit jamais dépasser MAX_BODY_BYTES octets. La taille
+        annoncée est contrôlée AVANT toute lecture : un corps trop
+        volumineux n'est donc ni lu ni alloué.
+
+        Raises:
+            RequestBodyError: en-tête Content-Length absent, négatif, non
+                numérique, corps trop volumineux (413) ou incomplet.
+        """
+        raw_length = self.headers.get("Content-Length")
+        if raw_length is None:
+            length = 0
+        else:
+            try:
+                length = int(raw_length)
+            except (TypeError, ValueError):
+                raise RequestBodyError(
+                    400, "Requête mal formée : en-tête Content-Length invalide."
+                ) from None
+            if length < 0:
+                raise RequestBodyError(
+                    400, "Requête mal formée : en-tête Content-Length invalide."
+                )
+            if length > MAX_BODY_BYTES:
+                # Refus immédiat : les données annoncées ne sont pas lues.
+                # Le corps n'est jamais consommé au-delà de la limite, même
+                # en partie : c'est ce qui garantit qu'un client ne peut pas
+                # forcer une allocation mémoire côté serveur.
+                # Conséquence assumée : le client peut voir sa connexion
+                # réinitialisée au lieu de lire la réponse 413, s'il
+                # écrivait encore son corps au moment du refus.
+                raise RequestBodyError(
+                    413,
+                    "Requête trop volumineuse : le corps dépasse la limite autorisée.",
+                )
+
+        raw = b""
+        if length > 0:
+            try:
+                raw = self.rfile.read(length)
+            except (TimeoutError, OSError):
+                raise RequestBodyError(
+                    400, "Requête mal formée : corps de requête incomplet."
+                ) from None
+            if len(raw) < length:
+                raise RequestBodyError(
+                    400, "Requête mal formée : corps de requête incomplet."
+                )
+
+        if not raw:
+            return {}
         try:
-            return json.loads(raw.decode("utf-8")) if raw else {}
+            data = json.loads(raw.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):
             return {}
+        if not isinstance(data, dict):
+            raise RequestBodyError(
+                400, "Requête mal formée : corps JSON invalide."
+            )
+        return data
 
     def _html_escape(self, text: str) -> str:
         return html.escape(text or "", quote=True)
@@ -178,12 +407,21 @@ class MilesHandler(BaseHTTPRequestHandler):
             self._handle_status()
         elif path == "/memory":
             self._handle_list_memories()
+        elif path == "/tools":
+            self._handle_list_tools()
         else:
             self._send_json(404, {"error": "Not found", "path": path})
 
     def do_POST(self) -> None:  # noqa: N802
         path = self.path.split("?")[0]
-        data = self._read_body()
+        try:
+            data = self._read_body()
+        except RequestBodyError as exc:
+            # Le corps n'a pas été lu : la connexion ne peut plus être
+            # réutilisée pour une requête suivante.
+            self.close_connection = True
+            self._send_json(exc.status, {"error": exc.message})
+            return
 
         if path == "/message":
             self._handle_message(data)
@@ -191,6 +429,8 @@ class MilesHandler(BaseHTTPRequestHandler):
             self._handle_remember(data)
         elif path == "/forget":
             self._handle_forget(data)
+        elif path == "/tool":
+            self._handle_run_tool(data)
         else:
             self._send_json(404, {"error": "Not found", "path": path})
 
@@ -231,6 +471,11 @@ button.secondary:hover {{ background: #616161; }}
 .memories {{ margin: 1rem 0; }}
 .memories ul {{ list-style: none; padding: 0; }}
 .memories li {{ margin: 0.25rem 0; padding: 0.25rem; background: #f5f5f5; border-radius: 4px; }}
+.tools {{ margin: 1rem 0; }}
+.tools ul {{ list-style: none; padding: 0; }}
+.tools li {{ margin: 0.35rem 0; padding: 0.35rem; background: #f5f5f5; border-radius: 4px; font-size: 0.9rem; }}
+.tools code {{ background: #e0e0e0; padding: 0 0.25rem; border-radius: 3px; }}
+.tools input[type="text"] {{ width: auto; padding: 0.25rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem; }}
 </style>
 </head>
 <body>
@@ -253,6 +498,11 @@ button.secondary:hover {{ background: #616161; }}
 </form>
 
 <div class="memories" id="memories"></div>
+
+<div class="tools" id="tools">
+<strong>Outils :</strong>
+<div id="toolsList"><p>Chargement…</p></div>
+</div>
 
 <script>
 async function sendMessage(e) {{
@@ -304,6 +554,91 @@ async function loadMemories() {{
   }} catch (err) {{ console.error(err); }}
 }}
 
+async function loadTools() {{
+  const container = document.getElementById('toolsList');
+  try {{
+    const res = await fetch('/tools');
+    const data = await res.json();
+    if (!Array.isArray(data.tools) || data.tools.length === 0) {{
+      container.innerHTML = '<p>Aucun outil disponible.</p>';
+      return;
+    }}
+    container.innerHTML = '<ul>' + data.tools.map(t => {{
+      const champs = (t.parameters || []).map(p =>
+        '<input type="text" data-tool="' + escapeHtml(t.id) + '" data-param="' + escapeHtml(p.name) +
+        '" data-type="' + escapeHtml(p.type) + '" placeholder="' + escapeHtml(p.name) + '" size="12">'
+      ).join(' ');
+      return '<li><code>' + escapeHtml(t.id) + '</code> [' + escapeHtml(t.risk_level) + '] ' +
+        escapeHtml(t.description) +
+        (t.requires_confirmation ? ' <em>(confirmation requise)</em>' : '') +
+        ' ' + champs +
+        ' <button type="button" class="secondary" onclick="runTool(\\'' + escapeHtml(t.id) + '\\')">Exécuter</button></li>';
+    }}).join('') + '</ul>';
+  }} catch (err) {{
+    container.innerHTML = '<p>Erreur de chargement des outils.</p>';
+    console.error(err);
+  }}
+}}
+
+function collectToolParams(toolId) {{
+  const params = {{}};
+  document.querySelectorAll('input[data-tool="' + toolId + '"]').forEach(input => {{
+    const valeur = input.value.trim();
+    if (!valeur) return;
+    const type = input.getAttribute('data-type');
+    if (type === 'int') {{
+      params[input.getAttribute('data-param')] = parseInt(valeur, 10);
+    }} else if (type === 'float') {{
+      params[input.getAttribute('data-param')] = parseFloat(valeur);
+    }} else if (type === 'bool') {{
+      params[input.getAttribute('data-param')] = (valeur === 'true' || valeur === '1');
+    }} else {{
+      params[input.getAttribute('data-param')] = valeur;
+    }}
+  }});
+  return params;
+}}
+
+async function postTool(toolId, params, userConfirmed, token) {{
+  const body = {{ tool: toolId, parameters: params }};
+  if (userConfirmed) {{
+    body.user_confirmed = true;
+    body.confirmation_token = token;
+  }}
+  const res = await fetch('/tool', {{
+    method: 'POST',
+    headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify(body)
+  }});
+  return await res.json();
+}}
+
+async function runTool(toolId) {{
+  const params = collectToolParams(toolId);
+  let data = await postTool(toolId, params, false, null);
+  if (data.confirmation_required) {{
+    // Confirmation humaine explicite : l'utilisateur tranche dans le
+    // navigateur avant que le jeton ne soit renvoyé.
+    const ok = window.confirm("L'outil '" + toolId + "' requiert une confirmation humaine.\\nExécuter ?");
+    if (!ok) {{
+      appendMessage('system', 'Action annulée.');
+      return;
+    }}
+    data = await postTool(toolId, params, true, data.confirmation_token);
+  }}
+  if (data.success) {{
+    appendMessage('assistant', 'Résultat de ' + toolId + ' :\\n' + formatToolResult(data.result));
+  }} else {{
+    appendMessage('error', 'Outil ' + toolId + ' : ' + (data.error || 'échec'));
+  }}
+}}
+
+function formatToolResult(result) {{
+  if (result === null || result === undefined) return '(aucun résultat)';
+  if (typeof result === 'object') return JSON.stringify(result, null, 2);
+  return String(result);
+}}
+
 function appendMessage(role, text) {{
   const chat = document.getElementById('chat');
   const div = document.createElement('div');
@@ -320,6 +655,7 @@ function escapeHtml(text) {{
 }}
 
 loadStatus();
+loadTools();
 </script>
 </body>
 </html>"""
@@ -331,6 +667,30 @@ loadStatus();
         state = self.app.provider_state()
         state["memory_available"] = self.app.memory.is_available if self.app.memory else False
         self._send_json(200, state)
+
+    def _handle_list_tools(self) -> None:
+        if self.app is None:
+            self._send_json(500, {"error": "Application non initialisée"})
+            return
+        payload = self.app.list_tools()
+        status = 200 if "error" not in payload else 503
+        self._send_json(status, payload)
+
+    def _handle_run_tool(self, data: dict[str, Any]) -> None:
+        if self.app is None:
+            self._send_json(500, {"error": "Application non initialisée"})
+            return
+        payload = self.app.run_tool(data)
+        # Une demande de confirmation est une réponse normale du protocole
+        # (200 + jeton), pas une erreur : le client doit pouvoir confirmer.
+        if payload.get("confirmation_required"):
+            self._send_json(200, payload)
+            return
+        if not payload.get("success"):
+            # Refus ou échec de l'outil : erreur côté appelant, pas serveur.
+            self._send_json(400, payload)
+            return
+        self._send_json(200, payload)
 
     def _handle_list_memories(self) -> None:
         if self.app is None:
@@ -379,23 +739,46 @@ loadStatus();
 
 
 class MilesWebServer:
-    """Serveur web MILES sur 127.0.0.1 par défaut."""
+    """Serveur web MILES, strictement local (127.0.0.1 uniquement).
+
+    L'adresse d'écoute est imposée par le code et n'est pas configurable.
+    Toute tentative de démarrage sur une adresse non locale est refusée
+    explicitement, que ce soit via le constructeur ou via une affectation
+    directe de l'attribut `host`.
+    """
+
+    #: Adresse d'écoute autorisée.
+    ALLOWED_HOST = LOCAL_ONLY_HOST
 
     def __init__(
         self,
         app: WebApp,
-        host: str = "127.0.0.1",
+        host: str = LOCAL_ONLY_HOST,
         port: int = 8080,
     ) -> None:
         self.app = app
+        # Passe par la propriété de validation : toute adresse non locale
+        # est refusée dès la construction.
         self.host = host
         self.port = port
         self._server: Optional[ThreadingHTTPServer] = None
 
+    @property
+    def host(self) -> str:
+        """Adresse d'écoute du serveur (toujours locale)."""
+        return self._host
+
+    @host.setter
+    def host(self, value: str) -> None:
+        self._host = assert_local_host(value)
+
     def start(self) -> None:
+        # Revalidation avant toute liaison : `host` est un attribut public,
+        # il pourrait avoir été modifié par affectation directe.
+        host = assert_local_host(self.host)
         MilesHandler.app = self.app
-        self._server = ThreadingHTTPServer((self.host, self.port), MilesHandler)
-        print(f"Interface web MILES sur http://{self.host}:{self.port}")
+        self._server = ThreadingHTTPServer((host, self.port), MilesHandler)
+        print(f"Interface web MILES sur http://{host}:{self.port}")
         self._server.serve_forever()
 
     def stop(self) -> None:

@@ -1,8 +1,9 @@
 """Premier outil MILES : lecture du statut du programme.
 
-Outil en lecture seule, sans effet de bord. Il retourne l'état courant
-du programme (fournisseur IA, historique, mémoire persistante) pour
-permettre au modèle de connaître le contexte actuel.
+Outil en lecture seule, sans effet de bord. Il retourne un état de
+**référence statique** : ces valeurs sont fixes et ne reflètent pas l'état
+en direct de l'instance en cours d'exécution (le moteur exécute les
+handlers dans un sous-processus, qui ne partage pas l'état de l'application).
 """
 
 from __future__ import annotations

@@ -10,7 +10,13 @@ from __future__ import annotations
 import datetime
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable, Optional
+
+from app.security.paths import (
+    PathSecurityError,
+    default_allowed_roots,
+    resolve_authorized_path,
+)
 
 
 @dataclass
@@ -22,10 +28,24 @@ class ActionResult:
 
 
 class ActionValidator:
-    """Valide et exécute les actions locales autorisées."""
+    """Valide et exécute les actions locales autorisées.
 
-    def __init__(self, allowed_actions: list[str] | None = None) -> None:
+    Les opérations sur le système de fichiers sont confinées aux racines
+    autorisées (par défaut : le répertoire du projet et son dossier de
+    données ``data/``). Les chemins sont résolus de façon canonique, ce qui
+    prend en compte les liens symboliques.
+    """
+
+    def __init__(
+        self,
+        allowed_actions: list[str] | None = None,
+        allowed_roots: Optional[Iterable[str]] = None,
+    ) -> None:
         self._allowed = set(allowed_actions or ["datetime", "workdir", "list_files"])
+        self._allowed_roots: list[str] = list(
+            allowed_roots if allowed_roots is not None
+            else [str(root) for root in default_allowed_roots()]
+        )
         self._registry: dict[str, Any] = {
             "datetime": self._action_datetime,
             "workdir": self._action_workdir,
@@ -81,12 +101,19 @@ class ActionValidator:
         return os.getcwd()
 
     def _action_list_files(self, path: str = ".") -> str:
-        """Lister les fichiers d'un répertoire autorisé (sous-répertoires du CWD uniquement)."""
-        # Empêcher les traversées de répertoires
-        target = os.path.abspath(path)
-        cwd = os.path.abspath(os.getcwd())
-        if not target.startswith(cwd + os.sep) and target != cwd:
-            return "Accès refusé : le répertoire demandé est en dehors du répertoire de travail."
+        """Lister les fichiers d'un répertoire autorisé.
+
+        Le chemin est résolu canoniquement (liens symboliques et `..`
+        inclus) puis vérifié : tout répertoire hors des racines autorisées
+        est refusé.
+        """
+        try:
+            target = resolve_authorized_path(path, roots=self._allowed_roots)
+        except PathSecurityError:
+            return (
+                "Accès refusé : le répertoire demandé est hors des racines "
+                "autorisées."
+            )
         if not os.path.isdir(target):
             return f"Le répertoire '{path}' n'existe pas ou n'est pas un répertoire."
         entries = sorted(os.listdir(target))

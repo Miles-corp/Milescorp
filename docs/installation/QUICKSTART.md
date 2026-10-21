@@ -116,6 +116,21 @@ Taper `/forget <id>` (remplacer `<id>` par l'identifiant affiché lors de l'enre
 2. Relancer `python miles.py`.
 3. Taper `/memory` : le souvenir enregistré précédemment est toujours présent (persistence SQLite).
 
+### 6.8 bis Persistance de la conversation (V1)
+
+Depuis la version V1, l'historique de conversation est enregistré dans une base
+SQLite locale (`data/conversations.db` par défaut, activée par
+`MILES_CONVERSATION_PERSIST=true`).
+
+1. Quitter MILES (`/quit`).
+2. Relancer `python miles.py`.
+3. Le message d'accueil indique la conversation restaurée et son nombre de messages.
+4. Taper `/status` : la ligne "Conversation persistée" affiche l'identifiant.
+5. Taper `/conversations` : la conversation enregistrée est listée.
+
+Pour repartir de zéro : `python miles.py --new-conversation`.
+Pour ne rien écrire sur disque : `python miles.py --no-persist`.
+
 ### 6.9 Refus des contenus ressemblant à des secrets
 
 Taper `/remember Ma clé API est sk-1234567890abcdef` : le programme refuse l'enregistrement et affiche un message d'erreur explicite (motif secret détecté).
