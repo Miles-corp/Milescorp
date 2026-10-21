@@ -238,7 +238,7 @@ plan proposé par le fournisseur IA (ou via le test unitaire).
 | Élément | Valeur |
 |---------|--------|
 | Branche de travail | `fix/miles-mission-bounds` (poussée : `origin/fix/miles-mission-bounds` = `3d0bfb8`) |
-| Commits produits par cette mission | **aucun commit de code** ; un commit documentaire (ce rapport + le guide développeur) |
+| Commits produits par cette mission | **aucun commit de code** ; un commit documentaire : e8e9\ (ce rapport + le guide développeur) |
 | `main` | `b9b7e7d` — **inchangée** |
 | Branche auditée par Agent B | `69bf670` — **inchangée** |
 | Artefact non suivi | `tatus --short --branch` — **préservé** |
