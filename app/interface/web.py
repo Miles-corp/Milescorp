@@ -27,6 +27,7 @@ from app.memory.persistent import PersistentMemory, PersistentMemoryError
 from app.orchestration.models import Mission, MissionState
 from app.orchestration.runner import (
     REASON_EXPIRED_APPROVAL_TOKEN,
+    REASON_INTERACTION_BUDGET_EXCEEDED,
     REASON_INVALID_APPROVAL_TOKEN,
     REASON_MISSING_APPROVAL_TOKEN,
     REASON_MISSION_FINISHED,
@@ -378,19 +379,45 @@ class WebApp:
     def answer_mission(
         self, mission_id: str, data: dict[str, Any], session: WebSession
     ) -> dict[str, Any]:
-        """Transmettre une réponse à une demande en attente."""
+        """Transmettre une réponse à une demande en attente.
+
+        La réponse n'est **positive** que si elle a réellement été traitée :
+        la demande en attente est validée de façon synchrone (identité,
+        propriété de la mission, état, expiration, session), avant le
+        lancement du fil d'exécution (défaut D1-bis appliqué à cette
+        route). Sans cette validation, le serveur répondait « answered »
+        alors que la réponse était refusée dans le fil.
+
+        Le **contrat** de la route est inchangé : le client transmet une
+        réponse texte ; aucun jeton n'est exigé.
+        """
         if self.mission_runner is None:
             return {"error": "Orchestrateur indisponible."}
         mission = self.mission_runner.get(
             mission_id, owner_user_id=session.user_id
         )
         if mission is None:
-            return {"error": f"Mission inconnue : {mission_id}"}
-        if mission.pending is None:
-            return {"error": "Aucune demande en attente pour cette mission."}
+            return {
+                "error": f"Mission inconnue : {mission_id}",
+                "reason": REASON_MISSION_NOT_FOUND,
+            }
         answer = data.get("answer", "")
         if not isinstance(answer, str) or not answer.strip():
             return {"error": "Réponse vide."}
+
+        # Validation SYNCHRONE de la demande en attente : identité, session,
+        # propriété de la mission, état courant, expiration, budget. Les
+        # messages ne contiennent ni jeton, ni identifiant de session, ni
+        # secret.
+        try:
+            self.mission_runner.check_answer(
+                mission_id,
+                requester_user_id=session.user_id,
+                requester_session_id=session.session_id,
+            )
+        except MissionAuthorizationError as exc:
+            return {"error": str(exc), "reason": exc.reason}
+
         try:
             started = self._start_mission_thread(
                 mission_id,

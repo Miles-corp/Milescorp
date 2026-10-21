@@ -86,6 +86,17 @@
 - **Limites** : aucune validation Debian 13 ; aucun appel API payant ; aucun acces a un fournisseur distant ; seule une directory temporaire de test est creee puis supprimee.
 - **En attente** : audit independant par Agent B (TASK-DEV-027). L'audit D3 n'est **pas** considere comme approuve.
 
+## Phase 6.3h — Correctifs A-alpha et B-alpha (Agent A, 2026-10-21)
+
+- **Rapport** : `docs/reports/PHASE_6_3H_ANSWER_D1TER_FIX_AGENT_A.md`
+- **Base** : `0be08cd` (`fix/miles-policy-path-typing`, qui porte D1 + D2 + D1-bis + D3). Branche : `fix/miles-answer-d1ter`, poussee sur `origin`. **Aucune fusion** ; `main` (`b9b7e7d`), l'integration (`69bf670`), D1 (`3a59dae`), D2 (`d3240d2`), D1-bis (`1ef4878`) et D3 (`0be08cd`) sont inchanges. Travail en **worktree isole** (`Temp\miles-answer`).
+- **A-alpha** : `POST /mission/<id>/answer` repondait 200 `{"answered": true}` meme lorsque la reponse etait **refusee dans le fil** (session differente, budget epuise, demande expiree) : l exception etait absorbee par le fil. Nouvelle methode `MissionRunner.check_answer` (modele D1-bis, source de verite unique, appellee par `answer`) ; l interface web valide **de facon synchrone** avant de lancer le fil et renvoie 403 + `reason` (mission inconnue, mission terminee, aucune demande en attente, autre session, autre utilisateur, demande expiree, budget epuise) ; 409 conserve pour le cas « mission occupee ». **Le contrat de la route est inchange : aucun jeton n est exige (A-beta NON applique).**
+- **B-alpha** : l analyse qualitative IA n est plus demandee pour une mission **en attente** (une seule ligne dans `_execute_loop`) : le fil se termine des la demande d autorisation, la fenetre pendant laquelle une autorisation etait ignoree **disparait**. Effet de bord assume : le compte rendu **provisoire** d une mission en attente ne comporte plus la section « Analyse qualitative » ; le compte rendu **definitif** la conserve (verifie par test). Le 409 reste comme filet.
+- **Tests** : `tests/test_answer_d1ter_fixes.py` (18 tests de regression, non destructifs : outils simules, fournisseur simule, aucun appel reseau, aucune donnee reelle). **7 tests echouent sans A-alpha** (revert de `app/interface/web.py`) et **1 sans B-alpha** (neutralisation ciblee) : la reintroduction des defauts est donc detectee. Suite complete **633 tests OK (4 ignores)** ; **70 tests d audit Agent B rejoues tels quels : OK (2 ignores)** ; non-regression D1 (6), D1-bis (20), D2 (21), securite web (35 + 33), orchestrateur (73), bornes (20), politique (11), confinement (21, 3 ignores), moteur (26), integration outils (40).
+- **Perimetre respecte** : ni la politique de securite, ni les permissions, ni le confinement des chemins (`app/security/paths.py` intact), ni le planificateur, ni les outils. Aucun appel API payant, aucune donnee reelle lue ni ecrite.
+- **Interactions avec les audits en cours** : D1 doit etre fusionne **avant** ce correctif (le refus cross-session repose sur son controle de session) ; D1-bis touche les **memes fichiers** (`runner.py`, `web.py`) mais dans des hunks distincts, avec un **conflit de contexte possible sur le bloc d imports** des constantes `REASON_*` (a resoudre manuellement, sans risque semantique) ; D2 et D3 n ont aucun fichier commun.
+- **En attente** : audit independant d Agent B (TASK-DEV-030) et decision sur l option **A-beta** (exiger le jeton sur `/answer` : changement de contrat d API, non applique).
+
 ## Blocages
 
 Aucun blocage à ce jour.

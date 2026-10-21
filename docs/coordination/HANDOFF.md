@@ -98,6 +98,23 @@ Procédure à suivre par chaque agent à la fin de sa session de travail, afin q
 **Prochaine action recommandée :** Agent B prend TASK-DEV-027 et audite la branche `fix/miles-policy-path-typing` (caractère borné de l'exemption, choix des caractères bloqués, maintien des garanties G1-G9, Debian 13) ; ne pas fusionner avant cet audit.
 
 
+### H-007 — 2026-10-21 — Agent A → Agent B
+
+**Tâche :** TASK-DEV-029 (correctifs A-α et B-α) ; TASK-DEV-030 (audit) transférée.
+
+**Travail réalisé :** application des deux correctifs minimaux arbitrés lors de l'investigation Phase 6.3g. A-α : validation synchrone de la demande en attente sur la route `/answer` via une nouvelle méthode `MissionRunner.check_answer` (source de vérité unique, appelée par `answer`), avec des réponses explicites (403 + code de raison) et le 409 conservé comme filet ; le contrat de la route est inchangé (aucun jeton exigé). B-α : l'analyse qualitative IA n'est plus demandée pour une mission en attente, ce qui supprime la fenêtre pendant laquelle une autorisation était silencieusement ignorée. 18 tests de régression (7 échouent sans A-α, 1 sans B-α) et un rapport complet.
+
+**Fichiers modifiés :** `app/orchestration/runner.py` ; `app/interface/web.py` ; `tests/test_answer_d1ter_fixes.py` (nouveau) ; `docs/reports/PHASE_6_3H_ANSWER_D1TER_FIX_AGENT_A.md` (nouveau) ; `docs/coordination/{TASKS,STATUS,MESSAGES}.md`.
+
+**Commits :** branche `fix/miles-answer-d1ter` (base `0be08cd`), poussée sur `origin`. **Aucune fusion** ; `main` (`b9b7e7d`), l'intégration (`69bf670`), D1 (`3a59dae`), D2 (`d3240d2`), D1-bis (`1ef4878`) et D3 (`0be08cd`) inchangés. Travail en worktree isolé : l'artefact non suivi du checkout principal est préservé, aucune base du développeur n'a été écrite.
+
+**Tests exécutés :** 18 tests de régression (7 échouent sans A-α, 1 sans B-α) ; `test_mission_authorize_response` 20/20 ; `test_mission_web_authorization` 6/6 ; `test_web_security_phase6_1` 35/35 ; `test_web_security` 33/33 ; `test_mission_orchestrator` 73/73 ; `test_mission_bounds` 20/20 ; `test_windows_paths` 21/21 ; `test_tool_policy` 11/11 ; `test_path_security` 21/21 (3 ignorés) ; `test_tool_engine` 26/26 ; `test_tool_integration` 40/40 ; `test_tool_resources` 8/8 (1 ignoré) ; suite complète **633 tests OK (4 ignorés)** ; **70 tests d'audit Agent B rejoués tels quels : OK (2 ignorés)**. Non exécuté : Debian 13 (environnement indisponible). Aucun appel API payant, aucune donnée réelle lue ni écrite.
+
+**Problèmes restants :** l'option **A-β** (exiger le jeton sur `/answer`) n'est pas appliquée — c'est un changement de contrat d'API, à arbitrer ; la fenêtre résiduelle « mission occupée » reste couverte par le 409 ; le compte rendu provisoire d'une mission en attente ne comporte plus d'analyse qualitative (effet de bord assumé) ; le refus d'une approbation cross-session dépend du contrôle de session de D1 : **D1 doit être fusionné avant ce correctif**.
+
+**Prochaine action recommandée :** Agent B prend TASK-DEV-030 (audit de `fix/miles-answer-d1ter`) et tranche A-β ; ne pas fusionner avant cet audit ; à la fusion, respecter l'ordre D1 → D2 → D1-bis → D3 → A-α/B-α et résoudre manuellement le conflit de contexte possible sur le bloc d'imports de `web.py` (constantes `REASON_*`).
+
+
 ## 3. Transmission de la main
 
 - Prévenir l'autre agent (par le canal convenu hors dépôt, ex. message) qu'une mise à jour est disponible sur GitHub ou dans le clone partagé.

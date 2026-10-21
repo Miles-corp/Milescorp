@@ -91,6 +91,7 @@ REASON_MISSING_APPROVAL_TOKEN = "missing_approval_token"
 REASON_INVALID_APPROVAL_TOKEN = "invalid_approval_token"
 REASON_EXPIRED_APPROVAL_TOKEN = "expired_approval_token"
 REASON_SESSION_MISMATCH = "session_mismatch"
+REASON_INTERACTION_BUDGET_EXCEEDED = "interaction_budget_exceeded"
 
 
 class MissionRunner:
@@ -295,6 +296,78 @@ class MissionRunner:
         self._record_event(mission, "cancelled", "Mission annulée.")
         return True
 
+    def check_answer(
+        self,
+        mission_id: str,
+        *,
+        requester_user_id: Optional[str] = None,
+        requester_session_id: Optional[str] = None,
+    ) -> Mission:
+        """Vérifier qu'une réponse peut être traitée, sans la traiter.
+
+        Cette méthode factorise les contrôles de :meth:`answer` : elle
+        permet à un appelant (interface web) de **refuser** une réponse
+        avant d'annoncer un succès, au lieu de découvrir l'échec dans un
+        fil d'exécution (défaut D1-bis, appliqué à la route `/answer`).
+
+        Contrôles effectués :
+        - la mission existe et n'est pas dans un état terminal ;
+        - le demandeur est le propriétaire de la mission ;
+        - une demande est bien en attente ;
+        - le budget d'interactions n'est pas épuisé ;
+        - si la demande en attente est une **autorisation**, les mêmes
+          contrôles que l'octroi d'un grant s'appliquent (expiration de la
+          demande, session du demandeur). Le jeton utilisé est celui de la
+          demande en attente : le contrat de `/answer` n'impose pas au
+          client de présenter un jeton.
+
+        Returns:
+            La mission sur laquelle porte la demande.
+
+        Raises:
+            MissionAuthorizationError: si la réponse ne peut pas être
+                traitée. L'attribut ``reason`` porte le code de refus.
+        """
+        mission = self.get(mission_id)
+        if mission is None:
+            raise MissionAuthorizationError(
+                "Mission inconnue.", REASON_MISSION_NOT_FOUND
+            )
+        if mission.state.is_terminal:
+            raise MissionAuthorizationError(
+                "La mission est deja terminee.", REASON_MISSION_FINISHED
+            )
+        if (
+            mission.owner_user_id
+            and requester_user_id is not None
+            and str(requester_user_id) != mission.owner_user_id
+        ):
+            raise MissionAuthorizationError(
+                "Cette mission appartient a un autre utilisateur.",
+                REASON_MISSION_NOT_OWNED,
+            )
+        if mission.pending is None:
+            raise MissionAuthorizationError(
+                "Aucune demande en attente pour cette mission.",
+                REASON_NO_PENDING_AUTHORIZATION,
+            )
+        if mission.budget.interactions > self.limits.max_interactions:
+            raise MissionAuthorizationError(
+                "Budget d'interactions de la mission épuisé.",
+                REASON_INTERACTION_BUDGET_EXCEEDED,
+            )
+        if mission.pending.kind == "authorization":
+            # Même validation que l'octroi d'un grant (propriétaire,
+            # expiration, session) : la réponse porte sur une vraie demande
+            # d'autorisation.
+            self.check_authorization(
+                mission_id,
+                approval_token=mission.pending.approval_token,
+                requester_user_id=requester_user_id,
+                requester_session_id=requester_session_id,
+            )
+        return mission
+
     def answer(
         self,
         mission_id: str,
@@ -314,26 +387,11 @@ class MissionRunner:
             MissionAuthorizationError: si le demandeur n'est pas le
                 propriétaire de la mission.
         """
-        mission = self.get(mission_id)
-        if mission is None:
-            return None
-        if (
-            mission.owner_user_id
-            and requester_user_id is not None
-            and str(requester_user_id) != mission.owner_user_id
-        ):
-            raise MissionAuthorizationError(
-                "Cette mission appartient a un autre utilisateur."
-            )
-        if mission.pending is None:
-            return mission
-        if mission.budget.interactions > self.limits.max_interactions:
-            # Défense : une interaction de plus que le budget global ne
-            # doit jamais être traitée (le compteur est incrémenté à la
-            # demande, pas à la réponse).
-            raise MissionAuthorizationError(
-                "Budget d'interactions de la mission épuisé."
-            )
+        mission = self.check_answer(
+            mission_id,
+            requester_user_id=requester_user_id,
+            requester_session_id=requester_session_id,
+        )
         text = (answer or "").strip()
         if mission.pending.kind == "authorization":
             approved = text.lower() in ("o", "oui", "y", "yes", "ok", "autorise")
@@ -830,7 +888,15 @@ class MissionRunner:
             self._collect_unfinished(mission)
 
         mission.finished_at = self._clock()
-        mission.report = self._report_builder.build(mission, self._analyze)
+        # L'analyse qualitative est demandée au fournisseur IA : elle n'est
+        # demandée que si la mission est TERMINÉE. Sinon le fil de la
+        # mission reste occupé le temps de l'appel au fournisseur, et une
+        # autorisation reçue pendant ce temps est ignorée (défaut D1-ter).
+        # Le compte rendu provisoire d'une mission en attente ne comporte
+        # donc pas de section « Analyse qualitative » ; le compte rendu
+        # définitif, produit à la fin de la mission, la contient.
+        analyste = self._analyze if mission.state.is_terminal else None
+        mission.report = self._report_builder.build(mission, analyste)
         mission.touch()
         self._save(mission)
         self._record_event(mission, "finished", f"Etat final : {mission.state.value}.")
