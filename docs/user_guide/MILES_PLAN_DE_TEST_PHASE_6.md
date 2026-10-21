@@ -23,7 +23,7 @@ que MILES sait faire réellement.
 | 7 | Limites : durée, appels d'outils, échanges, erreurs | ✅ opérationnel (voir la réserve sur les étapes, §4.7) | §4.7 |
 | 8 | Consultation / reprise / annulation d'une mission | ✅ opérationnel | §4.8 |
 | 9 | Interface web locale (auth, refus d'origine, types de contenu) | ✅ opérationnel | §5.1 |
-| 10 | Mission **déclenchée depuis l'interface web** | ⚠️ **bloquée** par un défaut connu (autorisation qui ne converge pas) | §6, D1 |
+| 10 | Mission **déclenchée depuis l'interface web** | ✅ opérationnelle (défaut D1 corrigé, branche `fix/miles-d1-web-authorization`) | §5.2 |
 | 11 | Conversation avec un fournisseur IA distant | ⚠️ dépend d'un service externe payant | §7 |
 | 12 | Lecture de fichiers volumineux / capteurs matériels | ⚠️ non applicable | §7 |
 
@@ -255,10 +255,12 @@ Résultats **vérifiés** : 200 / 200 / 401 / 200 / 403 / 415.
 
 ### 5.2 Mission depuis l'interface web
 
-`POST /mission` crée la mission et la démarre en arrière-plan. **Attention** :
-la mission atteint bien l'état `awaiting_authorization`, mais l'autorisation
-ne converge pas (défaut connu **D1**, §6). Ne jugez pas la mission web sur ce
-point tant que D1 n'est pas corrigé.
+`POST /mission` crée la mission et la démarre en arrière-plan. La mission
+atteint l'état `awaiting_authorization` ; après `POST /mission/<id>/authorize`
+(avec le jeton d'approbation renvoyé dans `pending.approval_token`), elle se
+**termine** : état final `completed`, 5 étapes / 5 appels d'outils / 1 échange.
+Le défaut D1 (l'autorisation ne convergeait pas) est corrigé dans la branche
+`fix/miles-d1-web-authorization`.
 
 ---
 
@@ -270,7 +272,8 @@ documentés dans `docs/reports/PHASE_6_3_VALIDATION_UTILISATEUR_AGENT_A.md`.
 
 | # | Gravité | Symptôme | Cause | Correctif proposé |
 |---|----------|----------|-------|-------------------|
-| **D1** | Élevée | Depuis l'interface web, l'autorisation d'une mission ne converge jamais : chaque autorisation soulève une nouvelle demande, jusqu'à l'épuisement du budget d'échanges (`interaction_budget_exceeded`). | `app/orchestration/runner.py::_ensure_authorization` interroge le registre d'autorisations avec **la session du runner** (`self.session_id`) alors que le grant est émis pour **la session du client** (`mission.session_id`). Les deux diffèrent pour le web. | Une ligne : interroger avec `mission.session_id or self.session_id`. |
+| **D1** | Élevée | **CORRIGÉ** (branche `fix/miles-d1-web-authorization`) : l'autorisation web converge et la mission se termine. | Le registre d'autorisations était interrogé avec la session du runner au lieu de celle du client. | Une ligne : interroger avec `mission.session_id or self.session_id`. |
+| **D1-bis** | Mineure | `POST /mission/<id>/authorize` renvoie `{"approved": true}` même quand le jeton d'approbation est invalide : la validation a lieu dans le fil d'exécution, dont l'exception n'est pas retournée. Aucune élévation de privilège (l'autorisation n'est pas accordée) ; la réponse HTTP est trompeuse. | Valider le jeton d'approbation de façon synchrone dans `WebApp.authorize_mission` avant de démarrer le fil. |
 | **D2** | Moyenne | Un chemin Windows absolu perd sa lettre de lecteur : `C:/Windows` → `/Windows`. La mission analyse alors le mauvais répertoire et le message d'erreur est trompeur. | `app/orchestration/planner.py::extract_target_path` : la classe de caractères du chemin n'inclut pas `:`. | Inclure `:` (et un cas de test). |
 | **D3** | Moyenne | Toute valeur de paramètre contenant `code`, `source`, `script`, `python` ou `javascript` est refusée : les chemins légitimes (`C:\dev\source\`, `C:\Users\X\Documents\code\`) sont rejetés et la mission ne peut pas les analyser. | `app/tools/policy.py::validate_no_code_execution` applique un contrôle par sous-chaîne aux VALEURS, y compris aux chemins. | Ne pas appliquer ce contrôle par sous-chaîne aux valeurs de type chemin (le contrôle sur les CLÉS est conservé). **Ne pas modifier sans validation explicite : c'est du code de sécurité.** |
 | **D4** | Mineure | Avec un fournisseur configuré mais injoignable, une mission attend le délai du fournisseur (jusqu'à 30 s) avant le repli déterministe ; l'interface paraît figée. | Le planificateur interroge le fournisseur avant de basculer. | Documenté ; contournement : ne pas configurer de fournisseur (§2). |

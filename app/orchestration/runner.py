@@ -850,8 +850,21 @@ class MissionRunner:
         parameters = dict(step.parameters)
         if "path" not in parameters and mission.target_path:
             parameters["path"] = mission.target_path
+        # L'autorisation est vérifiée avec la session du client PROPRIÉTAIRE
+        # de la mission, et non avec la session de l'application : le grant
+        # est émis pour la session du demandeur (voir `authorize`), qui peut
+        # être différente de celle du runner — c'est le cas pour l'interface
+        # web, où chaque client a sa propre session. Avec la session de
+        # l'application, un grant web légitime était refusé et la mission
+        # redemandait une autorisation sans fin (défaut D1). La session du
+        # client est déjà employée pour lier les jetons de confirmation des
+        # outils (voir `Executor.execute`), la vérification est donc
+        # cohérente avec lui.
         grant_id = self.grant_registry.authorize(
-            step.tool_id, parameters, mission.mission_id, self.session_id
+            step.tool_id,
+            parameters,
+            mission.mission_id,
+            mission.session_id or self.session_id,
         )
         if grant_id:
             return True
