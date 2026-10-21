@@ -76,6 +76,8 @@ class Settings:
         "mission_max_steps": 12,
         "mission_max_attempts": 2,
         "mission_max_duration_seconds": 120,
+        "mission_max_tool_calls": 24,
+        "mission_max_interactions": 5,
         # Interface web : authentification et contrôle d'origine (Phase 6.1)
         "web_auth_token": "",
         "web_users_file": "",
@@ -141,6 +143,8 @@ class Settings:
             "MILES_MISSION_MAX_STEPS": "mission_max_steps",
             "MILES_MISSION_MAX_ATTEMPTS": "mission_max_attempts",
             "MILES_MISSION_MAX_DURATION_SECONDS": "mission_max_duration_seconds",
+            "MILES_MISSION_MAX_TOOL_CALLS": "mission_max_tool_calls",
+            "MILES_MISSION_MAX_INTERACTIONS": "mission_max_interactions",
             # Interface web : authentification et contrôle d'origine (Phase 6.1)
             "MILES_WEB_AUTH_TOKEN": "web_auth_token",
             "MILES_WEB_USERS_FILE": "web_users_file",
@@ -166,6 +170,8 @@ class Settings:
                     "mission_max_steps",
                     "mission_max_attempts",
                     "mission_max_duration_seconds",
+                    "mission_max_tool_calls",
+                    "mission_max_interactions",
                 ):
                     try:
                         value = int(value)
@@ -285,6 +291,8 @@ class Settings:
             ("mission_max_steps", 1),
             ("mission_max_attempts", 1),
             ("mission_max_duration_seconds", 1),
+            ("mission_max_tool_calls", 1),
+            ("mission_max_interactions", 1),
         ):
             value = self._values.get(key)
             if not isinstance(value, int) or value < minimum:
@@ -376,3 +384,13 @@ class Settings:
     @property
     def mission_max_duration_seconds(self) -> int:
         return int(self._values.get("mission_max_duration_seconds", 120))
+
+    @property
+    def mission_max_tool_calls(self) -> int:
+        """Plafond global d'appels d'outils par mission."""
+        return int(self._values.get("mission_max_tool_calls", 24))
+
+    @property
+    def mission_max_interactions(self) -> int:
+        """Plafond global d'échanges avec l'utilisateur par mission."""
+        return int(self._values.get("mission_max_interactions", 5))

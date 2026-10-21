@@ -253,12 +253,20 @@ class ExecutionLimits:
     l'orchestrateur à chaque itération de la boucle.
 
     Attributs :
-        max_steps : nombre maximal d'étapes exécutées par mission.
-        max_attempts_per_step : nombre maximal de tentatives par étape.
-        max_duration_seconds : durée maximale d'une mission.
-        max_identical_results : nombre maximal de résultats identiques
-            consécutifs (détection de boucle).
-        max_report_bytes : taille maximale du compte rendu.
+    max_steps : nombre maximal d'étapes exécutées par mission.
+    max_attempts_per_step : nombre maximal de tentatives par étape.
+    max_duration_seconds : durée maximale d'une mission.
+    max_identical_results : nombre maximal de résultats identiques
+        consécutifs (détection de boucle).
+    max_report_bytes : taille maximale du compte rendu.
+    max_tool_calls : nombre maximal d'APPELS D'OUTILS par mission (toutes
+        boucles confondues). Par défaut `max_steps * max_attempts_per_step` :
+        une valeur cohérente avec les deux bornes déjà fixées, et non une
+        limite arbitraire.
+    max_interactions : nombre maximal d'ÉCHANGES avec l'utilisateur
+        (clarifications et autorisations) par mission. La valeur 5 est celle
+        déjà appliquée par l'interface en ligne de commande ; elle est
+        désormais appliquée par l'orchestrateur, donc aussi par le web.
     """
 
     max_steps: int = 12
@@ -266,6 +274,8 @@ class ExecutionLimits:
     max_duration_seconds: float = 120.0
     max_identical_results: int = 2
     max_report_bytes: int = 20000
+    max_tool_calls: int = 24
+    max_interactions: int = 5
     approval_ttl_seconds: float = 300.0
 
     def to_dict(self) -> dict[str, Any]:
@@ -275,6 +285,8 @@ class ExecutionLimits:
             "max_duration_seconds": self.max_duration_seconds,
             "max_identical_results": self.max_identical_results,
             "max_report_bytes": self.max_report_bytes,
+            "max_tool_calls": self.max_tool_calls,
+            "max_interactions": self.max_interactions,
             "approval_ttl_seconds": self.approval_ttl_seconds,
         }
 
@@ -340,6 +352,90 @@ class PendingRequest:
         )
 
 
+class StopReason(str, Enum):
+    """Motifs d'arrêt d'une mission (codes stables, exploitables par un client).
+
+    Un motif est TOUJOURS renseigné quand la mission cesse : la raison
+    d'un arrêt est donc toujours connue de l'appelant, et pas seulement
+    déductible d'un état.
+    """
+
+    NOT_STARTED = "not_started"
+    COMPLETED = "completed"
+    PARTIAL = "partial"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    TIME_BUDGET_EXCEEDED = "time_budget_exceeded"
+    STEP_BUDGET_EXCEEDED = "step_budget_exceeded"
+    TOOL_CALL_BUDGET_EXCEEDED = "tool_call_budget_exceeded"
+    INTERACTION_BUDGET_EXCEEDED = "interaction_budget_exceeded"
+    REPEATED_RESULTS = "repeated_results"
+    AUTHORIZATION_REQUIRED = "authorization_required"
+    CLARIFICATION_REQUIRED = "clarification_required"
+
+
+@dataclass
+class MissionBudget:
+    """Budget GLOBAL d'une mission.
+
+    Le budget est porté par la MISSION (et non par la boucle d'exécution) :
+    il n'est donc jamais réinitialisé par un changement de boucle, un
+    replanification, une réponse de l'utilisateur ou une reprise.
+
+    Attributs :
+        executed_seconds : temps d'exécution cumulé (le temps d'attente
+            d'un humain n'est PAS consommé : le budget mesure le travail
+            machine réellement effectué).
+        steps_executed : nombre cumulé d'étapes exécutées.
+        tool_calls : nombre cumulé d'appels d'outils effectués.
+        interactions : nombre cumulé de demandes adressées à l'utilisateur
+            (clarifications et autorisations).
+        last_signature : empreinte du dernier résultat observé (détection
+            de boucle, globale et non réinitialisée par une boucle).
+        identical_results : nombre de résultats identiques consécutifs
+            (détection de boucle).
+        stop_reason : motif d'arrêt (code de `StopReason`), vide si la
+            mission est en cours.
+        stop_detail : détail lisible du motif d'arrêt.
+    """
+
+    executed_seconds: float = 0.0
+    steps_executed: int = 0
+    tool_calls: int = 0
+    interactions: int = 0
+    last_signature: str = ""
+    identical_results: int = 0
+    stop_reason: str = ""
+    stop_detail: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "executed_seconds": self.executed_seconds,
+            "steps_executed": self.steps_executed,
+            "tool_calls": self.tool_calls,
+            "interactions": self.interactions,
+            "last_signature": self.last_signature,
+            "identical_results": self.identical_results,
+            "stop_reason": self.stop_reason,
+            "stop_detail": self.stop_detail,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "MissionBudget":
+        if not isinstance(data, dict):
+            return cls()
+        return cls(
+            executed_seconds=float(data.get("executed_seconds", 0.0) or 0.0),
+            steps_executed=int(data.get("steps_executed", 0) or 0),
+            tool_calls=int(data.get("tool_calls", 0) or 0),
+            interactions=int(data.get("interactions", 0) or 0),
+            last_signature=str(data.get("last_signature", "") or ""),
+            identical_results=int(data.get("identical_results", 0) or 0),
+            stop_reason=str(data.get("stop_reason", "") or ""),
+            stop_detail=str(data.get("stop_detail", "") or ""),
+        )
+
+
 @dataclass
 class Mission:
     """Une mission d'observation/confiance confiée à l'orchestrateur.
@@ -361,6 +457,7 @@ class Mission:
             (vide pour une mission locale hors interface web).
         report : compte rendu final.
         target_path : chemin cible déterminé pour la mission (si connu).
+        budget : budget GLOBAL de la mission (jamais réinitialisé).
         created_at / updated_at / started_at / finished_at : horodatages.
     """
 
@@ -378,6 +475,7 @@ class Mission:
     owner_user_id: str = ""
     report: str = ""
     target_path: str = ""
+    budget: MissionBudget = field(default_factory=MissionBudget)
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     started_at: Optional[float] = None
@@ -409,6 +507,7 @@ class Mission:
             "owner_user_id": self.owner_user_id,
             "report": sanitize_text(self.report),
             "target_path": self.target_path,
+            "budget": self.budget.to_dict(),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "started_at": self.started_at,
@@ -435,6 +534,7 @@ class Mission:
             owner_user_id=str(data.get("owner_user_id", "")),
             report=str(data.get("report", "")),
             target_path=str(data.get("target_path", "")),
+            budget=MissionBudget.from_dict(data.get("budget")),
             created_at=float(data.get("created_at", 0.0)),
             updated_at=float(data.get("updated_at", 0.0)),
             started_at=data.get("started_at"),

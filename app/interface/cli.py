@@ -399,15 +399,31 @@ class CLI:
         mission = self.mission_runner.run(mission.mission_id)
         self._drive_mission(mission)
 
+    def _mission_interaction_limit(self) -> int:
+        """Plafond d'échanges utilisateur appliqué à une mission.
+
+        La valeur provient de l'orchestrateur (et donc des réglages
+        applicatifs) ; en son absence, la valeur historique (5) est
+        employée.
+        """
+        runner = self.mission_runner
+        limits = getattr(runner, "limits", None)
+        value = getattr(limits, "max_interactions", None)
+        if isinstance(value, int) and value > 0:
+            return value
+        return 5
+
     def _drive_mission(self, mission: Any) -> None:
         """Conduire une mission jusqu'à son terme ou jusqu'à un refus.
 
         Les demandes adressées à l'utilisateur (clarification, autorisation)
         sont posées dans le terminal. Le nombre d'échanges est borné : une
-        boucle de questions ne peut pas bloquer le programme.
+        boucle de questions ne peut pas bloquer le programme. La borne
+        provient de l'orchestrateur (source unique de vérité) : c'est le
+        MÊME plafond global que celui appliqué au web.
         """
         interactions = 0
-        max_interactions = 5
+        max_interactions = self._mission_interaction_limit()
         while (
             mission is not None
             and mission.pending is not None

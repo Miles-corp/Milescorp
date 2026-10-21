@@ -228,6 +228,8 @@ def main(argv: list[str] | None = None) -> int:
                 max_steps=settings.mission_max_steps,
                 max_attempts_per_step=settings.mission_max_attempts,
                 max_duration_seconds=float(settings.mission_max_duration_seconds),
+                max_tool_calls=settings.mission_max_tool_calls,
+                max_interactions=settings.mission_max_interactions,
             ),
             grant_registry=grant_registry,
             session_id=session_id,

@@ -38,6 +38,7 @@ from app.orchestration.models import (
     Plan,
     PlanStep,
     StepStatus,
+    StopReason,
 )
 from app.orchestration.observer import Observer
 from app.orchestration.planner import (
@@ -262,10 +263,12 @@ class MissionRunner:
         if mission.state.is_terminal:
             return False
         mission.state = MissionState.CANCELLED
+        mission.budget.stop_reason = StopReason.CANCELLED.value
+        mission.budget.stop_detail = "Mission annulée par l'utilisateur."
         mission.finished_at = self._clock()
         mission.touch()
         self._save(mission)
-        self._record_event(mission, "cancelled", "Mission annulee par l'utilisateur.")
+        self._record_event(mission, "cancelled", "Mission annulée.")
         return True
 
     def answer(
@@ -300,6 +303,13 @@ class MissionRunner:
             )
         if mission.pending is None:
             return mission
+        if mission.budget.interactions > self.limits.max_interactions:
+            # Défense : une interaction de plus que le budget global ne
+            # doit jamais être traitée (le compteur est incrémenté à la
+            # demande, pas à la réponse).
+            raise MissionAuthorizationError(
+                "Budget d'interactions de la mission épuisé."
+            )
         text = (answer or "").strip()
         if mission.pending.kind == "authorization":
             approved = text.lower() in ("o", "oui", "y", "yes", "ok", "autorise")
@@ -316,6 +326,23 @@ class MissionRunner:
         if candidate:
             mission.target_path = candidate
         else:
+            if mission.budget.interactions >= self.limits.max_interactions:
+                # Budget d'interactions épuisé : on ne relance pas une question
+                # qui n'a pas été comprise, la mission s'arrête.
+                mission.state = MissionState.LIMIT_REACHED
+                mission.budget.stop_reason = (
+                    StopReason.INTERACTION_BUDGET_EXCEEDED.value
+                )
+                mission.budget.stop_detail = (
+                    f"Nombre maximal d'échanges avec l'utilisateur atteint "
+                    f"({self.limits.max_interactions})."
+                )
+                mission.errors.append(mission.budget.stop_detail)
+                mission.finished_at = self._clock()
+                mission.report = self._report_builder.build(mission, self._analyze)
+                mission.touch()
+                self._save(mission)
+                return mission
             mission.pending = PendingRequest(
                 kind="clarification",
                 question=(
@@ -324,6 +351,9 @@ class MissionRunner:
                 ),
                 created_at=self._clock(),
             )
+            mission.budget.interactions += 1
+            mission.budget.stop_reason = StopReason.CLARIFICATION_REQUIRED.value
+            mission.budget.stop_detail = "Réponse non comprise : question relancée."
             self._save(mission)
             return mission
 
@@ -391,9 +421,11 @@ class MissionRunner:
         if not approved:
             mission.pending = None
             mission.state = MissionState.FAILED
-            mission.errors.append(
+            mission.budget.stop_reason = StopReason.FAILED.value
+            mission.budget.stop_detail = (
                 "Autorisation refusée par l'utilisateur : mission arrêtée."
             )
+            mission.errors.append(mission.budget.stop_detail)
             mission.finished_at = self._clock()
             mission.report = self._report_builder.build(mission, self._analyze)
             self._save(mission)
@@ -493,21 +525,45 @@ class MissionRunner:
         try:
             plan = self.planner.plan(mission.objective, context)
         except ClarificationRequired as exc:
+            if mission.budget.interactions >= self.limits.max_interactions:
+                # Budget d'interactions épuisé : on n'ouvre pas de nouvelle
+                # demande, la mission s'arrête avec un motif explicite.
+                mission.state = MissionState.LIMIT_REACHED
+                mission.budget.stop_reason = (
+                    StopReason.INTERACTION_BUDGET_EXCEEDED.value
+                )
+                mission.budget.stop_detail = (
+                    f"Nombre maximal d'échanges avec l'utilisateur atteint "
+                    f"({self.limits.max_interactions})."
+                )
+                mission.errors.append(mission.budget.stop_detail)
+                mission.finished_at = self._clock()
+                mission.report = self._report_builder.build(mission, self._analyze)
+                mission.touch()
+                self._save(mission)
+                return None
             mission.state = MissionState.NEEDS_CLARIFICATION
             mission.pending = PendingRequest(
                 kind="clarification",
                 question=exc.question,
                 created_at=self._clock(),
             )
+            mission.budget.interactions += 1
+            mission.budget.stop_reason = StopReason.CLARIFICATION_REQUIRED.value
+            mission.budget.stop_detail = "Information manquante demandée."
             mission.touch()
             self._save(mission)
             self._record_event(
-                mission, "clarification", "Information manquante demandee."
+                mission, "clarification", "Information manquante demandée."
             )
             return None
         except PlanRejected as exc:
             mission.state = MissionState.FAILED
-            mission.errors.append(str(exc.reason if hasattr(exc, "reason") else exc))
+            mission.budget.stop_reason = StopReason.FAILED.value
+            mission.budget.stop_detail = str(
+                exc.reason if hasattr(exc, "reason") else exc
+            )
+            mission.errors.append(mission.budget.stop_detail)
             mission.finished_at = self._clock()
             mission.report = self._report_builder.build(mission, self._analyze)
             mission.touch()
@@ -524,104 +580,146 @@ class MissionRunner:
         return plan
 
     def _execute_loop(self, mission: Mission) -> Mission:
-        """Boucle bornée d'exécution des étapes."""
+        """Boucle bornée d'exécution des étapes.
+
+        Les bornes sont **globales à la mission** : elles sont lues dans
+        ``mission.budget``, qui n'est jamais réinitialisé (ni par une
+        nouvelle boucle, ni par une replanification, ni par une réponse ou
+        une reprise). La durée mesure le temps d'**exécution** cumulé : le
+        temps d'attente d'un humain n'est pas consommé par le budget, comme
+        auparavant.
+        """
         limits = self.limits
-        deadline = self._clock() + limits.max_duration_seconds
+        budget = mission.budget
         results: Dict[str, Any] = {}
-        executed = 0
-        identical = 0
-        last_signature = ""
         mission.state = MissionState.RUNNING
         if mission.started_at is None:
             mission.started_at = self._clock()
 
-        while True:
-            if mission.mission_id in self._cancelled:
-                mission.state = MissionState.CANCELLED
-                break
+        loop_start = self._clock()
+        base_seconds = budget.executed_seconds
 
-            if self._clock() > deadline:
-                mission.state = MissionState.LIMIT_REACHED
-                mission.errors.append(
-                    f"Durée maximale de mission atteinte "
-                    f"({limits.max_duration_seconds} s)."
-                )
-                break
+        def elapsed_total() -> float:
+            """Durée d'exécution cumulée depuis le début de la mission."""
+            return base_seconds + max(0.0, self._clock() - loop_start)
 
-            step = mission.plan.next_pending() if mission.plan else None
-            if step is None:
-                break
+        def stop(reason: StopReason, detail: str) -> None:
+            """Arrêter la mission en propagant explicitement le motif."""
+            mission.state = MissionState.LIMIT_REACHED
+            budget.stop_reason = reason.value
+            budget.stop_detail = detail
+            mission.errors.append(detail)
 
-            if executed >= limits.max_steps:
-                mission.state = MissionState.LIMIT_REACHED
-                mission.errors.append(
-                    f"Nombre maximal d'étapes atteint ({limits.max_steps})."
-                )
-                break
+        try:
+            while True:
+                if mission.mission_id in self._cancelled:
+                    mission.state = MissionState.CANCELLED
+                    budget.stop_reason = StopReason.CANCELLED.value
+                    budget.stop_detail = "Mission annulée par l'utilisateur."
+                    break
 
-            if not self._ensure_authorization(mission, step):
-                break
-
-            executed += 1
-            step.status = StepStatus.RUNNING
-            step.attempts += 1
-            outcome = self.executor.execute(step, mission, results)
-            observation = self.observer.observe(step, outcome)
-            mission.facts.extend(observation.facts)
-
-            if outcome.status == StepStatus.SUCCEEDED:
-                step.status = StepStatus.SUCCEEDED
-                step.result = outcome.result
-                step.error = ""
-                results[step.step_id] = outcome.result
-                identical, last_signature = self._track_signature(
-                    observation.signature, last_signature, identical
-                )
-            elif outcome.status == StepStatus.SKIPPED:
-                step.status = StepStatus.SKIPPED
-                step.note = outcome.skipped_reason
-                identical = 0
-            elif outcome.status == StepStatus.BLOCKED:
-                step.status = StepStatus.BLOCKED
-                step.error = outcome.error
-                mission.pending = self._authorization_request(mission, step)
-                mission.state = MissionState.AWAITING_AUTHORIZATION
-                self._record_event(
-                    mission, "authorization_required", "Autorisation humaine requise."
-                )
-                identical = 0
-                break
-            else:
-                step.status = StepStatus.FAILED
-                step.error = outcome.error
-                mission.errors.append(
-                    f"Étape {step.step_id} ({step.tool_id}) : {outcome.error}"
-                )
-                identical = 0
-                if (
-                    outcome.kind == FailureKind.TRANSIENT
-                    and step.attempts < limits.max_attempts_per_step
-                ):
-                    # Reprise limitée : l'étape repasse en attente et sera
-                    # rejouée au prochain tour de boucle.
-                    step.status = StepStatus.PENDING
-                    step.note = (
-                        f"nouvelle tentative ({step.attempts + 1}/"
-                        f"{limits.max_attempts_per_step})"
+                if elapsed_total() > limits.max_duration_seconds:
+                    stop(
+                        StopReason.TIME_BUDGET_EXCEEDED,
+                        f"Durée maximale de mission atteinte "
+                        f"({limits.max_duration_seconds} s).",
                     )
-                    continue
-                self._skip_dependents(mission, step.step_id)
+                    break
 
-            if identical >= limits.max_identical_results:
-                mission.state = MissionState.LIMIT_REACHED
-                mission.errors.append(
-                    "Résultats identiques répétés : boucle détectée, "
-                    "mission arrêtée."
-                )
-                break
+                step = mission.plan.next_pending() if mission.plan else None
+                if step is None:
+                    break
 
-            mission.touch()
-            self._save(mission)
+                if budget.steps_executed >= limits.max_steps:
+                    stop(
+                        StopReason.STEP_BUDGET_EXCEEDED,
+                        f"Nombre maximal d'étapes atteint ({limits.max_steps}).",
+                    )
+                    break
+
+                if budget.tool_calls >= limits.max_tool_calls:
+                    stop(
+                        StopReason.TOOL_CALL_BUDGET_EXCEEDED,
+                        f"Nombre maximal d'appels d'outils atteint "
+                        f"({limits.max_tool_calls}).",
+                    )
+                    break
+
+                if not self._ensure_authorization(mission, step):
+                    break
+
+                budget.steps_executed += 1
+                budget.tool_calls += 1
+                step.status = StepStatus.RUNNING
+                step.attempts += 1
+                outcome = self.executor.execute(step, mission, results)
+                observation = self.observer.observe(step, outcome)
+                mission.facts.extend(observation.facts)
+
+                if outcome.status == StepStatus.SUCCEEDED:
+                    step.status = StepStatus.SUCCEEDED
+                    step.result = outcome.result
+                    step.error = ""
+                    results[step.step_id] = outcome.result
+                    budget.identical_results, budget.last_signature = (
+                        self._track_signature(
+                            observation.signature,
+                            budget.last_signature,
+                            budget.identical_results,
+                        )
+                    )
+                elif outcome.status == StepStatus.SKIPPED:
+                    step.status = StepStatus.SKIPPED
+                    step.note = outcome.skipped_reason
+                    budget.identical_results = 0
+                elif outcome.status == StepStatus.BLOCKED:
+                    step.status = StepStatus.BLOCKED
+                    step.error = outcome.error
+                    if not self._request_authorization(mission, step):
+                        # Budget d'interactions épuisé : la mission
+                        # s'arrête avec un motif explicite.
+                        break
+                    self._record_event(
+                        mission, "authorization_required", "Autorisation humaine requise."
+                    )
+                    budget.identical_results = 0
+                    break
+                else:
+                    step.status = StepStatus.FAILED
+                    step.error = outcome.error
+                    mission.errors.append(
+                        f"Étape {step.step_id} ({step.tool_id}) : {outcome.error}"
+                    )
+                    budget.identical_results = 0
+                    if (
+                        outcome.kind == FailureKind.TRANSIENT
+                        and step.attempts < limits.max_attempts_per_step
+                    ):
+                        # Reprise limitée : l'étape repasse en attente et sera
+                        # rejouée au prochain tour de boucle.
+                        step.status = StepStatus.PENDING
+                        step.note = (
+                            f"nouvelle tentative ({step.attempts + 1}/"
+                            f"{limits.max_attempts_per_step})"
+                        )
+                        continue
+                    self._skip_dependents(mission, step.step_id)
+
+                if budget.identical_results >= limits.max_identical_results:
+                    stop(
+                        StopReason.REPEATED_RESULTS,
+                        "Résultats identiques répétés : boucle détectée, "
+                        "mission arrêtée.",
+                    )
+                    break
+
+                budget.executed_seconds = elapsed_total()
+                mission.touch()
+                self._save(mission)
+        finally:
+            # Le temps d'exécution de cette boucle est imputé au budget
+            # global, même en cas de sortie anormale.
+            budget.executed_seconds = elapsed_total()
 
         if mission.state == MissionState.RUNNING:
             self._collect_unfinished(mission)
@@ -629,6 +727,15 @@ class MissionRunner:
                 MissionState.COMPLETED
                 if not mission.errors and not mission.unfinished
                 else MissionState.PARTIAL
+            )
+            budget.stop_reason = (
+                StopReason.COMPLETED.value
+                if mission.state == MissionState.COMPLETED
+                else StopReason.PARTIAL.value
+            )
+            budget.stop_detail = (
+                "Mission terminée." if mission.state == MissionState.COMPLETED
+                else "Mission terminée avec des écarts (voir les erreurs)."
             )
 
         if mission.state == MissionState.CANCELLED:
@@ -689,6 +796,36 @@ class MissionRunner:
                 f"{step.step_id} ({step.tool_id}) : {label}{suffix}"
             )
 
+    def _request_authorization(self, mission: Mission, step: PlanStep) -> bool:
+        """Lever une demande d'autorisation pour une étape sensible.
+
+        Point unique de création d'une demande : le budget global
+        d'interactions y est vérifié et débité, et le motif d'arrêt est
+        renseigné. La même règle s'applique quelle que soit l'origine de
+        la demande (pré-contrôle avant exécution, ou refus du moteur).
+
+        Returns:
+            True si la demande a été levée (la mission attend l'utilisateur),
+            False si le budget d'interactions est épuisé (la mission
+            s'arrête avec un motif explicite).
+        """
+        budget = mission.budget
+        if budget.interactions >= self.limits.max_interactions:
+            mission.state = MissionState.LIMIT_REACHED
+            budget.stop_reason = StopReason.INTERACTION_BUDGET_EXCEEDED.value
+            budget.stop_detail = (
+                f"Nombre maximal d'échanges avec l'utilisateur atteint "
+                f"({self.limits.max_interactions})."
+            )
+            mission.errors.append(budget.stop_detail)
+            return False
+        mission.pending = self._authorization_request(mission, step)
+        budget.interactions += 1
+        mission.state = MissionState.AWAITING_AUTHORIZATION
+        budget.stop_reason = StopReason.AUTHORIZATION_REQUIRED.value
+        budget.stop_detail = "Autorisation humaine requise."
+        return True
+
     def _ensure_authorization(self, mission: Mission, step: PlanStep) -> bool:
         """Vérifier qu'une action sensible est couverte par une autorisation.
 
@@ -700,8 +837,7 @@ class MissionRunner:
             # ne peuvent pas être exécutées silencieusement.
             tool = self.tool_service.registry.get_tool(step.tool_id)
             if tool is not None and tool.risk_level in ("MEDIUM", "HIGH"):
-                mission.pending = self._authorization_request(mission, step)
-                mission.state = MissionState.AWAITING_AUTHORIZATION
+                self._request_authorization(mission, step)
                 return False
             return True
 
@@ -720,8 +856,9 @@ class MissionRunner:
         if grant_id:
             return True
 
-        mission.pending = self._authorization_request(mission, step)
-        mission.state = MissionState.AWAITING_AUTHORIZATION
+        # Une demande a été levée (ou le budget est épuisé) : dans les deux
+        # cas, l'étape ne doit PAS être exécutée.
+        self._request_authorization(mission, step)
         return False
 
     def _authorization_request(

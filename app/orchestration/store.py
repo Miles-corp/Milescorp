@@ -40,7 +40,7 @@ class MissionStore:
         db_path : chemin du fichier de base de données SQLite.
     """
 
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
 
     def __init__(
         self,
@@ -104,6 +104,7 @@ class MissionStore:
                 errors_json TEXT NOT NULL DEFAULT '[]',
                 unfinished_json TEXT NOT NULL DEFAULT '[]',
                 pending_json TEXT,
+                budget_json TEXT NOT NULL DEFAULT '{}',
                 report TEXT NOT NULL DEFAULT '',
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL,
@@ -112,6 +113,17 @@ class MissionStore:
             )
             """
         )
+        # Migration : une base créée avant la version 2 (budget global
+        # persisté) ne possède pas la colonne budget_json.
+        columns = {
+            str(row[1])
+            for row in cursor.execute("PRAGMA table_info(missions)").fetchall()
+        }
+        if "budget_json" not in columns:
+            cursor.execute(
+                "ALTER TABLE missions ADD COLUMN budget_json "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS mission_events (
@@ -184,6 +196,7 @@ class MissionStore:
             if payload.get("pending")
             else None
         )
+        budget_json = json.dumps(payload.get("budget") or {}, default=str)
 
         with self._lock:
             assert self._conn is not None
@@ -194,9 +207,9 @@ class MissionStore:
                     INSERT INTO missions (
                         id, objective, state, session_id, planner, planner_note,
                         plan_json, facts_json, errors_json, unfinished_json,
-                        pending_json, report, created_at, updated_at,
+                        pending_json, budget_json, report, created_at, updated_at,
                         started_at, finished_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         objective = excluded.objective,
                         state = excluded.state,
@@ -208,6 +221,7 @@ class MissionStore:
                         errors_json = excluded.errors_json,
                         unfinished_json = excluded.unfinished_json,
                         pending_json = excluded.pending_json,
+                        budget_json = excluded.budget_json,
                         report = excluded.report,
                         updated_at = excluded.updated_at,
                         started_at = excluded.started_at,
@@ -225,6 +239,7 @@ class MissionStore:
                         errors_json,
                         unfinished_json,
                         pending_json,
+                        budget_json,
                         sanitize_text(payload["report"]),
                         payload["created_at"],
                         payload["updated_at"],
@@ -277,8 +292,9 @@ class MissionStore:
             "facts": _json(row["facts_json"], []),
             "errors": _json(row["errors_json"], []),
             "unfinished": _json(row["unfinished_json"], []),
-            "pending": _json(row["pending_json"], None),
-            "report": row["report"],
+        "pending": _json(row["pending_json"], None),
+        "budget": _json(row["budget_json"], {}),
+        "report": row["report"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
             "started_at": row["started_at"],

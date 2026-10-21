@@ -45,6 +45,18 @@ class ReportBuilder:
             lines.append(f"Planificateur : {mission.planner}")
         if mission.planner_note:
             lines.append(f"Note du planificateur : {mission.planner_note}")
+        # Budget global et motif d'arrêt : l'appel sait toujours POURQUOI
+        # la mission s'est arrêtée, et combien de budget a été consommé.
+        budget = mission.budget
+        lines.append(
+            "Budget consommé : "
+            f"{budget.executed_seconds:.1f} s d'exécution, "
+            f"{budget.steps_executed} étape(s), "
+            f"{budget.tool_calls} appel(s) d'outil(s), "
+            f"{budget.interactions} échange(s) utilisateur."
+        )
+        if budget.stop_reason:
+            lines.append(f"Motif d'arrêt : {budget.stop_reason}")
         lines.append("")
 
         lines.append("== Faits observés ==")

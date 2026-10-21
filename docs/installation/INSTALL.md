@@ -114,10 +114,22 @@ produit un compte rendu. Il est accessible depuis le terminal :
 | `MILES_MISSION_DB_PATH` | `data/missions.db` | Emplacement de la base des missions |
 | `MILES_MISSION_MAX_STEPS` | `12` | Nombre maximal d'étapes par mission |
 | `MILES_MISSION_MAX_ATTEMPTS` | `2` | Nombre maximal de tentatives par étape |
-| `MILES_MISSION_MAX_DURATION_SECONDS` | `120` | Durée maximale d'une mission |
+| `MILES_MISSION_MAX_DURATION_SECONDS` | `120` | Durée maximale d'exécution d'une mission |
+| `MILES_MISSION_MAX_TOOL_CALLS` | `24` | Nombre maximal d'appels d'outils par mission (toutes boucles confondues) |
+| `MILES_MISSION_MAX_INTERACTIONS` | `5` | Nombre maximal d'échanges avec l'utilisateur par mission |
 
 Ces bornes sont **appliquées par le code** : elles ne sont pas des
 recommandations adressées au modèle.
+
+Les bornes sont **globales à la mission** : elles sont portées par la mission
+elle-même et ne sont jamais réinitialisées par un changement de boucle, une
+replanification, une réponse de l'utilisateur ou une reprise. La durée mesure
+le **temps d'exécution cumulé** : le temps d'attente d'un humain n'est pas
+consommé par le budget. Chaque mission se termine avec un **motif d'arrêt**
+explicite (`completed`, `partial`, `failed`, `cancelled`,
+`time_budget_exceeded`, `step_budget_exceeded`,
+`tool_call_budget_exceeded`, `interaction_budget_exceeded`,
+`repeated_results`, `authorization_required`, `clarification_required`).
 
 Le chemin de la base est **confiné aux racines autorisées** (répertoire du
 projet et dossier `data/`), comme les autres bases MILES.
@@ -186,7 +198,7 @@ Seules les variables `MILES_*` listées ci-dessous sont lues depuis le fichier `
 | Voix (facultative) (1) | `MILES_VOICE_ENABLED` |
 | Mémoire de souvenirs (4) | `MILES_MEMORY_ENABLED`, `MILES_MEMORY_DB_PATH`, `MILES_MEMORY_MAX_MEMORIES_IN_CONTEXT`, `MILES_MEMORY_MAX_CONTENT_LENGTH` |
 | Historique de conversation (2) | `MILES_CONVERSATION_PERSIST`, `MILES_CONVERSATION_DB_PATH` |
-| Orchestrateur de missions (6) | `MILES_MISSION_ENABLED`, `MILES_MISSION_PERSIST`, `MILES_MISSION_DB_PATH`, `MILES_MISSION_MAX_STEPS`, `MILES_MISSION_MAX_ATTEMPTS`, `MILES_MISSION_MAX_DURATION_SECONDS` |
+| Orchestrateur de missions (8) | `MILES_MISSION_ENABLED`, `MILES_MISSION_PERSIST`, `MILES_MISSION_DB_PATH`, `MILES_MISSION_MAX_STEPS`, `MILES_MISSION_MAX_ATTEMPTS`, `MILES_MISSION_MAX_DURATION_SECONDS`, `MILES_MISSION_MAX_TOOL_CALLS`, `MILES_MISSION_MAX_INTERACTIONS` |
 | Interface web : accès et origine (3) | `MILES_WEB_AUTH_TOKEN`, `MILES_WEB_USERS_FILE`, `MILES_WEB_ALLOWED_ORIGINS` |
 
 ### Variables de chemin de fichier (lues uniquement de l'environnement)
