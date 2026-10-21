@@ -47,6 +47,23 @@ Procédure à suivre par chaque agent à la fin de sa session de travail, afin q
 
 **Prochaine action recommandée :** Agent B prend TASK-DEV-019, audite `6b736d7` (lien grant/session, non-reutilisabilite, scenario web complet, non-regression, Debian 13) et rend son avis avant toute fusion.
 
+### H-003 — 2026-10-21 — Agent A → Agent B
+
+**Tâche :** TASK-DEV-020 (correction D2) ; TASK-DEV-021 (audit D2) et TASK-DEV-022 (D3, analyse) transférées.
+
+**Travail réalisé :** diagnostic du défaut D2 (perte de la lettre de lecteur d'un chemin Windows absolu, avec mesure de l'impact sur un autre lecteur), correction de `app/orchestration/planner.py` (fidélité de l'extraction : lettre de lecteur, tiret, espaces internes, chemins entre guillemets, marqueur), 21 tests de régression et de confinement, vérification manuelle en CLI, mise à jour du guide utilisateur, analyse D3 complète sans aucune modification de sécurité.
+
+**Fichiers modifiés :** `app/orchestration/planner.py` ; `tests/test_windows_paths.py` (nouveau) ; `docs/reports/PHASE_6_3C_D2_WINDOWS_PATHS_AGENT_A.md` (nouveau) ; `docs/user_guide/MILES_PLAN_DE_TEST_PHASE_6.md` ; `docs/coordination/{TASKS,STATUS,MESSAGES}.md`.
+
+**Commits :** branche `fix/miles-windows-paths` (base `3a59dae` = tete de la branche D1), poussée sur `origin`. **Aucune fusion** ; `main` (`b9b7e7d`), `origin/integration/miles-phases-5-6-6-1` (`69bf670`) et `fix/miles-d1-web-authorization` (`3a59dae`) inchangés. Travail effectué dans un worktree isolé : l'artefact non suivi `tatus --short--branch` du checkout principal est préservé.
+
+**Tests exécutés :** 21 tests dédiés (9 échouent sans le correctif, vérifié par `git stash`) ; `test_mission_orchestrator` 73/73 ; `test_mission_bounds` 20/20 ; `test_mission_web_authorization` 6/6 (non-régression D1) ; `test_web_security_phase6_1` 35/35 ; `test_tool_policy` 11/11 ; `test_web_security` 33/33 ; suite complète **555 tests OK (4 ignorés)** ; **70 tests d'audit Agent B rejoués tels quels : OK (2 ignorés)** ; CLI : chemin absolu → `completed`, chemin avec espaces → `completed`, hors périmètre → `failed` avec le vrai chemin cité. Non exécuté : Debian 13 (environnement indisponible).
+
+**Problèmes restants :** D3 non corrigé (analyse et proposition seulement, §5 du rapport) ; D1-bis et D4 toujours non corrigés ; un chemin dont le dernier segment porte des espaces en minuscules n'est reconnu qu'entre guillemets (limite assumée).
+
+**Prochaine action recommandée :** Agent B prend TASK-DEV-021 (audit du commit D2) et tranche la voie de correction de D3 pour TASK-DEV-022 ; ne pas fusionner avant ces validations.
+
+
 ## 3. Transmission de la main
 
 - Prévenir l'autre agent (par le canal convenu hors dépôt, ex. message) qu'une mise à jour est disponible sur GitHub ou dans le clone partagé.

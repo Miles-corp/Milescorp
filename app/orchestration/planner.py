@@ -129,8 +129,79 @@ _TARGET_AFTER_MARKER = re.compile(
     re.IGNORECASE,
 )
 
+#: Caractères autorisés dans un segment de chemin (hors séparateur).
+_SEGMENT_CHARS = r"A-Za-z0-9_.~-"
+
 #: Jeton contenant un séparateur de chemin.
-_PATH_LIKE = re.compile(r"[A-Za-z0-9_.\-]*[\\/][A-Za-z0-9_.\-/\\]*|[A-Za-z0-9_.\-]+\\")
+#:
+#: L'extraction conserve fidèlement ce que l'utilisateur a écrit, et en
+#: particulier la lettre de lecteur Windows (« C:/Windows », « D:\\donnees »)
+#: : la perdre désignait un **autre** répertoire (défaut D2).
+_PATH_LIKE = re.compile(
+    r"(?<![A-Za-z0-9_.~-])"  # début de jeton (pas de milieu de mot)
+    r"(?:[A-Za-z]:)?"  # lettre de lecteur Windows (« C: »)
+    rf"[{_SEGMENT_CHARS}]*"  # premier segment
+    rf"(?:[\\/][{_SEGMENT_CHARS}]*)+"  # segments suivants
+)
+
+#: Chemin délimité par des guillemets : les espaces y font partie du chemin.
+#:
+#: C'est la forme non ambiguë d'un chemin contenant des espaces :
+#: « Analyse "C:\\Users\\Jean\\Mes Documents" ».
+_QUOTED_PATH = re.compile(r"[\"'«]([^\"'»]+)[\"'»]")
+
+#: Mot suivant dans le texte, avec son début.
+_NEXT_WORD = re.compile(r"\s+(\S+)")
+
+#: Chemin Windows absolu (lettre de lecteur).
+_WINDOWS_ABSOLUTE = re.compile(r"[A-Za-z]:[\\/]")
+
+#: Une lettre de lecteur seule (« C: ») ne désigne pas un dossier.
+_DRIVE_ONLY = re.compile(r"[A-Za-z]:")
+
+
+def _word_continues_path(word: str, token: str) -> bool:
+    """Indiquer si un mot prolonge le chemin déjà reconnu.
+
+    Un mot qui contient lui-même un séparateur prolonge le chemin
+    (« C:\\Program Files\\MonDossier »). Un mot capitalisé le prolonge
+    également quand le chemin est un chemin Windows absolu, car les noms de
+    dossiers Windows contiennent souvent des espaces (« C:\\Users\\Jean\\Mes
+    Documents ») ; cette seconde règle est volontairement limitée aux chemins
+    Windows pour ne pas avaler la prose qui suit un chemin POSIX.
+
+    Les chemins relatifs et POSIX ne sont jamais prolongés par un mot
+    capitalisé : « docs/ identifie son organisation » doit rester « docs/ ».
+    """
+    if "/" in word or "\\" in word:
+        return True
+    if word[:1].isupper() and _WINDOWS_ABSOLUTE.match(token):
+        return True
+    return False
+
+
+def _extend_with_following_words(
+    objective: str, end: int, token: str
+) -> tuple[str, int]:
+    """Prolonger un chemin avec les mots qui lui appartiennent.
+
+    Args:
+        objective : objectif complet.
+        end : position juste après le jeton reconnu.
+        token : jeton reconnu.
+
+    Returns:
+        Le chemin prolongé et la position atteinte.
+    """
+    while True:
+        match = _NEXT_WORD.match(objective, end)
+        if match is None:
+            return token, end
+        word = match.group(1).strip(".,;:!?\"'«»")
+        if not word or not _word_continues_path(word, token):
+            return token, end
+        token = f"{token} {word}"
+        end = match.end()
 
 
 def extract_target_path(objective: str) -> Optional[str]:
@@ -142,22 +213,62 @@ def extract_target_path(objective: str) -> Optional[str]:
     Heuristiques (volontairement conservatrices) :
     - un jeton contenant un séparateur de chemin (``docs/``, ``C:\\x``) est
       un candidat ;
+    - un chemin entre guillemets (« "C:\\Users\\Jean\\Mes Documents" ») est
+      un candidat dont les espaces font partie du chemin ;
     - ``dossier <nom>`` / ``projet <nom>`` désigne le nom donné ;
     - « ce dossier », « le projet »… désignent la racine du projet ;
     - plusieurs candidats distincts => aucune déduction (clarification).
     """
     text = objective.lower()
     candidates: List[str] = []
+    #: Zones du texte déjà couvertes par un chemin reconnu : un marqueur
+    #: (« dossier … ») qui s'y trouve ne désigne pas une autre cible.
+    covered: List[tuple[int, int]] = []
 
+    consumed_until = 0
     for match in _PATH_LIKE.finditer(objective):
+        if match.start() < consumed_until:
+            # Jeton déjà absorbé par le prolongement du chemin précédent
+            # (« C:\Program Files\MonDossier » est un seul chemin).
+            continue
         token = match.group(0)
+        consumed_until = match.end()
         if token.lower() in _STOPWORDS:
             continue
+        token, consumed_until = _extend_with_following_words(
+            objective, consumed_until, token
+        )
+        covered.append((match.start(), consumed_until))
+        candidates.append(token)
+
+    for match in _QUOTED_PATH.finditer(objective):
+        # Un chemin entre guillemets est pris tel quel : c'est la forme
+        # non ambiguë d'un chemin contenant des espaces.
+        token = match.group(1).strip()
+        if "/" not in token and "\\" not in token:
+            continue
+        if token.lower() in _STOPWORDS:
+            continue
+        covered.append((match.start(), match.end()))
         candidates.append(token)
 
     for match in _TARGET_AFTER_MARKER.finditer(objective):
         token = match.group(1)
         if token.lower() in _STOPWORDS:
+            continue
+        # Le marqueur est situé à l'intérieur d'un chemin déjà reconnu
+        # (« C:\...\Dossier Avec Espace ») : il ne désigne pas une autre
+        # cible.
+        if any(start <= match.start() < end for start, end in covered):
+            continue
+        # Le marqueur (« dossier … ») peut ne capturer qu'un *préfixe* d'un
+        # chemin : « dossier C:/Windows » capture « C », « dossier
+        # docs/coordination » capture « docs ». Dans ce cas, le chemin
+        # complet est déjà un candidat : le préfixe est ignoré, sinon deux
+        # cibles distinctes seraient déduites et la mission demanderait une
+        # clarification inutile.
+        end = match.end(1)
+        if end < len(objective) and objective[end] in ":/\\":
             continue
         if not any(candidate.endswith(token) for candidate in candidates):
             candidates.append(token)
@@ -166,8 +277,12 @@ def extract_target_path(objective: str) -> Optional[str]:
     for candidate in candidates:
         # Les séparateurs de fin ne portent pas d'information : « docs/ »
         # et « docs » désignent la même cible.
-        cleaned = candidate.rstrip("/\\")
+        cleaned = candidate.rstrip("/\\ ")
         if not cleaned:
+            continue
+        # « C: » seul ne désigne pas un dossier : la cible reste inconnue
+        # et l'orchestrateur demandera une clarification.
+        if _DRIVE_ONLY.fullmatch(cleaned):
             continue
         if cleaned not in distinct:
             distinct.append(cleaned)

@@ -49,6 +49,17 @@
 - **Limites** : aucune validation Debian 13 (environnement indisponible) ; les tests ignores sont des limites de plateforme Windows.
 - **En attente** : audit independant par Agent B (TASK-DEV-019) avant toute fusion.
 
+## Phase 6.3c — Correction D2 (chemins Windows) et analyse D3 (Agent A, 2026-10-21)
+
+- **Rapport** : `docs/reports/PHASE_6_3C_D2_WINDOWS_PATHS_AGENT_A.md`
+- **Branche** : `fix/miles-windows-paths` (base `3a59dae` = tete de `fix/miles-d1-web-authorization`, qui porte le correctif D1). **Aucune fusion.** `main` (`b9b7e7d`), `origin/integration/miles-phases-5-6-6-1` (`69bf670`) et `fix/miles-d1-web-authorization` (`3a59dae`) sont inchanges. Travail effectue dans un **worktree isole** (`C:\Users\StanC\AppData\Local\Temp\miles-d2`) : le checkout principal et son artefact non suivi (`tatus --short--branch`) n'ont pas ete touches.
+- **Defaut corrige (D2)** : `app/orchestration/planner.py::extract_target_path` perdait la lettre de lecteur d'un chemin Windows absolu (`C:/Windows` -> `/Windows`). Un chemin sans lettre de lecteur n'est plus absolu : il est resolu comme racine du lecteur **courant**. Mesure : `D:\donnees\rapports` etait servi par `C:\donnees\rapports` (autre repertoire, parfois dans le perimetre) ; le refus de perimetre citait `/Windows/System32` au lieu de `C:/Windows/System32`.
+- **Correctif** : `app/orchestration/planner.py` uniquement — conservation de la lettre de lecteur, restauration du tiret dans les segments, espaces internes (mot contenant un separateur, ou mot capitalise sur un chemin Windows absolu), chemins entre guillemets, prefixe de marqueur ignore, `C:` seul non retenu. **Aucune modification de la politique de securite ni du perimetre** : le confinement (`app/security/paths.py`) reste le seul juge.
+- **Tests** : `tests/test_windows_paths.py` (21 tests) — chemins absolus Windows, chemins avec espaces, chemins relatifs, chemins POSIX, non-regression, et confinement (hors perimetre, traversee, entrees malformedes, racines inchangees) ; **9 tests echouent sans le correctif** (verifie par `git stash`). Suite complete **555 tests OK (4 ignores)** ; **70 tests d'audit Agent B rejoues tels quels : OK (2 ignores)** ; verification manuelle CLI (chemin absolu -> `completed`, chemin avec espaces -> `completed`, hors perimetre -> `failed` avec le vrai chemin dans le message).
+- **D3 — analyse seule, aucune modification** : `app/tools/policy.py` applique un controle par sous-chaine aux VALEURS ; les faux positifs sont confirmes (`source`, `code`, `script`, `python`, `javascript`) **et la meme famille existe dans les controles shell (`system`, `run`, `command`, `exec`) et secrets (`secret`)**. Strategie proposee : conserver le controle exact sur les CLES, appliquer au parametre de type chemin un controle structurel (metacaracteres) au lieu du controle par sous-chaine, inchange pour toute valeur non chemin, et sur les trois validateurs. Deux voies : **2-a typage explicite du parametre chemin (recommandee)** ou 2-b heuristique (deconseillee). Cas qui doivent rester bloques et cas qui doivent etre acceptes lists dans le rapport.
+- **Limites** : un chemin dont le dernier segment porte des espaces en minuscules n'est reconnu qu'entre guillemets ; aucun test Debian 13 (environnement indisponible) ; D1-bis et D4 toujours non corriges.
+- **En attente** : audit independant par Agent B (TASK-DEV-021) et decision sur la voie de correction de D3 (TASK-DEV-022).
+
 ## Blocages
 
 Aucun blocage à ce jour.
