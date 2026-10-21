@@ -64,7 +64,7 @@ que MILES sait faire réellement.
 
 ```powershell
 cd C:\Users\StanC\Desktop\Milescorp
-git checkout fix/miles-windows-paths
+git checkout fix/miles-d1bis-authorization-response
 git pull --ff-only
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1      # ou : .\.venv\Scripts\python.exe ...
@@ -308,9 +308,10 @@ documentés dans `docs/reports/PHASE_6_3_VALIDATION_UTILISATEUR_AGENT_A.md`.
 | # | Gravité | Symptôme | Cause | Correctif proposé |
 |---|----------|----------|-------|-------------------|
 | **D1** | Élevée | **CORRIGÉ** (branche `fix/miles-d1-web-authorization`) : l'autorisation web converge et la mission se termine. | Le registre d'autorisations était interrogé avec la session du runner au lieu de celle du client. | Une ligne : interroger avec `mission.session_id or self.session_id`. |
-| **D1-bis** | Mineure | `POST /mission/<id>/authorize` renvoie `{"approved": true}` même quand le jeton d'approbation est invalide : la validation a lieu dans le fil d'exécution, dont l'exception n'est pas retournée. Aucune élévation de privilège (l'autorisation n'est pas accordée) ; la réponse HTTP est trompeuse. | Valider le jeton d'approbation de façon synchrone dans `WebApp.authorize_mission` avant de démarrer le fil. |
+| **D1-bis** | Mineure | **CORRIGÉ** (branche `fix/miles-d1bis-authorization-response`) : `POST /mission/<id>/authorize` renvoyait `{"approved": true}` meme avec un jeton d'approbation invalide (la validation avait lieu dans le fil d'execution, dont l'exception n'etait pas retournee). Aucune elevation de privilege (l'autorisation n'etait pas accordee) ; la reponse HTTP etait trompeuse. | La validation du jeton, de l'expiration et de la session a lieu desormais de facon **synchrone** avant le lancement du fil ; les refus portent un code HTTP et un code de raison explicites (voir §5.2). |
 | **D2** | Moyenne | **CORRIGÉ** (branche `fix/miles-windows-paths`) : la lettre de lecteur d'un chemin Windows absolu est conservée (`C:/Windows` n'est plus tronqué en `/Windows`). Avant, la mission analysait un **autre** répertoire (le lecteur était perdu : `D:\donnees` devenait `C:\donnees`) et le message d'erreur citait un chemin erroné. | `app/orchestration/planner.py::extract_target_path` : la classe de caractères du chemin n'incluait pas `:`. | Une ligne : accepter la lettre de lecteur, les espaces internes et les chemins entre guillemets (tests : `tests/test_windows_paths.py`). |
 | **D3** | Moyenne | Toute valeur de paramètre contenant `code`, `source`, `script`, `python` ou `javascript` est refusée : les chemins légitimes (`C:\dev\source\`, `C:\Users\X\Documents\code\`) sont rejetés et la mission ne peut pas les analyser. Même famille de faux positifs pour les contrôles shell (`system`, `run`, `command`, `exec`) et secrets (`secret`). | `app/tools/policy.py::validate_no_code_execution` applique un contrôle par sous-chaîne aux VALEURS, y compris aux chemins (le contrôle sur les CLÉS est exact et correct). | **Analyse faite, AUCUNE modification apportée** (code de sécurité) : voir `docs/reports/PHASE_6_3C_D2_WINDOWS_PATHS_AGENT_A.md` §5 pour la stratégie proposée et les tests à écrire. **Ne pas modifier sans validation explicite.** |
+| **D1-ter** | Mineure | Une autorisation recue pendant que la mission termine son rapport (appel au fournisseur IA) est **silencieusement ignoree** : le fil de la mission est encore vivant. La reponse HTTP annoncait une autorisation accordee. | `WebApp._start_mission_thread` ignore l'action si un fil est deja actif pour la mission, et le rapport interroge le fournisseur IA meme pour une mission en attente. | La reponse est desormais honnete (**409 `mission_busy`**, a reessayer). La correction racine (ne pas interroger le fournisseur pour une mission en attente) est **proposee, non appliquee** : voir `docs/reports/PHASE_6_3D_D1BIS_AGENT_A.md` §6.1. |
 | **D4** | Mineure | Avec un fournisseur configuré mais injoignable, une mission attend le délai du fournisseur (jusqu'à 30 s) avant le repli déterministe ; l'interface paraît figée. | Le planificateur interroge le fournisseur avant de basculer. | Documenté ; contournement : ne pas configurer de fournisseur (§2). |
 
 ---
@@ -321,9 +322,10 @@ documentés dans `docs/reports/PHASE_6_3_VALIDATION_UTILISATEUR_AGENT_A.md`.
 
 | Test | Commande | Résultat vérifié |
 |------|----------|------------------|
-| Suite complète | `python -m unittest discover -s tests` | **555 tests, 0 échec, 4 ignorés** (limites Windows : 3 liens symboliques, 1 `/proc/self/fd`) |
+| Suite complète | `python -m unittest discover -s tests` | **575 tests, 0 échec, 4 ignorés** (limites Windows : 3 liens symboliques, 1 `/proc/self/fd`) |
 | Garde-fou FPS | `python -m unittest tests.test_mission_bounds` | 20 tests, 0 échec |
 | Chemins Windows (D2) | `python -m unittest tests.test_windows_paths` | 21 tests, 0 échec |
+| Réponse d'autorisation (D1-bis) | `python -m unittest tests.test_mission_authorize_response` | 20 tests, 0 échec |
 | Orchestrateur | `python -m unittest tests.test_mission_orchestrator` | 73 tests, 0 échec |
 | Sécurité web | `python -m unittest tests.test_web_security_phase6_1` | 35 tests, 0 échec |
 | Contrat IPC | `python -m unittest tests.contrat_ipc` | 18 tests, 0 échec |

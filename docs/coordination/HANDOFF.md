@@ -64,6 +64,23 @@ Procédure à suivre par chaque agent à la fin de sa session de travail, afin q
 **Prochaine action recommandée :** Agent B prend TASK-DEV-021 (audit du commit D2) et tranche la voie de correction de D3 pour TASK-DEV-022 ; ne pas fusionner avant ces validations.
 
 
+### H-004 — 2026-10-21 — Agent A → Agent B
+
+**Tâche :** TASK-DEV-023 (correction D1-bis) ; TASK-DEV-024 (audit D1-bis) et TASK-DEV-025 (D3, analyse) transférées.
+
+**Travail réalisé :** reproduction du défaut D1-bis sur le vrai serveur HTTP (200 mensonger), correction de la réponse d'autorisation (validation synchrone via `MissionRunner.check_authorization`, codes HTTP et corps explicites, code de raison non sensible), 20 tests de régression, analyse approfondie de D3 (moteur, typage applicable, matrice de 29 tests, 7 risques de contournement, deux voies proposées) **sans aucune modification du code de sécurité**.
+
+**Fichiers modifiés :** `app/interface/web.py` ; `app/orchestration/runner.py` ; `tests/test_mission_authorize_response.py` (nouveau) ; `docs/reports/PHASE_6_3D_D1BIS_AGENT_A.md` (nouveau) ; `docs/reports/PHASE_6_3E_D3_ANALYSIS_AGENT_A.md` (nouveau) ; `docs/user_guide/MILES_PLAN_DE_TEST_PHASE_6.md` ; `docs/coordination/{TASKS,STATUS,MESSAGES}.md`.
+
+**Commits :** branche `fix/miles-d1bis-authorization-response` (base `d3240d2`), poussée sur `origin`. **Aucune fusion** ; `main` (`b9b7e7d`), la branche d'intégration auditée (`69bf670`), la branche D1 (`3a59dae`) et la branche D2 (`d3240d2`) inchangés. Travail en worktree isolé : l'artefact non suivi du checkout principal est préservé.
+
+**Tests exécutés :** 20 tests dédiés (15 échouent sans le correctif, vérifié par `git stash`) ; `test_mission_web_authorization` 6/6 (non-régression D1) ; `test_web_security_phase6_1` 35/35 ; `test_mission_orchestrator` 73/73 ; `test_mission_bounds` 20/20 ; `test_web_security` 33/33 ; `test_windows_paths` 21/21 (non-régression D2) ; suite complète **575 tests OK (4 ignorés)** ; **70 tests d'audit Agent B rejoués tels quels : OK (2 ignorés)** ; scénario web réel : 403 (jeton invalide) → 409 ×2 → 200 → mission `completed`. Non exécuté : Debian 13 (environnement indisponible).
+
+**Problèmes restants :** D1-ter (une autorisation peut être silencieusement ignorée pendant que la mission construit son rapport) — réponse rendue honnête (409), cause racine **proposée, non appliquée** ; D3 non corrigé (analyse et proposition seulement) ; le jeton d'approbation reste contournable par le propriétaire via `/mission/<id>/answer` (préexistant, signalé).
+
+**Prochaine action recommandée :** Agent B prend TASK-DEV-024 (audit du commit D1-bis) et tranche la voie de correction de D3 pour TASK-DEV-025 ; ne pas fusionner avant ces validations.
+
+
 ## 3. Transmission de la main
 
 - Prévenir l'autre agent (par le canal convenu hors dépôt, ex. message) qu'une mise à jour est disponible sur GitHub ou dans le clone partagé.

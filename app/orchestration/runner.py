@@ -66,7 +66,31 @@ class MissionAuthorizationError(Exception):
     Levée lorsqu'un demandeur n'est pas autorisé à agir sur la mission,
     lorsqu'il ne présente pas le jeton d'approbation attendu, ou lorsque la
     demande est expirée ou déjà utilisée.
+
+    Attributs :
+        reason : code de refus stable et non sensible, utilisable par les
+            appelants (interface web) pour construire une réponse HTTP
+            explicite. Il ne contient jamais de jeton ni de secret.
     """
+
+    def __init__(self, message: str, reason: str = "unauthorized") -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+#: Codes de refus d'une autorisation de mission.
+#:
+#: Ils sont stables (l'interface web s'appuie dessus) et ne divulguent
+#: aucune information sensible : ni jeton, ni identifiant de session, ni
+#: identifiant d'utilisateur.
+REASON_MISSION_NOT_FOUND = "mission_not_found"
+REASON_MISSION_FINISHED = "mission_finished"
+REASON_NO_PENDING_AUTHORIZATION = "no_pending_authorization"
+REASON_MISSION_NOT_OWNED = "mission_not_owned"
+REASON_MISSING_APPROVAL_TOKEN = "missing_approval_token"
+REASON_INVALID_APPROVAL_TOKEN = "invalid_approval_token"
+REASON_EXPIRED_APPROVAL_TOKEN = "expired_approval_token"
+REASON_SESSION_MISMATCH = "session_mismatch"
 
 
 class MissionRunner:
@@ -363,6 +387,90 @@ class MissionRunner:
         self._save(mission)
         return self.run(mission_id)
 
+    def check_authorization(
+        self,
+        mission_id: str,
+        *,
+        approval_token: Optional[str] = None,
+        requester_user_id: Optional[str] = None,
+        requester_session_id: Optional[str] = None,
+    ) -> Mission:
+        """Vérifier qu'une autorisation peut être accordée, sans l'accorder.
+
+        Cette méthode factorise les contrôles d':meth:`authorize`. Elle
+        permet à un appelant (interface web) de **refuser** une
+        autorisation avant d'annoncer un succès, au lieu de découvrir
+        l'échec dans un fil d'exécution : sans elle, la réponse HTTP
+        annonçait une autorisation accordée alors que le jeton était
+        invalide, expiré ou émis pour une autre session (défaut D1-bis).
+
+        Contrôles effectués :
+        - la mission existe et attend une autorisation ;
+        - le demandeur est le propriétaire de la mission ;
+        - la demande n'est pas expirée ;
+        - le jeton d'approbation est présent et correspond à celui de la
+          demande (comparaison en temps constant) ;
+        - la demande provient de la session qui porte la mission : le grant
+          d'autorisation est émis et vérifié avec cette session (voir
+          :meth:`_ensure_authorization`), une autorisation venue d'une autre
+          session ne pourrait donc pas être honorée. Ce contrôle ne
+          concerne que les missions créées par un CLIENT : une mission
+          créée par l'application (ligne de commande) n'est pas liée à une
+          session cliente.
+
+        Returns:
+            La mission sur laquelle porte la demande d'autorisation.
+
+        Raises:
+            MissionAuthorizationError: si l'autorisation ne peut pas être
+                accordée. L'attribut ``reason`` porte le code de refus.
+        """
+        mission = self.get(mission_id)
+        if mission is None:
+            raise MissionAuthorizationError(
+                "Mission inconnue.", REASON_MISSION_NOT_FOUND
+            )
+        if mission.pending is None or mission.pending.kind != "authorization":
+            raise MissionAuthorizationError(
+                "Aucune autorisation en attente pour cette mission.",
+                REASON_NO_PENDING_AUTHORIZATION,
+            )
+        if (
+            mission.owner_user_id
+            and str(requester_user_id or "") != mission.owner_user_id
+        ):
+            raise MissionAuthorizationError(
+                "Cette mission appartient a un autre utilisateur.",
+                REASON_MISSION_NOT_OWNED,
+            )
+        pending = mission.pending
+        if pending.expires_at and self._clock() > pending.expires_at:
+            raise MissionAuthorizationError(
+                "La demande d'autorisation est expiree.",
+                REASON_EXPIRED_APPROVAL_TOKEN,
+            )
+        if not pending.approval_token or not approval_token:
+            raise MissionAuthorizationError(
+                "Jeton d'autorisation manquant.",
+                REASON_MISSING_APPROVAL_TOKEN,
+            )
+        if not hmac.compare_digest(pending.approval_token, approval_token):
+            raise MissionAuthorizationError(
+                "Jeton d'autorisation invalide.",
+                REASON_INVALID_APPROVAL_TOKEN,
+            )
+        if (
+            mission.session_id
+            and requester_session_id
+            and mission.session_id != requester_session_id
+            and mission.session_id != self.session_id
+        ):
+            raise MissionAuthorizationError(
+                "Cette mission est liee a une autre session.",
+                REASON_SESSION_MISMATCH,
+            )
+        return mission
+
     def authorize(
         self,
         mission_id: str,
@@ -390,33 +498,13 @@ class MissionRunner:
             MissionAuthorizationError: si le demandeur n'est pas autorisé
                 ou si le jeton est absent, invalide, expiré ou déjà utilisé.
         """
-        mission = self.get(mission_id)
-        if mission is None:
-            raise MissionAuthorizationError("Mission inconnue.")
-        if mission.pending is None or mission.pending.kind != "authorization":
-            raise MissionAuthorizationError(
-                "Aucune autorisation en attente pour cette mission."
-            )
-        if (
-            mission.owner_user_id
-            and str(requester_user_id or "") != mission.owner_user_id
-        ):
-            raise MissionAuthorizationError(
-                "Cette mission appartient a un autre utilisateur."
-            )
+        mission = self.check_authorization(
+            mission_id,
+            approval_token=approval_token,
+            requester_user_id=requester_user_id,
+            requester_session_id=requester_session_id,
+        )
         pending = mission.pending
-        if pending.expires_at and self._clock() > pending.expires_at:
-            raise MissionAuthorizationError(
-                "La demande d'autorisation est expiree."
-            )
-        if not pending.approval_token or not approval_token:
-            raise MissionAuthorizationError(
-                "Jeton d'autorisation manquant."
-            )
-        if not hmac.compare_digest(pending.approval_token, approval_token):
-            raise MissionAuthorizationError(
-                "Jeton d'autorisation invalide."
-            )
 
         if not approved:
             mission.pending = None

@@ -25,7 +25,18 @@ from app.config.settings import Settings
 from app.core.conversation import Conversation
 from app.memory.persistent import PersistentMemory, PersistentMemoryError
 from app.orchestration.models import Mission, MissionState
-from app.orchestration.runner import MissionAuthorizationError, MissionRunner
+from app.orchestration.runner import (
+    REASON_EXPIRED_APPROVAL_TOKEN,
+    REASON_INVALID_APPROVAL_TOKEN,
+    REASON_MISSING_APPROVAL_TOKEN,
+    REASON_MISSION_FINISHED,
+    REASON_MISSION_NOT_FOUND,
+    REASON_MISSION_NOT_OWNED,
+    REASON_NO_PENDING_AUTHORIZATION,
+    REASON_SESSION_MISMATCH,
+    MissionAuthorizationError,
+    MissionRunner,
+)
 from app.tools.grants import default_session_id
 from app.tools.service import ToolService
 from app.interface.web_auth import (
@@ -70,6 +81,10 @@ LOCAL_ONLY_HOST = "127.0.0.1"
 # cette limite : c'est une invariant de sécurité (un client ne peut pas
 # forcer le serveur à consommer de la mémoire en annonçant une taille).
 MAX_BODY_BYTES = 65536
+
+# Code de refus : la mission est encore en cours de traitement, l'action
+# demandée n'a pas été appliquée (le client peut réessayer).
+REASON_MISSION_BUSY = "mission_busy"
 
 
 class WebServerSecurityError(Exception):
@@ -276,27 +291,66 @@ class WebApp:
         Le demandeur doit être l'utilisateur propriétaire de la mission et
         présenter le jeton d'approbation de la demande en attente. Une
         simple valeur booléenne fournie par le client ne suffit pas.
+
+        La réponse n'est **positive** que si l'autorisation a réellement été
+        acceptée : le jeton est validé de façon synchrone, avant le
+        lancement du fil d'exécution (défaut D1-bis). Sans cette
+        validation, le serveur répondait 200 « approved » alors que la
+        validation échouait dans le fil, que l'autorisation n'était pas
+        accordée et que la mission restait en attente.
         """
         if self.mission_runner is None:
             return {"error": "Orchestrateur indisponible."}
         mission = self.mission_runner.get(mission_id)
         if mission is None:
-            return {"error": f"Mission inconnue : {mission_id}"}
+            return {
+                "error": f"Mission inconnue : {mission_id}",
+                "reason": REASON_MISSION_NOT_FOUND,
+            }
+        if mission.state.is_terminal:
+            return {
+                "error": "La mission est deja terminee.",
+                "reason": REASON_MISSION_FINISHED,
+            }
         if mission.pending is None or mission.pending.kind != "authorization":
-            return {"error": "Aucune autorisation en attente pour cette mission."}
+            return {
+                "error": "Aucune autorisation en attente pour cette mission.",
+                "reason": REASON_NO_PENDING_AUTHORIZATION,
+            }
         if (
             mission.owner_user_id
             and mission.owner_user_id != session.user_id
         ):
-            return {"error": "Cette mission appartient a un autre utilisateur."}
+            return {
+                "error": "Cette mission appartient a un autre utilisateur.",
+                "reason": REASON_MISSION_NOT_OWNED,
+            }
 
         approval_token = data.get("approval_token")
         if not isinstance(approval_token, str) or not approval_token:
-            return {"error": "Jeton d'autorisation manquant."}
+            return {
+                "error": "Jeton d'autorisation manquant.",
+                "reason": REASON_MISSING_APPROVAL_TOKEN,
+            }
 
         approved = bool(data.get("approved", False))
+
+        # Validation SYNCHRONE du jeton, de l'expiration et de la session
+        # (défaut D1-bis) : l'autorisation n'est annoncée comme accordée
+        # que si elle l'a réellement été. Les messages d'erreur ne
+        # contiennent ni jeton, ni identifiant de session, ni secret.
         try:
-            self._start_mission_thread(
+            self.mission_runner.check_authorization(
+                mission_id,
+                approval_token=approval_token,
+                requester_user_id=session.user_id,
+                requester_session_id=session.session_id,
+            )
+        except MissionAuthorizationError as exc:
+            return {"error": str(exc), "reason": exc.reason}
+
+        try:
+            started = self._start_mission_thread(
                 mission_id,
                 lambda mid: self.mission_runner.authorize(
                     mid,
@@ -307,7 +361,18 @@ class WebApp:
                 ),
             )
         except MissionAuthorizationError as exc:
-            return {"error": str(exc)}
+            return {"error": str(exc), "reason": exc.reason}
+        if not started:
+            # Une autre action est encore en cours pour cette mission :
+            # l'autorisation n'a pas ete appliquee. Le dire explicitement
+            # plutot que d'annoncer un succes (defaut D1-bis).
+            return {
+                "error": (
+                    "La mission est encore en cours de traitement : "
+                    "l'autorisation n'a pas ete appliquee, reessayez."
+                ),
+                "reason": REASON_MISSION_BUSY,
+            }
         return {"mission_id": mission_id, "approved": approved, "started": True}
 
     def answer_mission(
@@ -327,7 +392,7 @@ class WebApp:
         if not isinstance(answer, str) or not answer.strip():
             return {"error": "Réponse vide."}
         try:
-            self._start_mission_thread(
+            started = self._start_mission_thread(
                 mission_id,
                 lambda mid: self.mission_runner.answer(
                     mid,
@@ -337,7 +402,15 @@ class WebApp:
                 ),
             )
         except MissionAuthorizationError as exc:
-            return {"error": str(exc)}
+            return {"error": str(exc), "reason": exc.reason}
+        if not started:
+            return {
+                "error": (
+                    "La mission est encore en cours de traitement : "
+                    "la reponse n'a pas ete enregistree, reessayez."
+                ),
+                "reason": REASON_MISSION_BUSY,
+            }
         return {"mission_id": mission_id, "answered": True, "started": True}
 
     def cancel_mission(self, mission_id: str, session: WebSession) -> dict[str, Any]:
@@ -354,16 +427,22 @@ class WebApp:
             return {"error": f"Mission {mission_id} introuvable ou déjà terminée."}
         return {"mission_id": mission_id, "cancelled": True}
 
-    def _start_mission_thread(self, mission_id: str, action: Any) -> None:
+    def _start_mission_thread(self, mission_id: str, action: Any) -> bool:
         """Lancer une action de mission dans un fil d'exécution séparé.
 
         Le fil est un démon : il n'empêche pas l'arrêt du programme. Une
         mission déjà en cours d'exécution n'est pas relancée.
+
+        Returns:
+            True si l'action a été lancée, False si une autre action est
+            encore en cours pour cette mission : l'action est alors
+            **ignorée** et l'appelant doit le signaler (une réponse
+            « started » serait un mensonge, défaut D1-bis).
         """
         with self._mission_lock:
             existing = self._mission_threads.get(mission_id)
             if existing is not None and existing.is_alive():
-                return
+                return False
 
             def _target() -> None:
                 try:
@@ -379,6 +458,7 @@ class WebApp:
             )
             self._mission_threads[mission_id] = thread
             thread.start()
+            return True
 
     @staticmethod
     def _mission_payload(mission: Mission) -> dict[str, Any]:
@@ -1255,7 +1335,14 @@ showLogin();
             return
         mission_id = path.split("/")[2]
         payload = self.app.authorize_mission(mission_id, data, session)
-        status = 200 if "error" not in payload else 403
+        if "error" not in payload:
+            status = 200
+        elif payload.get("reason") == REASON_MISSION_BUSY:
+            # La mission est en cours de traitement : l'action n'a pas été
+            # appliquée, le client peut réessayer (409 Conflict).
+            status = 409
+        else:
+            status = 403
         self._send_json(status, payload)
 
     def _handle_mission_answer(
@@ -1266,7 +1353,12 @@ showLogin();
             return
         mission_id = path.split("/")[2]
         payload = self.app.answer_mission(mission_id, data, session)
-        status = 200 if "error" not in payload else 403
+        if "error" not in payload:
+            status = 200
+        elif payload.get("reason") == REASON_MISSION_BUSY:
+            status = 409
+        else:
+            status = 403
         self._send_json(status, payload)
 
     def _handle_mission_cancel(self, path: str, session: WebSession) -> None:
