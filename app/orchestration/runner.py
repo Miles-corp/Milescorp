@@ -22,7 +22,9 @@ Garanties fundamentals :
 
 from __future__ import annotations
 
+import hmac
 import logging
+import secrets
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -55,6 +57,15 @@ from app.tools.service import ToolService
 logger = logging.getLogger("miles.orchestration")
 if not logger.handlers:
     logger.addHandler(logging.NullHandler())
+
+
+class MissionAuthorizationError(Exception):
+    """Une autorisation de mission a été refusée.
+
+    Levée lorsqu'un demandeur n'est pas autorisé à agir sur la mission,
+    lorsqu'il ne présente pas le jeton d'approbation attendu, ou lorsque la
+    demande est expirée ou déjà utilisée.
+    """
 
 
 class MissionRunner:
@@ -133,38 +144,71 @@ class MissionRunner:
 
     # --- Cycle de vie des missions ---
 
-    def create(self, objective: str) -> Mission:
-        """Créer une mission à partir d'un objectif en langage naturel."""
+    def create(
+        self,
+        objective: str,
+        *,
+        owner_user_id: str = "",
+        owner_session_id: str = "",
+    ) -> Mission:
+        """Créer une mission à partir d'un objectif en langage naturel.
+
+        Args:
+            objective : objectif en langage naturel.
+            owner_user_id : utilisateur authentifié propriétaire de la
+                mission (vide pour une mission locale).
+            owner_session_id : session du client propriétaire : c'est elle
+                qui est liée aux jetons de confirmation des outils et aux
+                autorisations.
+        """
         cleaned = (objective or "").strip()
         if not cleaned:
             raise ValueError("L'objectif d'une mission ne peut pas être vide.")
         mission = Mission(
             mission_id=Mission.new_id(),
             objective=cleaned,
-            session_id=self.session_id,
+            session_id=owner_session_id or self.session_id,
+            owner_user_id=owner_user_id,
             target_path=extract_target_path(cleaned) or "",
         )
         with self._lock:
             self._missions[mission.mission_id] = mission
         self._save(mission)
+        self._record_event(mission, "created", "Mission creee.")
         return mission
 
-    def get(self, mission_id: str) -> Optional[Mission]:
-        """Retourner une mission connue (en mémoire ou en persistance)."""
+    def get(
+        self, mission_id: str, *, owner_user_id: Optional[str] = None
+    ) -> Optional[Mission]:
+        """Retourner une mission connue (en mémoire ou en persistance).
+
+        Args:
+            mission_id : identifiant de la mission.
+            owner_user_id : si fourni, la mission n'est retournée que si
+                elle appartient à cet utilisateur (isolation entre
+                utilisateurs de l'interface web).
+        """
         with self._lock:
             mission = self._missions.get(mission_id)
-        if mission is not None:
-            return mission
-        if self.store is not None:
+        if mission is None and self.store is not None:
             mission = self.store.load(mission_id)
             if mission is not None:
                 with self._lock:
                     self._missions[mission_id] = mission
-            return mission
-        return None
+        if mission is None:
+            return None
+        if owner_user_id is not None and mission.owner_user_id != owner_user_id:
+            return None
+        return mission
 
-    def list_missions(self, limit: int = 20) -> List[Dict[str, Any]]:
-        """Lister les missions connues."""
+    def list_missions(
+        self, limit: int = 20, *, owner_user_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Lister les missions connues.
+
+        Si ``owner_user_id`` est fourni, seules les missions de cet
+        utilisateur sont retournées.
+        """
         with self._lock:
             missions = list(self._missions.values())
         missions.sort(key=lambda m: m.created_at, reverse=True)
@@ -176,8 +220,9 @@ class MissionRunner:
                 "created_at": m.created_at,
                 "updated_at": m.updated_at,
             }
-            for m in missions[:limit]
-        ]
+            for m in missions
+            if owner_user_id is None or m.owner_user_id == owner_user_id
+        ][:limit]
 
     def find_running(self, objective: str) -> Optional[Mission]:
         """Retourner une mission en cours portant le même objectif.
@@ -220,23 +265,51 @@ class MissionRunner:
         mission.finished_at = self._clock()
         mission.touch()
         self._save(mission)
+        self._record_event(mission, "cancelled", "Mission annulee par l'utilisateur.")
         return True
 
-    def answer(self, mission_id: str, answer: str) -> Optional[Mission]:
+    def answer(
+        self,
+        mission_id: str,
+        answer: str,
+        *,
+        requester_user_id: Optional[str] = None,
+        requester_session_id: Optional[str] = None,
+    ) -> Optional[Mission]:
         """Traiter une réponse de l'utilisateur à une demande en attente.
 
         - demande de clarification : la réponse complète l'objectif et la
           mission est replanifiée ;
         - demande d'autorisation : une réponse positive autorise le
           périmètre proposé, une autre réponse refuse et arrête la mission.
+
+        Raises:
+            MissionAuthorizationError: si le demandeur n'est pas le
+                propriétaire de la mission.
         """
         mission = self.get(mission_id)
-        if mission is None or mission.pending is None:
+        if mission is None:
+            return None
+        if (
+            mission.owner_user_id
+            and requester_user_id is not None
+            and str(requester_user_id) != mission.owner_user_id
+        ):
+            raise MissionAuthorizationError(
+                "Cette mission appartient a un autre utilisateur."
+            )
+        if mission.pending is None:
             return mission
         text = (answer or "").strip()
         if mission.pending.kind == "authorization":
             approved = text.lower() in ("o", "oui", "y", "yes", "ok", "autorise")
-            return self.authorize(mission_id, approved=approved)
+            return self.authorize(
+                mission_id,
+                approved=approved,
+                requester_user_id=requester_user_id,
+                requester_session_id=requester_session_id,
+                approval_token=mission.pending.approval_token,
+            )
 
         # Clarification : on cherche un chemin dans la réponse.
         candidate = extract_target_path(text)
@@ -267,18 +340,53 @@ class MissionRunner:
         approved: bool,
         tool_ids: Optional[List[str]] = None,
         allowed_roots: Optional[List[str]] = None,
+        requester_user_id: Optional[str] = None,
+        requester_session_id: Optional[str] = None,
+        approval_token: Optional[str] = None,
     ) -> Optional[Mission]:
         """Accorder (ou refuser) l'autorisation demandée par une mission.
 
-        L'autorisation accordée est un **grant** lié à la session courante
-        et à la mission : elle expire, son nombre d'usages est borné et
-        elle ne peut pas être rejouée ailleurs.
+        L'autorisation accordée est un **grant** lié à la session du client
+        demandeur et à la mission : elle expire, son nombre d'usages est
+        borné et elle ne peut pas être rejouée ailleurs.
+
+        Le demandeur doit :
+        - être le propriétaire de la mission (comparaison de l'identifiant
+          utilisateur) ;
+        - présenter le jeton d'approbation de la demande en attente, lié à
+          cette mission et à ce périmètre précis.
+
+        Raises:
+            MissionAuthorizationError: si le demandeur n'est pas autorisé
+                ou si le jeton est absent, invalide, expiré ou déjà utilisé.
         """
         mission = self.get(mission_id)
         if mission is None:
-            return None
+            raise MissionAuthorizationError("Mission inconnue.")
         if mission.pending is None or mission.pending.kind != "authorization":
-            return mission
+            raise MissionAuthorizationError(
+                "Aucune autorisation en attente pour cette mission."
+            )
+        if (
+            mission.owner_user_id
+            and str(requester_user_id or "") != mission.owner_user_id
+        ):
+            raise MissionAuthorizationError(
+                "Cette mission appartient a un autre utilisateur."
+            )
+        pending = mission.pending
+        if pending.expires_at and self._clock() > pending.expires_at:
+            raise MissionAuthorizationError(
+                "La demande d'autorisation est expiree."
+            )
+        if not pending.approval_token or not approval_token:
+            raise MissionAuthorizationError(
+                "Jeton d'autorisation manquant."
+            )
+        if not hmac.compare_digest(pending.approval_token, approval_token):
+            raise MissionAuthorizationError(
+                "Jeton d'autorisation invalide."
+            )
 
         if not approved:
             mission.pending = None
@@ -291,20 +399,25 @@ class MissionRunner:
             self._save(mission)
             return mission
 
-        tools = tool_ids if tool_ids is not None else list(mission.pending.tool_ids)
+        tools = tool_ids if tool_ids is not None else list(pending.tool_ids)
         roots = (
             allowed_roots
             if allowed_roots is not None
-            else list(mission.pending.allowed_roots)
+            else list(pending.allowed_roots)
         )
         if self.grant_registry is not None:
             self.grant_registry.issue(
-                session_id=self.session_id,
+                session_id=requester_session_id or mission.session_id,
                 mission_id=mission.mission_id,
                 tool_ids=tools,
                 allowed_roots=roots,
                 scope="lecture_seule",
             )
+        self._record_event(
+            mission,
+            "authorized",
+            "Autorisation accordee pour : " + ", ".join(tools),
+        )
         mission.pending = None
         mission.state = MissionState.CREATED
         self._save(mission)
@@ -388,6 +501,9 @@ class MissionRunner:
             )
             mission.touch()
             self._save(mission)
+            self._record_event(
+                mission, "clarification", "Information manquante demandee."
+            )
             return None
         except PlanRejected as exc:
             mission.state = MissionState.FAILED
@@ -470,6 +586,9 @@ class MissionRunner:
                 step.error = outcome.error
                 mission.pending = self._authorization_request(mission, step)
                 mission.state = MissionState.AWAITING_AUTHORIZATION
+                self._record_event(
+                    mission, "authorization_required", "Autorisation humaine requise."
+                )
                 identical = 0
                 break
             else:
@@ -519,6 +638,7 @@ class MissionRunner:
         mission.report = self._report_builder.build(mission, self._analyze)
         mission.touch()
         self._save(mission)
+        self._record_event(mission, "finished", f"Etat final : {mission.state.value}.")
         return mission
 
     @staticmethod
@@ -635,6 +755,12 @@ class MissionRunner:
             allowed_roots=roots,
             details={"step_id": step.step_id},
             created_at=self._clock(),
+            # Jeton d'approbation : lié à CETTE demande (mission,
+            # périmètre, utilisateur). Imprévisible, à usage unique, il
+            # expire et n'est jamais déduit d'un identifiant de mission.
+            approval_token=secrets.token_hex(32),
+            requested_by_user=mission.owner_user_id,
+            expires_at=self._clock() + self.limits.approval_ttl_seconds,
         )
 
     def _analyze(self, mission: Mission) -> str:
@@ -687,3 +813,16 @@ class MissionRunner:
             self.store.save(mission)
         except Exception:  # noqa: BLE001 — la persistance ne doit rien casser
             logger.warning("Enregistrement de la mission impossible.")
+
+    def _record_event(self, mission: Mission, kind: str, detail: str = "") -> None:
+        """Consigner un événement de mission (traçabilité).
+
+        La table ``mission_events`` de la persistance est ainsi réellement
+        alimentée : chaque transition notable d'une mission est tracée.
+        """
+        if self.store is None:
+            return
+        try:
+            self.store.record_event(mission.mission_id, kind, detail)
+        except Exception:  # noqa: BLE001 — la traçabilité ne doit rien casser
+            logger.warning("Enregistrement d'un evenement de mission impossible.")

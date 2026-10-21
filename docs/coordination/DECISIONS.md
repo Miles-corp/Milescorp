@@ -81,3 +81,17 @@ Convention : chaque décision reçoit un ID `DEC-###` (ou `D-###`), une date, un
   6. **Résultat d'outil = donnée** — le contenu retourné par un outil est rapporté, jamais exécuté, et ne peut modifier ni les autorisations, ni le plan, ni les règles.
 - **Conséquences** : la mission pilote ne peut pas modifier le dépôt ; le compte rendu distingue faits observés, erreurs et étapes non terminées ; la reprise ne rejoue pas une étape au résultat incertain. Limites assumées : l'identité de session n'est pas une identité humaine authentifiée et le serveur web reste local et sans authentification.
 - **Statut** : ACCEPTEE
+
+## DEC-010 — Authentification par jeton porteur, session par client et autorisation de mission liée à une identité
+
+- **Date** : 2026-10-20
+- **Auteur** : Agent A
+- **Contexte** : le réaudit d'Agent B de la Phase 6 a confirmé deux P1 exploitables : aucune protection d'origine/CSRF sur les routes web modifiantes (P1-6-03) et une autorisation de mission acceptant `{"approved": true}` de n'importe quel client HTTP (P1-6-06). Un résiduel persistait : la session du serveur web, créée au démarrage, était partagée par tous les clients (P1-6-02).
+- **Décision** :
+  1. **Authentification explicite par jeton porteur.** Les identifiants sont configurés (`MILES_WEB_AUTH_TOKEN`, ou `MILES_WEB_USERS_FILE` pour plusieurs utilisateurs) ou générés et affichés une seule fois par `python miles.py --web`. **Sans identifiant configuré, l'interface web est fermée** (403 sur les routes sensibles). Ce n'est pas une identité humaine authentifiée au sens des comptes et mots de passe : c'est documenté comme tel, et cela ne dispense pas d'une authentification réelle avant toute exposition hors machine locale.
+  2. **Session par client.** `POST /session` échange le jeton contre une session opaque (256 bits, expiration 30 min, révocable) et un jeton CSRF distinct. La session est l'**identité** utilisée pour les jetons de confirmation des outils, les grants et la propriété des missions. Le contrôle d'origine est une défense complémentaire, jamais une protection CSRF à lui seul.
+  3. **Chaîne de contrôle sur toute route modifiante**, dans cet ordre : origine (403), type de contenu JSON (415), session authentifiée (401), jeton CSRF (403). Les refus interviennent avant la lecture du corps et avant toute action : aucun effet de bord.
+  4. **Autorisation de mission liée à une identité.** Une mission porte un propriétaire et une session ; les demandes d'autorisation portent un jeton d'approbation imprévisible, lié à cette demande précise, expirant et à usage unique. Le jeton n'est jamais déduit d'un identifiant de mission et le grant émis est lié à la session du client demandeur.
+  5. **Correction du blocage « résultat volumineux »** : le moteur consomme la file de résultats pendant l'exécution de l'enfant (le tampon d'un tube fait 8 Kio sous Windows) ; sans cela, tout résultat supérieur à 8 Kio expiraient à tort.
+- **Conséquences** : les routes web sensibles ne sont plus atteignables sans jeton ; les 5 tests d'audit d'Agent B exprimant les P1 passent désormais ; 488 tests OK. Restent à traiter séparément : bornes par mission et non par passage de boucle (P2-6-07/08), rotation des secrets et 2FA.
+- **Statut** : ACCEPTEE

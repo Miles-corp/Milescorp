@@ -37,6 +37,7 @@ from app.interface.cli import CLI
 from app.interface.web import MilesHandler, WebApp
 from app.tools.builtin import build_default_registry
 from app.tools.service import ToolService
+from tests.web_test_support import TEST_TOKEN, build_app
 
 
 # Handlers de test définis au niveau du module : le moteur exécute les
@@ -57,7 +58,7 @@ def _handler_lent() -> str:
 
 
 class _WebFixture:
-    """Serveur web local sur un port libre."""
+    """Serveur web local sur un port libre (session authentifiée)."""
 
     def __init__(self, app: WebApp) -> None:
         MilesHandler.app = app
@@ -65,10 +66,53 @@ class _WebFixture:
         self._port = self._server.server_address[1]
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
+        self._session: dict | None = None
+        self._login()
 
     @property
     def port(self) -> int:
         return self._port
+
+    def _login(self) -> None:
+        """Ouvrir une session authentifiée (Phase 6.1)."""
+        payload = self._send(
+            "POST", "/session", {"token": TEST_TOKEN}, {}, authenticated=False
+        )
+        self._session = payload[1] if payload[1] else None
+
+    def auth_headers(self) -> dict:
+        if not self._session:
+            return {}
+        return {
+            "X-MILES-Session": self._session["session_id"],
+            "X-MILES-CSRF": self._session["csrf_token"],
+        }
+
+    def _send(
+        self,
+        method: str,
+        path: str,
+        body: dict | None,
+        extra_headers: dict,
+        authenticated: bool = True,
+    ) -> tuple[int, dict]:
+        import urllib.error
+        import urllib.request
+
+        url = f"http://127.0.0.1:{self._port}{path}"
+        data = None
+        headers = dict(extra_headers)
+        if body is not None:
+            data = json.dumps(body).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        if authenticated:
+            headers.update(self.auth_headers())
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read().decode("utf-8"))
 
     def __enter__(self) -> "_WebFixture":
         return self
@@ -78,21 +122,7 @@ class _WebFixture:
         self._server.server_close()
 
     def request(self, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
-        import urllib.error
-        import urllib.request
-
-        url = f"http://127.0.0.1:{self.port}{path}"
-        data = None
-        headers = {}
-        if body is not None:
-            data = json.dumps(body).encode("utf-8")
-            headers["Content-Type"] = "application/json"
-        req = urllib.request.Request(url, data=data, headers=headers, method=method)
-        try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                return resp.status, json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            return exc.code, json.loads(exc.read().decode("utf-8"))
+        return self._send(method, path, body, {})
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +347,7 @@ class TestWebToolIntegration(unittest.TestCase):
 
     def setUp(self) -> None:
         self.service = ToolService()
-        self.app = WebApp(settings=Settings(), tool_service=self.service)
+        self.app = build_app(tool_service=self.service)
 
     def test_route_tools_liste_le_catalogue(self) -> None:
         with _WebFixture(self.app) as web:
@@ -409,7 +439,7 @@ class TestWebToolIntegration(unittest.TestCase):
             cli._handle_tool_command(["action_datetime"])
         sortie_cli = out.getvalue()
 
-        app = WebApp(settings=Settings(), tool_service=self.service)
+        app = build_app(tool_service=self.service)
         with _WebFixture(app) as web:
             status, payload = web.request(
                 "POST", "/tool", {"tool": "action_datetime", "parameters": {}}
@@ -448,7 +478,7 @@ class TestToolSecretProtection(unittest.TestCase):
 
     def test_secret_absent_de_la_reponse_web(self) -> None:
         service = ToolService()
-        app = WebApp(settings=Settings(), tool_service=service)
+        app = build_app(tool_service=service)
         with _WebFixture(app) as web:
             status, payload = web.request(
                 "POST", "/tool", {"tool": "action_datetime", "parameters": {"token": "abc"}}

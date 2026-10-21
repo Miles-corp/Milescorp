@@ -68,6 +68,7 @@ from app.tools.builtin import build_default_registry
 from app.tools.grants import GrantRegistry
 from app.tools.registry import ToolDefinition, ToolParameter, ToolRegistry
 from app.tools.service import ToolService
+from tests.web_test_support import TEST_TOKEN, TEST_USER, build_app
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +218,7 @@ def _build_runner(
 
 
 class _WebFixture:
-    """Serveur web local sur un port libre."""
+    """Serveur web local sur un port libre (session authentifiée)."""
 
     def __init__(self, app: WebApp) -> None:
         MilesHandler.app = app
@@ -225,6 +226,49 @@ class _WebFixture:
         self._port = self._server.server_address[1]
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
+        self._session: dict | None = None
+        self._login()
+
+    def _login(self) -> None:
+        """Ouvrir une session authentifiée (Phase 6.1)."""
+        payload = self._send(
+            "POST", "/session", {"token": TEST_TOKEN}, {}, authenticated=False
+        )
+        self._session = payload[1] if payload[1] else None
+
+    def auth_headers(self) -> dict:
+        if not self._session:
+            return {}
+        return {
+            "X-MILES-Session": self._session["session_id"],
+            "X-MILES-CSRF": self._session["csrf_token"],
+        }
+
+    def _send(
+        self,
+        method: str,
+        path: str,
+        body: dict | None,
+        extra_headers: dict,
+        authenticated: bool = True,
+    ):
+        import urllib.error
+        import urllib.request
+
+        url = f"http://127.0.0.1:{self._port}{path}"
+        data = None
+        headers = dict(extra_headers)
+        if body is not None:
+            data = json.dumps(body).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        if authenticated:
+            headers.update(self.auth_headers())
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read().decode("utf-8"))
 
     def __enter__(self) -> "_WebFixture":
         return self
@@ -234,21 +278,7 @@ class _WebFixture:
         self._server.server_close()
 
     def request(self, method: str, path: str, body: dict | None = None):
-        import urllib.error
-        import urllib.request
-
-        url = f"http://127.0.0.1:{self._port}{path}"
-        data = None
-        headers = {}
-        if body is not None:
-            data = json.dumps(body).encode("utf-8")
-            headers["Content-Type"] = "application/json"
-        req = urllib.request.Request(url, data=data, headers=headers, method=method)
-        try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                return resp.status, json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            return exc.code, json.loads(exc.read().decode("utf-8"))
+        return self._send(method, path, body, {})
 
 
 # ---------------------------------------------------------------------------
@@ -755,7 +785,11 @@ class TestAuthorization(unittest.TestCase):
             steps=[PlanStep("s1", "Sensible", "outil_sensible")],
         )
         mission = runner.run(mission.mission_id)
-        mission = runner.authorize(mission.mission_id, approved=False)
+        mission = runner.authorize(
+            mission.mission_id,
+            approved=False,
+            approval_token=mission.pending.approval_token,
+        )
         self.assertEqual(mission.state, MissionState.FAILED)
         self.assertTrue(any("refusée" in e for e in mission.errors))
 
@@ -771,7 +805,11 @@ class TestAuthorization(unittest.TestCase):
             steps=[PlanStep("s1", "Sensible", "outil_sensible")],
         )
         mission = runner.run(mission.mission_id)
-        mission = runner.authorize(mission.mission_id, approved=True)
+        mission = runner.authorize(
+            mission.mission_id,
+            approved=True,
+            approval_token=mission.pending.approval_token,
+        )
         self.assertEqual(mission.state, MissionState.COMPLETED)
         self.assertEqual(mission.plan.steps[0].status, StepStatus.SUCCEEDED)
 
@@ -919,7 +957,11 @@ class TestPilotMission(unittest.TestCase):
         )
         mission = runner.run(mission.mission_id)
         self.assertEqual(mission.state, MissionState.AWAITING_AUTHORIZATION)
-        mission = runner.authorize(mission.mission_id, approved=True)
+        mission = runner.authorize(
+            mission.mission_id,
+            approved=True,
+            approval_token=mission.pending.approval_token,
+        )
         self.assertIn(
             mission.state,
             (MissionState.COMPLETED, MissionState.PARTIAL),
@@ -1334,7 +1376,7 @@ class TestWebIntegration(unittest.TestCase):
 
     def setUp(self) -> None:
         self.runner, _, _ = _build_runner()
-        self.app = WebApp(settings=Settings(), mission_runner=self.runner)
+        self.app = build_app(mission_runner=self.runner)
 
     def test_route_creation_de_mission(self) -> None:
         with _WebFixture(self.app) as web:
@@ -1352,14 +1394,14 @@ class TestWebIntegration(unittest.TestCase):
         self.assertIn("error", payload)
 
     def test_route_liste_des_missions(self) -> None:
-        self.runner.create("Analyse le dossier docs/")
+        self.runner.create("Analyse le dossier docs/", owner_user_id=TEST_USER)
         with _WebFixture(self.app) as web:
             status, payload = web.request("GET", "/missions")
         self.assertEqual(status, 200)
         self.assertEqual(len(payload["missions"]), 1)
 
     def test_route_detail_dune_mission(self) -> None:
-        mission = self.runner.create("Analyse le dossier docs/")
+        mission = self.runner.create("Analyse le dossier docs/", owner_user_id=TEST_USER)
         with _WebFixture(self.app) as web:
             status, payload = web.request("GET", f"/mission/{mission.mission_id}")
         self.assertEqual(status, 200)
@@ -1385,7 +1427,7 @@ class TestWebIntegration(unittest.TestCase):
         self.assertEqual(payload1["mission_id"], payload2["mission_id"])
 
     def test_route_annulation(self) -> None:
-        mission = self.runner.create("Analyse le dossier docs/")
+        mission = self.runner.create("Analyse le dossier docs/", owner_user_id=TEST_USER)
         with _WebFixture(self.app) as web:
             status, payload = web.request(
                 "POST", f"/mission/{mission.mission_id}/cancel", {}

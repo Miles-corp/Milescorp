@@ -9,6 +9,12 @@ from app.ai_providers.remote import RemoteProvider
 from app.config.settings import Settings
 from app.core.conversation import Conversation
 from app.interface.cli import CLI
+from app.interface.web import MilesWebServer, WebApp
+from app.interface.web_auth import (
+    WebAuthenticator,
+    WebCredentialStore,
+    generate_access_token,
+)
 from app.memory.persistent import PersistentMemory, PersistentMemoryError
 from app.memory.transcript import ConversationTranscript
 from app.orchestration.models import ExecutionLimits
@@ -55,6 +61,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-persist",
         action="store_true",
         help="Ne pas enregistrer la conversation sur disque (mode éphémère)",
+    )
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        help="Démarrer l'interface web locale (au lieu du terminal)",
+    )
+    parser.add_argument(
+        "--web-port",
+        type=int,
+        default=8080,
+        help="Port d'écoute de l'interface web (défaut: 8080)",
     )
     return parser
 
@@ -108,6 +125,24 @@ def _build_mission_store(settings: Settings) -> MissionStore | None:
         )
         return None
     return MissionStore(enabled=True, db_path=str(db_path))
+
+
+def _build_web_authenticator(settings: Settings) -> tuple[WebAuthenticator, str]:
+    """Construire l'authentificateur de l'interface web.
+
+    Si aucun identifiant n'est configuré, un jeton d'accès est généré et
+    **affiché une seule fois** à l'utilisateur : la possession de ce jeton
+    est requise pour toute requête. Rien n'est écrit sur disque.
+
+    Returns:
+        Le couple ``(authentificateur, jeton à afficher)``. Le jeton est
+        vide si l'authentification était déjà configurée.
+    """
+    authenticator = WebAuthenticator.from_settings(settings)
+    if authenticator.is_configured:
+        return authenticator, ""
+    token = generate_access_token()
+    return WebAuthenticator(WebCredentialStore({"local": token})), token
 
 
 def _list_conversations(transcript: ConversationTranscript | None) -> int:
@@ -225,6 +260,43 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 # Première utilisation : on crée la première conversation.
                 conversation.attach_transcript(transcript)
+
+    if args.web:
+        # Interface web locale : elle exige une authentification par jeton.
+        authenticator, displayed_token = _build_web_authenticator(settings)
+        web_app = WebApp(
+            settings=settings,
+            provider=provider,
+            conversation=conversation,
+            memory=memory,
+            tool_service=tool_service,
+            mission_runner=mission_runner,
+            authenticator=authenticator,
+        )
+        server = MilesWebServer(web_app, port=args.web_port)
+        if displayed_token:
+            print("=" * 72)
+            print("Jeton d'accès de l'interface web (affiché une seule fois) :")
+            print(f"  {displayed_token}")
+            print(
+                "Saisissez ce jeton dans la page de connexion. "
+                "Sans lui, aucune route sensible n'est accessible."
+            )
+            print("=" * 72)
+        try:
+            server.start()
+        except KeyboardInterrupt:
+            print("\nArrêt de l'interface web.")
+            return 0
+        finally:
+            server.stop()
+            if memory is not None:
+                memory.close()
+            if transcript is not None:
+                transcript.close()
+            if mission_store is not None:
+                mission_store.close()
+        return 0
 
     cli = CLI(
         settings=settings,

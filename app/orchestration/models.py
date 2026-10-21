@@ -266,6 +266,7 @@ class ExecutionLimits:
     max_duration_seconds: float = 120.0
     max_identical_results: int = 2
     max_report_bytes: int = 20000
+    approval_ttl_seconds: float = 300.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -274,6 +275,7 @@ class ExecutionLimits:
             "max_duration_seconds": self.max_duration_seconds,
             "max_identical_results": self.max_identical_results,
             "max_report_bytes": self.max_report_bytes,
+            "approval_ttl_seconds": self.approval_ttl_seconds,
         }
 
 
@@ -292,6 +294,12 @@ class PendingRequest:
         allowed_roots : racines de chemin concernées.
         details : informations complémentaires.
         created_at : instant de création.
+        approval_token : jeton d'approbation, lié à cette demande précise
+            (mission, périmètre, utilisateur). Il est imprévisible,
+            expire et ne peut être utilisé qu'une fois.
+        requested_by_user : utilisateur authentifié destinataire de la
+            demande (vide si la mission n'est pas multi-utilisateur).
+        expires_at : instant d'expiration de la demande d'approbation.
     """
 
     kind: str = "clarification"
@@ -300,6 +308,9 @@ class PendingRequest:
     allowed_roots: List[str] = field(default_factory=list)
     details: Dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
+    approval_token: str = ""
+    requested_by_user: str = ""
+    expires_at: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -309,6 +320,9 @@ class PendingRequest:
             "allowed_roots": list(self.allowed_roots),
             "details": dict(self.details),
             "created_at": self.created_at,
+            "approval_token": self.approval_token,
+            "requested_by_user": self.requested_by_user,
+            "expires_at": self.expires_at,
         }
 
     @classmethod
@@ -320,6 +334,9 @@ class PendingRequest:
             allowed_roots=[str(r) for r in (data.get("allowed_roots") or [])],
             details=dict(data.get("details") or {}),
             created_at=float(data.get("created_at", 0.0)),
+            approval_token=str(data.get("approval_token", "")),
+            requested_by_user=str(data.get("requested_by_user", "")),
+            expires_at=float(data.get("expires_at", 0.0)),
         )
 
 
@@ -338,7 +355,10 @@ class Mission:
         pending : demande en attente, le cas échéant.
         planner : nom du planificateur utilisé.
         planner_note : justification factuelle du choix du planificateur.
-        session_id : session ayant lancé la mission.
+        session_id : session ayant lancé la mission (identité technique du
+            client : console ou session web authentifiée).
+        owner_user_id : utilisateur authentifié propriétaire de la mission
+            (vide pour une mission locale hors interface web).
         report : compte rendu final.
         target_path : chemin cible déterminé pour la mission (si connu).
         created_at / updated_at / started_at / finished_at : horodatages.
@@ -355,6 +375,7 @@ class Mission:
     planner: str = ""
     planner_note: str = ""
     session_id: str = ""
+    owner_user_id: str = ""
     report: str = ""
     target_path: str = ""
     created_at: float = field(default_factory=time.time)
@@ -385,6 +406,7 @@ class Mission:
             "planner": self.planner,
             "planner_note": sanitize_text(self.planner_note),
             "session_id": self.session_id,
+            "owner_user_id": self.owner_user_id,
             "report": sanitize_text(self.report),
             "target_path": self.target_path,
             "created_at": self.created_at,
@@ -410,6 +432,7 @@ class Mission:
             planner=str(data.get("planner", "")),
             planner_note=str(data.get("planner_note", "")),
             session_id=str(data.get("session_id", "")),
+            owner_user_id=str(data.get("owner_user_id", "")),
             report=str(data.get("report", "")),
             target_path=str(data.get("target_path", "")),
             created_at=float(data.get("created_at", 0.0)),

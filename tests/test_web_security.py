@@ -29,6 +29,7 @@ from http.server import ThreadingHTTPServer
 from app.ai_providers.base import AIProvider, AIProviderError
 from app.config.settings import Settings
 from app.interface.web import MilesHandler, WebApp
+from tests.web_test_support import TEST_TOKEN, build_app
 
 FAKE_PROVIDER_KEY = "sk-FAUSSE-CLE-XYZ"
 FAKE_BEARER_TOKEN = "FAUX-JETON-BEARER-0123456789"
@@ -73,8 +74,32 @@ class LeakyMemory:
         return []
 
 
+def _inject_auth_headers(raw_request: bytes, headers: dict) -> bytes:
+    """Insérer les en-têtes de session dans une requête HTTP brute.
+
+    Les requêtes brutes doivent elles aussi être authentifiées : sans
+    session, le serveur refuse la requête avant d'atteindre la lecture du
+    corps, ce qui masquerait les contrôles de taille de corps.
+    """
+    if not headers:
+        return raw_request
+    lines = raw_request.split(b"\r\n")
+    extra = b"".join(
+        f"{name}: {value}\r\n".encode("utf-8") for name, value in headers.items()
+    )
+    # Insertion à la fin du bloc d'en-têtes (avant la ligne vide).
+    for index, line in enumerate(lines):
+        if line == b"":
+            return b"\r\n".join(lines[:index]) + b"\r\n" + extra + b"\r\n".join(lines[index:])
+    return raw_request + extra
+
+
 class _Server:
-    """Serveur de test sur un port libre, arrêté à la fin."""
+    """Serveur de test sur un port libre, arrêté à la fin.
+    L'interface web exige une authentification par jeton (Phase 6.1) :
+    une session est ouverte automatiquement et les en-têtes de session et
+    de jeton CSRF sont joints à chaque requête.
+    """
 
     def __init__(self, app: WebApp) -> None:
         MilesHandler.app = app
@@ -82,25 +107,49 @@ class _Server:
         self._port = self._server.server_address[1]
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
+        self._session: dict | None = None
+        self._login()
 
     @property
     def port(self) -> int:
         return self._port
 
-    def __enter__(self) -> "_Server":
-        return self
+    def auth_headers(self) -> dict:
+        """En-têtes de session et de jeton CSRF de la session courante."""
+        if not self._session:
+            return {}
+        return {
+            "X-MILES-Session": self._session["session_id"],
+            "X-MILES-CSRF": self._session["csrf_token"],
+        }
 
-    def __exit__(self, *args: object) -> None:
-        self._server.shutdown()
-        self._server.server_close()
+    def _login(self) -> None:
+        """Ouvrir une session authentifiée auprès du serveur."""
+        response = self._send(
+            "POST", "/session", {"token": TEST_TOKEN}, {}, authenticated=False
+        )
+        try:
+            self._session = json.loads(response["body"])
+        except (ValueError, KeyError):
+            self._session = None
 
-    def request(self, method: str, path: str, body: dict | None = None) -> dict:
+    def _send(
+        self,
+        method: str,
+        path: str,
+        body: dict | None,
+        extra_headers: dict,
+        authenticated: bool = True,
+    ) -> dict:
         url = f"http://127.0.0.1:{self._port}{path}"
         data = None
-        headers = {}
+        headers = dict(extra_headers)
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
+        if authenticated and self._session:
+            headers["X-MILES-Session"] = self._session["session_id"]
+            headers["X-MILES-CSRF"] = self._session["csrf_token"]
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
@@ -110,6 +159,16 @@ class _Server:
                 "status": exc.code,
                 "body": exc.read().decode("utf-8", errors="replace"),
             }
+
+    def __enter__(self) -> "_Server":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+
+    def request(self, method: str, path: str, body: dict | None = None) -> dict:
+        return self._send(method, path, body, {})
 
 
 class TestWebNoSecretLeak(unittest.TestCase):
@@ -125,7 +184,7 @@ class TestWebNoSecretLeak(unittest.TestCase):
         provider = LeakyProvider(
             AIProviderError(f"échec interne clé {FAKE_PROVIDER_KEY}")
         )
-        app = WebApp(settings=Settings(), provider=provider)
+        app = build_app(settings=Settings(), provider=provider)
         with _Server(app) as server:
             result = server.request("POST", "/message", {"message": "bonjour"})
 
@@ -138,7 +197,7 @@ class TestWebNoSecretLeak(unittest.TestCase):
                 f"authentification refusée Authorization: Bearer {FAKE_BEARER_TOKEN}"
             )
         )
-        app = WebApp(settings=Settings(), provider=provider)
+        app = build_app(settings=Settings(), provider=provider)
         with _Server(app) as server:
             result = server.request("POST", "/message", {"message": "bonjour"})
 
@@ -149,7 +208,7 @@ class TestWebNoSecretLeak(unittest.TestCase):
         provider = LeakyProvider(
             AIProviderError(f"échec interne password={FAKE_PASSWORD}")
         )
-        app = WebApp(settings=Settings(), provider=provider)
+        app = build_app(settings=Settings(), provider=provider)
         with _Server(app) as server:
             result = server.request("POST", "/message", {"message": "bonjour"})
 
@@ -164,7 +223,7 @@ class TestWebNoSecretLeak(unittest.TestCase):
                 f"Bearer {FAKE_BEARER_TOKEN} password={FAKE_PASSWORD}"
             )
         )
-        app = WebApp(settings=Settings(), provider=provider)
+        app = build_app(settings=Settings(), provider=provider)
         with _Server(app) as server:
             result = server.request("POST", "/message", {"message": "bonjour"})
 
@@ -176,7 +235,7 @@ class TestWebNoSecretLeak(unittest.TestCase):
     def test_erreur_fournisseur_preserve_le_contexte(self) -> None:
         """Les codes HTTP et le drapeau context_preserved sont préservés."""
         provider = LeakyProvider(AIProviderError(f"échec {FAKE_PROVIDER_KEY}"))
-        app = WebApp(settings=Settings(), provider=provider)
+        app = build_app(settings=Settings(), provider=provider)
         with _Server(app) as server:
             result = server.request("POST", "/message", {"message": "bonjour"})
 
@@ -189,7 +248,7 @@ class TestWebNoSecretLeak(unittest.TestCase):
         memory = LeakyMemory(
             RuntimeError(f"échec {FAKE_PROVIDER_KEY} password={FAKE_PASSWORD}")
         )
-        app = WebApp(settings=Settings(), memory=memory)  # type: ignore[arg-type]
+        app = build_app(settings=Settings(), memory=memory)  # type: ignore[arg-type]
         with _Server(app) as server:
             result = server.request("POST", "/remember", {"content": "test"})
 
@@ -200,7 +259,7 @@ class TestWebNoSecretLeak(unittest.TestCase):
         memory = LeakyMemory(
             RuntimeError(f"échec {FAKE_PROVIDER_KEY} Bearer {FAKE_BEARER_TOKEN}")
         )
-        app = WebApp(settings=Settings(), memory=memory)  # type: ignore[arg-type]
+        app = build_app(settings=Settings(), memory=memory)  # type: ignore[arg-type]
         with _Server(app) as server:
             result = server.request("POST", "/forget", {"id": 1})
 
@@ -215,7 +274,7 @@ class TestWebNoSecretLeak(unittest.TestCase):
                 f"Bearer {FAKE_BEARER_TOKEN} password={FAKE_PASSWORD}"
             )
         )
-        app = WebApp(settings=Settings(), provider=provider)
+        app = build_app(settings=Settings(), provider=provider)
         with self.assertLogs("miles.web", level="ERROR") as captured:
             with _Server(app) as server:
                 server.request("POST", "/message", {"message": "bonjour"})
@@ -230,7 +289,7 @@ class TestWebNoSecretLeak(unittest.TestCase):
     def test_log_interne_sans_trace_brute(self) -> None:
         """Aucune trace d'appels brute n'est journalisée pour une exception."""
         provider = LeakyProvider(RuntimeError(f"panne {FAKE_PROVIDER_KEY}"))
-        app = WebApp(settings=Settings(), provider=provider)
+        app = build_app(settings=Settings(), provider=provider)
         with self.assertLogs("miles.web", level="ERROR") as captured:
             with _Server(app) as server:
                 server.request("POST", "/message", {"message": "bonjour"})
@@ -277,7 +336,7 @@ class TestWebServerLocalOnly(unittest.TestCase):
     """S-002 : le serveur web MILES doit écouter uniquement sur 127.0.0.1."""
 
     def _app(self) -> WebApp:
-        return WebApp(settings=Settings())
+        return build_app(settings=Settings())
 
     def test_adresse_par_defaut_est_locale(self) -> None:
         from app.interface.web import LOCAL_ONLY_HOST, MilesWebServer
@@ -361,20 +420,35 @@ class TestWebServerLocalOnly(unittest.TestCase):
 
             thread = threading.Thread(target=http_server.serve_forever, daemon=True)
             thread.start()
-            with urllib.request.urlopen(
-                f"http://127.0.0.1:{port}/status", timeout=5
-            ) as resp:
-                self.assertEqual(resp.status, 200)
-                self.assertIn(b"non configur", resp.read())
+            # Phase 6.1 : la route /status exige une session authentifiée.
+            with _Server(app) as authenticated:
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/status",
+                    headers=authenticated.auth_headers(),
+                )
+                with urllib.request.urlopen(request, timeout=5) as resp:
+                    self.assertEqual(resp.status, 200)
+                    self.assertIn(b"non configur", resp.read())
         finally:
             http_server.shutdown()
             http_server.server_close()
 
-    def test_serveur_ne_demande_pas_d_authentification(self) -> None:
-        """Aucune authentification n'est requise : le service est strictement local."""
+    def test_serveur_reste_local_et_exige_desormais_une_session(self) -> None:
+        """Le service reste strictement local ET exige une session.
+
+        Phase 6.1 : l'absence d'authentification n'est plus considérée
+        comme une protection suffisante. Le serveur n'écoute que sur
+        127.0.0.1 **et** les routes sensibles exigent une session
+        authentifiée par jeton.
+        """
         from app.interface.web import LOCAL_ONLY_HOST
 
         self.assertEqual(LOCAL_ONLY_HOST, "127.0.0.1")
+        # Sans session, une route sensible est refusée (401).
+        app = build_app(settings=Settings())
+        with _Server(app) as server:
+            result = server._send("GET", "/status", None, {}, authenticated=False)
+            self.assertEqual(result["status"], 401)
 
 
 class TestWebRequestBodyLimit(unittest.TestCase):
@@ -410,11 +484,12 @@ class TestWebRequestBodyLimit(unittest.TestCase):
         """
         import http.client
 
-        app = WebApp(settings=Settings())
+        app = build_app(settings=Settings())
         with _Server(app) as server:
             conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=10)
             try:
                 headers = {"Content-Type": "application/json"}
+                headers.update(server.auth_headers())
                 if content_length is not None:
                     headers["Content-Length"] = content_length
                 try:
@@ -453,8 +528,9 @@ class TestWebRequestBodyLimit(unittest.TestCase):
         """
         import socket
 
-        app = WebApp(settings=Settings())
+        app = build_app(settings=Settings())
         with _Server(app) as server:
+            raw_request = _inject_auth_headers(raw_request, server.auth_headers())
             sock = socket.create_connection(("127.0.0.1", server.port), timeout=10)
             try:
                 sock.sendall(raw_request)
