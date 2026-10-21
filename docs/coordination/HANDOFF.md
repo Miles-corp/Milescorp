@@ -115,6 +115,23 @@ Procédure à suivre par chaque agent à la fin de sa session de travail, afin q
 **Prochaine action recommandée :** Agent B prend TASK-DEV-030 (audit de `fix/miles-answer-d1ter`) et tranche A-β ; ne pas fusionner avant cet audit ; à la fusion, respecter l'ordre D1 → D2 → D1-bis → D3 → A-α/B-α et résoudre manuellement le conflit de contexte possible sur le bloc d'imports de `web.py` (constantes `REASON_*`).
 
 
+### H-008 — 2026-10-21 — Agent A → Agent B
+
+**Tâche :** TASK-DEV-031 (D-B05 + validation D-B01) ; TASK-DEV-032 (audit) transférée.
+
+**Travail réalisé :** vérification de l'état Git réel (la branche d'audit d'Agent B a bougé : `ac627df` → `fd25a26` ; nouveau rapport lu, il ne contredit aucun constat et ne signale aucune régression) ; examen des six défauts D-B01 à D-B06 sur le code de la base de travail ; correction de D-B05 (la liste des missions ignorait la base ; le propriétaire n'était pas persisté, ce qui éteignait la séparation entre utilisateurs au redémarrage) ; reproduction exacte du constat D-B01 de l'audit dans un dépôt placé dans un chemin contenant `code` ; ajout du test de non-régression demandé par l'audit.
+
+**Fichiers modifiés :** `app/orchestration/store.py` ; `app/orchestration/runner.py` ; `tests/test_mission_persistence_owner.py` (nouveau) ; `docs/reports/PHASE_6_3I_MISSION_PERSISTENCE_AGENT_A.md` (nouveau) ; `docs/coordination/{TASKS,STATUS,MESSAGES}.md`.
+
+**Commits :** branche `fix/miles-mission-persistence-owner` (base `25baa60`), poussée sur `origin`. **Aucune fusion** ; `main` (`b9b7e7d`), l'intégration (`69bf670`), D1 (`3a59dae`), D2 (`d3240d2`), D1-bis (`1ef4878`), D3 (`0be08cd`) et A-α/B-α (`25baa60`) inchangés. Travail en worktree isolé : l'artefact non suivi du checkout principal est préservé, aucune base du développeur n'a été écrite.
+
+**Tests exécutés :** 9 tests dédiés (3 échouent sans le correctif) ; `test_mission_orchestrator` 73/73 ; `test_mission_bounds` 20/20 ; `test_mission_authorize_response` 20/20 ; `test_mission_web_authorization` 6/6 ; `test_windows_paths` 21/21 ; `test_policy_path_typing` 40/40 ; `test_web_security_phase6_1` 35/35 ; suite complète **642 tests OK (4 ignorés)** ; **70 tests d'audit Agent B rejoués tels quels : OK (2 ignorés)**. Non exécuté : Debian 13 (environnement indisponible).
+
+**Problèmes restants :** D-B05 conserve deux points ouverts (`results` non persistés, étape `RUNNING` non reprise) ; D-B02 reste une réserve de conception assumée (non touchée) ; les missions antérieures à la migration n'ont pas de propriétaire connu (choix sûr : non listées dans la vue filtrée, visibles dans la vue non filtrée).
+
+**Prochaine action recommandée :** Agent B prend TASK-DEV-032 (audit de la branche) et décide si les deux points D-B05 restants méritent un lot dédié ; ne pas fusionner sans décision explicite ; l'ordre de fusion D1 → D2 → D1-bis → D3 → A-α/B-α → D-B05 est à respecter.
+
+
 ## 3. Transmission de la main
 
 - Prévenir l'autre agent (par le canal convenu hors dépôt, ex. message) qu'une mise à jour est disponible sur GitHub ou dans le clone partagé.

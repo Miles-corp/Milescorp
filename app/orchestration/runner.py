@@ -232,13 +232,22 @@ class MissionRunner:
     ) -> List[Dict[str, Any]]:
         """Lister les missions connues.
 
+        Les missions en mémoire et les missions **persistées** sont
+        combinées : sans cela, les missions d'une session précédente
+        disparaissaient de la liste au démarrage du programme (défaut
+        D-B05). Une mission présente dans les deux sources n'est listée
+        qu'une fois.
+
         Si ``owner_user_id`` est fourni, seules les missions de cet
-        utilisateur sont retournées.
+        utilisateur sont retournées (séparation entre utilisateurs). Les
+        missions enregistrées avant la persistance du propriétaire (donc
+        sans propriétaire connu) n'apparaissent alors pas dans la liste
+        filtrée : elles restent visibles dans la liste non filtrée, propre à
+        la console locale.
         """
         with self._lock:
             missions = list(self._missions.values())
-        missions.sort(key=lambda m: m.created_at, reverse=True)
-        return [
+        entrees = [
             {
                 "mission_id": m.mission_id,
                 "objective": m.objective,
@@ -248,7 +257,31 @@ class MissionRunner:
             }
             for m in missions
             if owner_user_id is None or m.owner_user_id == owner_user_id
-        ][:limit]
+        ]
+        deja_listees = {e["mission_id"] for e in entrees}
+        if self.store is not None:
+            try:
+                rows = self.store.list_missions(
+                    limit=limit, owner_user_id=owner_user_id
+                )
+            except (OSError, ValueError):
+                rows = []
+            for row in rows:
+                mission_id = str(row.get("id") or "")
+                if not mission_id or mission_id in deja_listees:
+                    continue
+                deja_listees.add(mission_id)
+                entrees.append(
+                    {
+                        "mission_id": mission_id,
+                        "objective": row.get("objective") or "",
+                        "state": row.get("state") or "",
+                        "created_at": row.get("created_at") or 0.0,
+                        "updated_at": row.get("updated_at") or 0.0,
+                    }
+                )
+        entrees.sort(key=lambda e: e["created_at"], reverse=True)
+        return entrees[:limit]
 
     def find_running(self, objective: str) -> Optional[Mission]:
         """Retourner une mission en cours portant le même objectif.

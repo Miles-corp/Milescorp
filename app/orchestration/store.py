@@ -40,7 +40,7 @@ class MissionStore:
         db_path : chemin du fichier de base de données SQLite.
     """
 
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
 
     def __init__(
         self,
@@ -92,12 +92,13 @@ class MissionStore:
         )
         cursor.execute(
             """
-            CREATE TABLE IF NOT EXISTS missions (
-                id TEXT PRIMARY KEY,
-                objective TEXT NOT NULL,
-                state TEXT NOT NULL,
-                session_id TEXT NOT NULL DEFAULT '',
-                planner TEXT NOT NULL DEFAULT '',
+              CREATE TABLE IF NOT EXISTS missions (
+                  id TEXT PRIMARY KEY,
+                  objective TEXT NOT NULL,
+                  state TEXT NOT NULL,
+                  session_id TEXT NOT NULL DEFAULT '',
+                  owner_user_id TEXT NOT NULL DEFAULT '',
+                  planner TEXT NOT NULL DEFAULT '',
                 planner_note TEXT NOT NULL DEFAULT '',
                 plan_json TEXT NOT NULL DEFAULT '{}',
                 facts_json TEXT NOT NULL DEFAULT '[]',
@@ -123,6 +124,15 @@ class MissionStore:
             cursor.execute(
                 "ALTER TABLE missions ADD COLUMN budget_json "
                 "TEXT NOT NULL DEFAULT '{}'"
+            )
+        # Migration : une base créée avant la version 3 (propriétaire
+        # persisté) ne possède pas la colonne owner_user_id. Sans elle, le
+        # propriétaire d'une mission était perdu au rechargement : la
+        # séparation entre utilisateurs ne tenait plus (défaut D-B05).
+        if "owner_user_id" not in columns:
+            cursor.execute(
+                "ALTER TABLE missions ADD COLUMN owner_user_id "
+                "TEXT NOT NULL DEFAULT ''"
             )
         cursor.execute(
             """
@@ -205,15 +215,17 @@ class MissionStore:
                 self._conn.execute(
                     """
                     INSERT INTO missions (
-                        id, objective, state, session_id, planner, planner_note,
+                        id, objective, state, session_id, owner_user_id,
+                        planner, planner_note,
                         plan_json, facts_json, errors_json, unfinished_json,
                         pending_json, budget_json, report, created_at, updated_at,
                         started_at, finished_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         objective = excluded.objective,
                         state = excluded.state,
                         session_id = excluded.session_id,
+                        owner_user_id = excluded.owner_user_id,
                         planner = excluded.planner,
                         planner_note = excluded.planner_note,
                         plan_json = excluded.plan_json,
@@ -232,6 +244,7 @@ class MissionStore:
                         sanitize_text(payload["objective"]),
                         payload["state"],
                         payload["session_id"],
+                        payload.get("owner_user_id", ""),
                         payload["planner"],
                         sanitize_text(payload["planner_note"]),
                         plan_json,
@@ -286,6 +299,7 @@ class MissionStore:
             "objective": row["objective"],
             "state": row["state"],
             "session_id": row["session_id"],
+            "owner_user_id": row["owner_user_id"],
             "planner": row["planner"],
             "planner_note": row["planner_note"],
             "plan": _json(row["plan_json"], None),
@@ -308,23 +322,44 @@ class MissionStore:
             )
             return None
 
-    def list_missions(self, limit: int = 20) -> list[dict[str, Any]]:
-        """Lister les missions récentes (les plus récentes d'abord)."""
+    def list_missions(
+        self, limit: int = 20, *, owner_user_id: Optional[str] = None
+    ) -> list[dict[str, Any]]:
+        """Lister les missions récentes (les plus récentes d'abord).
+
+        Args:
+            limit : nombre maximum de missions retournées.
+            owner_user_id : si fourni, seules les missions de cet
+                utilisateur sont retournées (séparation entre utilisateurs).
+        """
         if not self.is_available:
             return []
         with self._lock:
             assert self._conn is not None
             try:
-                rows = self._conn.execute(
-                    """
-                    SELECT id, objective, state, planner, created_at, updated_at,
-                           finished_at
-                    FROM missions
-                    ORDER BY created_at DESC, rowid DESC
-                    LIMIT ?
-                    """,
-                    (limit,),
-                ).fetchall()
+                if owner_user_id is None:
+                    rows = self._conn.execute(
+                        """
+                        SELECT id, objective, state, planner, created_at,
+                               updated_at, finished_at
+                        FROM missions
+                        ORDER BY created_at DESC, rowid DESC
+                        LIMIT ?
+                        """,
+                        (limit,),
+                    ).fetchall()
+                else:
+                    rows = self._conn.execute(
+                        """
+                        SELECT id, objective, state, planner, created_at,
+                               updated_at, finished_at
+                        FROM missions
+                        WHERE owner_user_id = ?
+                        ORDER BY created_at DESC, rowid DESC
+                        LIMIT ?
+                        """,
+                        (owner_user_id, limit),
+                    ).fetchall()
             except sqlite3.Error:
                 return []
         return [dict(row) for row in rows]
