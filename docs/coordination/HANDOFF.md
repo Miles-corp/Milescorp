@@ -132,6 +132,23 @@ Procédure à suivre par chaque agent à la fin de sa session de travail, afin q
 **Prochaine action recommandée :** Agent B prend TASK-DEV-032 (audit de la branche) et décide si les deux points D-B05 restants méritent un lot dédié ; ne pas fusionner sans décision explicite ; l'ordre de fusion D1 → D2 → D1-bis → D3 → A-α/B-α → D-B05 est à respecter.
 
 
+### H-009 — 2026-10-21 — Agent A → Agent B
+
+**Tâche :** TASK-DEV-033 (persistance des résultats et reprise des missions interrompues) ; TASK-DEV-034 (audit) transférée.
+
+**Travail réalisé :** diagnostic des deux points D-B05 restants (dictionnaire `results` local à la boucle d'exécution ; étape `RUNNING` ni rejouée ni signalée) ; correction sans changement de schéma (les résultats sont reconstruits depuis le plan déjà persisté) ; comportement de reprise explicite à deux catégories (rejeu si l'outil est déclaré sans effet, sinon incertitude et aucune réexécution) ; déclaration `read_only` portée par le schéma d'outils, fausse par défaut ; 12 tests déterministes et un rapport complet.
+
+**Fichiers modifiés :** `app/orchestration/runner.py` ; `app/tools/registry.py` ; `app/tools/builtin.py` ; `tests/test_mission_results_recovery.py` (nouveau) ; `docs/reports/PHASE_6_3J_RESULTS_RECOVERY_AGENT_A.md` (nouveau) ; `docs/coordination/{TASKS,STATUS,MESSAGES}.md`.
+
+**Commits :** branche `fix/miles-results-persistence` (base `79692fe`, référence de lecture non modifiée), poussée sur `origin`. **Aucune fusion** ; `main` (`b9b7e7d`), l'intégration (`69bf670`), D1 (`3a59dae`), D2 (`d3240d2`), D1-bis (`1ef4878`), D3 (`0be08cd`) et A-α/B-α (`25baa60`) inchangés. Travail en worktree isolé : l'artefact non suivi du checkout principal est préservé, aucune base du développeur n'a été écrite.
+
+**Tests exécutés :** 12 tests dédiés (4 échouent sans le correctif) ; `test_mission_persistence_owner` 9/9 ; `test_mission_orchestrator` 73/73 ; `test_mission_bounds` 20/20 ; `test_mission_authorize_response` 20/20 ; `test_mission_web_authorization` 6/6 ; `test_web_security_phase6_1` 35/35 ; `test_tool_engine` 26/26 ; `test_tool_integration` 40/40 ; `test_tool_policy` 11/11 ; `test_policy_path_typing` 40/40 ; `test_windows_paths` 21/21 ; `test_path_security` 21/21 (3 ignorés) ; suite complète **654 tests OK (4 ignorés)** ; **70 tests d'audit Agent B rejoués tels quels : OK (2 ignorés)**. Non exécuté : Debian 13 (environnement indisponible). Aucun appel API payant, aucune donnée réelle lue ni écrite.
+
+**Problèmes restants :** la déclaration `read_only` est une affirmation de l'application (faux par défaut) ; la reprise d'une étape de lecture relit la donnée ; le budget global peut être atteint par la reprise (comportement voulu) ; un outil à effet interrompu laisse la mission en `partial` avec une étape incertaine.
+
+**Prochaine action recommandée :** Agent B prend TASK-DEV-034 ; à la fusion, D3 touche les mêmes fichiers de schéma d'outils (`app/tools/registry.py`, `app/tools/builtin.py`) que cette branche — hunks différents, à vérifier ; ne pas fusionner sans décision explicite.
+
+
 ## 3. Transmission de la main
 
 - Prévenir l'autre agent (par le canal convenu hors dépôt, ex. message) qu'une mise à jour est disponible sur GitHub ou dans le clone partagé.

@@ -53,6 +53,7 @@ def build_default_registry() -> ToolRegistry:
             risk_level="LOW",
             required_permissions=(),
             timeout_seconds=5,
+            read_only=True,
         )
     )
 
@@ -65,6 +66,7 @@ def build_default_registry() -> ToolRegistry:
             risk_level="LOW",
             required_permissions=(),
             timeout_seconds=5,
+            read_only=True,
         )
     )
 
@@ -77,6 +79,7 @@ def build_default_registry() -> ToolRegistry:
             risk_level="LOW",
             required_permissions=(),
             timeout_seconds=5,
+            read_only=True,
         )
     )
 
@@ -111,6 +114,7 @@ def build_default_registry() -> ToolRegistry:
             risk_level="MEDIUM",
             required_permissions=("lecture_systeme",),
             timeout_seconds=10,
+            read_only=True,
         )
     )
 
@@ -146,6 +150,7 @@ def build_default_registry() -> ToolRegistry:
             risk_level="MEDIUM",
             required_permissions=("lecture_systeme",),
             timeout_seconds=10,
+            read_only=True,
         )
     )
 

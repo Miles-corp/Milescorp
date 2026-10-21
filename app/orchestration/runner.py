@@ -641,6 +641,15 @@ class MissionRunner:
         automatiquement : elles sont signalées comme nécessitant une
         revalidation explicite. Les autorisations sont revalidées (un
         grant expiré ou émis pour une autre session est refusé).
+
+        Cas d'une étape **interrompue** (le programme s'est arrêté pendant
+        son exécution, l'étape est restée à l'état ``RUNNING``) :
+
+        - si l'outil est déclaré **sans effet** (``ToolDefinition.read_only``),
+          l'absence d'effet précédent est démontrée : l'étape est rejouée ;
+        - sinon, l'action a pu produire un effet : l'étape est marquée
+          **incertaine**, elle n'est **pas** rejouée et exige une
+          vérification explicite de l'utilisateur.
         """
         mission = self.get(mission_id)
         if mission is None:
@@ -656,6 +665,24 @@ class MissionRunner:
                 step.note = (
                     "résultat incertain : étape non rejouée automatiquement"
                 )
+            elif step.status == StepStatus.RUNNING:
+                if self._is_side_effect_free(step.tool_id):
+                    # L'INTERRUPTION est sans conséquence : l'étape est
+                    # rejouée (le budget global reste la borne).
+                    step.status = StepStatus.PENDING
+                    step.result = None
+                    step.note = (
+                        "reprise après interruption : étape rejouée "
+                        "(outil déclaré sans effet)"
+                    )
+                else:
+                    # L'action a pu produire un effet : elle n'est PAS
+                    # rejouée, elle est signalée comme incertaine.
+                    step.status = StepStatus.UNCERTAIN
+                    step.note = (
+                        "interrompue : résultat incertain, action non "
+                        "rejouée, vérification requise"
+                    )
         # Une mission annulée peut être relancée : l'annulation précédente
         # ne doit pas empêcher la reprise explicite.
         with self._lock:
@@ -770,7 +797,16 @@ class MissionRunner:
         """
         limits = self.limits
         budget = mission.budget
-        results: Dict[str, Any] = {}
+        # Les résultats des étapes déjà terminées sont relus depuis le plan
+        # (persisté avec la mission, `PlanStep.result`). Sans cela, une
+        # mission reprise ne pouvait plus résoudre les sources de ses étapes
+        # dépendantes : celles-ci étaient sautées et la mission s'achevait
+        # en « partial » (défaut D-B05).
+        results: Dict[str, Any] = {
+            step.step_id: step.result
+            for step in (mission.plan.steps if mission.plan else [])
+            if step.status == StepStatus.SUCCEEDED and step.result is not None
+        }
         mission.state = MissionState.RUNNING
         if mission.started_at is None:
             mission.started_at = self._clock()
@@ -945,6 +981,16 @@ class MissionRunner:
         if signature == last_signature:
             return identical + 1, last_signature
         return 0, signature
+
+    def _is_side_effect_free(self, tool_id: str) -> bool:
+        """Indiquer si l'outil est déclaré sans effet de bord.
+
+        La déclaration est portée par l'application (le schéma des outils) ;
+        elle est fausse par défaut : un outil non déclaré n'est jamais rejoué
+        automatiquement après une interruption.
+        """
+        tool = self.tool_service.registry.get_tool(tool_id)
+        return bool(tool is not None and getattr(tool, "read_only", False))
 
     def _skip_dependents(self, mission: Mission, step_id: str) -> None:
         """Marquer comme sautées les étapes qui dépendent d'une étape échouée."""

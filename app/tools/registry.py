@@ -51,13 +51,21 @@ class ToolDefinition:
     """Définition d'un outil autorisé.
 
     Attributs :
-        tool_id : identifiant unique de l'outil.
-        description : description lisible pour l'humain.
+        tool_id : identifiant de l'outil.
+        description : description lisible par l'humain.
         handler : fonction Python qui implémente l'outil.
         parameters : paramètres attendus et leurs contraintes.
         risk_level : "LOW", "MEDIUM" ou "HIGH".
         required_permissions : permissions nécessaires pour exécuter l'outil.
         timeout_seconds : délai maximal d'exécution en secondes.
+        read_only : l'outil est-il déclaré **sans effet de bord** ? Un outil
+            déclaré sans effet peut être rejoué après une interruption :
+            l'absence d'effet précédent est alors démontrée par la
+            déclaration elle-même (faire relire un fichier n'écrit rien).
+            Un outil qui n'est pas déclaré sans effet n'est **jamais** rejoué
+            automatiquement : une étape interrompue est marquée incertaine et
+            exige une vérification explicite. La déclaration est posée par
+            l'application, jamais par le modèle ; le défaut est « à effet ».
     """
 
     tool_id: str
@@ -67,6 +75,7 @@ class ToolDefinition:
     risk_level: str = "LOW"
     required_permissions: tuple[str, ...] = ()
     timeout_seconds: int = 30
+    read_only: bool = False
 
     def __post_init__(self) -> None:
         if self.risk_level not in ("LOW", "MEDIUM", "HIGH"):
