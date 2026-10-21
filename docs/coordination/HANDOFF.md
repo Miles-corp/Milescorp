@@ -98,6 +98,23 @@ Procédure à suivre par chaque agent à la fin de sa session de travail, afin q
 **Prochaine action recommandée :** Agent B prend TASK-DEV-027 et audite la branche `fix/miles-policy-path-typing` (caractère borné de l'exemption, choix des caractères bloqués, maintien des garanties G1-G9, Debian 13) ; ne pas fusionner avant cet audit.
 
 
+### H-006 — 2026-10-21 — Agent A → Agent B
+
+**Tâche :** TASK-DEV-028 (investigation `/answer` et D1-ter) — investigation seule, correctifs non appliqués.
+
+**Travail réalisé :** reproduction et caractérisation des deux signalements. Risque A : mesure de l'asymétrie de jeton entre `/authorize` et `/answer`, de la réponse mensongère de `/answer`, et de l'impact cross-session comparé entre les bases D1 et D3 ; comportement CLI/Web comparé. Risque B : analyse des états et transitions, reproduction déterministe de la cause racine (analyse qualitative demandée pendant l'attente), démonstration que le 409 est temporaire et récupérable, et qu'aucun état incohérent ni double exécution n'est créé. 13 tests d'observation non destructifs et un rapport complet.
+
+**Fichiers modifiés :** **aucun fichier de production**. Fichiers ajoutés : `tests/test_investigation_d1ter_answer_path.py`, `docs/reports/PHASE_6_3G_INVESTIGATION_D1TER_ANSWER_AGENT_A.md`, `docs/coordination/{TASKS,STATUS,MESSAGES}.md`.
+
+**Commits :** branche `investigation/d1ter-and-answer-path` (base `0be08cd`), poussée sur `origin`. **Aucune fusion** ; `main` (`b9b7e7d`), l'intégration (`69bf670`), D1 (`3a59dae`), D2 (`d3240d2`), D1-bis (`1ef4878`) et D3 (`0be08cd`) inchangés. Travail en worktree isolé : l'artefact non suivi du checkout principal est préservé.
+
+**Tests exécutés :** 13 tests d'investigation (0 échec) ; `test_web_security_phase6_1` 35/35 ; `test_web_security` 33/33 ; `test_mission_authorize_response` 20/20 ; `test_mission_web_authorization` 6/6 ; `test_mission_orchestrator` 73/73 ; `test_mission_bounds` 20/20 ; `test_tool_policy` 11/11 ; `test_path_security` 21/21 (3 ignorés) ; suite complète **628 tests OK (4 ignorés)** ; **70 tests d'audit Agent B rejoués tels quels : OK (2 ignorés)**. Non exécuté : Debian 13 (environnement indisponible). Aucun appel API payant, aucune donnée réelle lue ni écrite.
+
+**Problèmes restants :** risque A et risque B confirmés mais **d'aucune gravité supérieure à mineure** (aucune élévation de privilège) ; les correctifs A-alpha / A-beta / B-alpha sont proposés et **non appliqués**, en attente d'arbitrage ; D1-ter reste présent sur les bases actuelles.
+
+**Prochaine action recommandée :** Agent B arbitre A-alpha (recommandé), A-beta (contrat d'API) et B-alpha (1 ligne) ; un correctif D1-ter peut être préparé sur une branche dédiée une fois l'arbitrage fait, en s'appuyant sur les 13 tests d'observation comme base de régression inversée.
+
+
 ## 3. Transmission de la main
 
 - Prévenir l'autre agent (par le canal convenu hors dépôt, ex. message) qu'une mise à jour est disponible sur GitHub ou dans le clone partagé.
