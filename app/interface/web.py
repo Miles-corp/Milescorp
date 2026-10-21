@@ -1166,7 +1166,9 @@ showLogin();
             )
             return None
         session_id = self.headers.get(SESSION_HEADER) or ""
-        session = self.app.authenticator.authenticate(session_id)
+        session = self.app.authenticator.authenticate(
+            session_id, user_agent=self.headers.get("User-Agent") or ""
+        )
         if session is None:
             self._reject(401, "Session absente ou expiree : connectez-vous.")
             return None
@@ -1190,7 +1192,9 @@ showLogin();
             return
         try:
             session = self.app.authenticator.login(
-                token.strip(), client_address=self.client_address[0]
+                token.strip(),
+                client_address=self.client_address[0],
+                user_agent=self.headers.get("User-Agent") or "",
             )
         except WebAuthError as exc:
             self._send_json(401, {"error": str(exc)})

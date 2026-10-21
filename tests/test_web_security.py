@@ -29,7 +29,7 @@ from http.server import ThreadingHTTPServer
 from app.ai_providers.base import AIProvider, AIProviderError
 from app.config.settings import Settings
 from app.interface.web import MilesHandler, WebApp
-from tests.web_test_support import TEST_TOKEN, build_app
+from tests.web_test_support import TEST_TOKEN, TEST_USER_AGENT, build_app
 
 FAKE_PROVIDER_KEY = "sk-FAUSSE-CLE-XYZ"
 FAKE_BEARER_TOKEN = "FAUX-JETON-BEARER-0123456789"
@@ -80,7 +80,14 @@ def _inject_auth_headers(raw_request: bytes, headers: dict) -> bytes:
     Les requêtes brutes doivent elles aussi être authentifiées : sans
     session, le serveur refuse la requête avant d'atteindre la lecture du
     corps, ce qui masquerait les contrôles de taille de corps.
+
+    L'agent utilisateur est également injecté : depuis le durcissement
+    Phase 6.1, la session est liée au client qui l'a ouverte, et un
+    client qui change d'agent entre la connexion et la requête voit sa
+    session refusée.
     """
+    headers = dict(headers or {})
+    headers.setdefault("User-Agent", TEST_USER_AGENT)
     if not headers:
         return raw_request
     lines = raw_request.split(b"\r\n")
@@ -144,6 +151,9 @@ class _Server:
         url = f"http://127.0.0.1:{self._port}{path}"
         data = None
         headers = dict(extra_headers)
+        # Agent utilisateur constant : la session est liée au client qui
+        # l'a ouverte (durcissement Phase 6.1).
+        headers.setdefault("User-Agent", TEST_USER_AGENT)
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
@@ -421,10 +431,15 @@ class TestWebServerLocalOnly(unittest.TestCase):
             thread = threading.Thread(target=http_server.serve_forever, daemon=True)
             thread.start()
             # Phase 6.1 : la route /status exige une session authentifiée.
+            # La session est liée à l'agent utilisateur du client qui l'a
+            # ouverte : la requête doit présenter le même agent.
             with _Server(app) as authenticated:
                 request = urllib.request.Request(
                     f"http://127.0.0.1:{port}/status",
-                    headers=authenticated.auth_headers(),
+                    headers={
+                        **authenticated.auth_headers(),
+                        "User-Agent": TEST_USER_AGENT,
+                    },
                 )
                 with urllib.request.urlopen(request, timeout=5) as resp:
                     self.assertEqual(resp.status, 200)

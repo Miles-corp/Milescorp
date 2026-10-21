@@ -63,7 +63,18 @@ if not logger.handlers:
 TOKEN_BYTES = 32
 
 #: Durée de vie d'une session web (secondes).
-DEFAULT_SESSION_TTL_SECONDS = 1800.0
+#:
+#: 900 s (15 min) d'INACTIVITÉ, avec renouvellement glissant à chaque
+#: requête authentifiée. La valeur précédente (1800 s) laissait une session
+#: volée exploitable pendant une demi-heure — y compris pour les ROUTES DE
+#: LECTURE, que le jeton CSRF ne protège pas (le CSRF protège les
+#: requêtes *modifiantes* cross-site, pas l'accès en lecture d'un porteur
+#: de jeton légitime).
+DEFAULT_SESSION_TTL_SECONDS = 900.0
+
+#: Durée de vie MAXIMALE d'une session (secondes), quel que soit l'usage.
+#: 8 h : au-delà, une ré-authentification est exigée.
+MAX_SESSION_LIFETIME_SECONDS = 8 * 3600.0
 
 #: Durée de vie d'une demande d'autorisation de mission (secondes).
 DEFAULT_APPROVAL_TTL_SECONDS = 300.0
@@ -225,7 +236,11 @@ class WebSession:
         user_id : identifiant de l'utilisateur authentifié.
         csrf_token : jeton CSRF, distinct du jeton de session.
         created_at : instant de création.
-        expires_at : instant d'expiration.
+        expires_at : instant d'expiration (renouvellement glissant).
+        absolute_expires_at : expiration MAXIMALE, non renouvelable.
+        ua_digest : empreinte de l'agent utilisateur ayant ouvert la
+            session. Une session presentations depuis un autre client
+            (_User-Agent_ différent) est refusée.
         revoked : True si la session a été révoquée.
     """
 
@@ -234,11 +249,29 @@ class WebSession:
     csrf_token: str
     created_at: float
     expires_at: float
+    absolute_expires_at: float = 0.0
+    ua_digest: str = ""
     revoked: bool = False
 
     def is_expired(self, now: float) -> bool:
-        """Indiquer si la session a expiré."""
-        return now >= self.expires_at
+        """Indiquer si la session a expiré (inactivité ou durée maximale)."""
+        if now >= self.expires_at:
+            return True
+        if self.absolute_expires_at and now >= self.absolute_expires_at:
+            return True
+        return False
+
+
+def _ua_digest(user_agent: str) -> str:
+    """Calculer l'empreinte de l'agent utilisateur.
+
+    L'empreinte n'est pas un secret : elle sert à lier une session au
+    client qui l'a ouverte, afin qu'un `session_id` volé ne soit pas
+    rejouable depuis une autre pile cliente.
+    """
+    if not user_agent:
+        return ""
+    return hashlib.sha256(user_agent.encode("utf-8", "replace")).hexdigest()
 
 
 class WebAuthenticator:
@@ -246,7 +279,9 @@ class WebAuthenticator:
 
     Attributs :
         credentials : magasin des identifiants.
-        session_ttl_seconds : durée de vie d'une session.
+        session_ttl_seconds : durée d'INACTIVITÉ d'une session (renouvelée
+            à chaque requête authentifiée).
+        max_session_lifetime_seconds : durée de vie MAXIMALE d'une session.
     """
 
     def __init__(
@@ -254,10 +289,12 @@ class WebAuthenticator:
         credentials: WebCredentialStore,
         *,
         session_ttl_seconds: float = DEFAULT_SESSION_TTL_SECONDS,
+        max_session_lifetime_seconds: float = MAX_SESSION_LIFETIME_SECONDS,
         clock: Any = time.time,
     ) -> None:
         self.credentials = credentials
         self.session_ttl_seconds = float(session_ttl_seconds)
+        self.max_session_lifetime_seconds = float(max_session_lifetime_seconds)
         self._clock = clock
         self._sessions: Dict[str, WebSession] = {}
         self._failures: Dict[str, List[float]] = {}
@@ -287,8 +324,16 @@ class WebAuthenticator:
 
     # --- Connexion ---
 
-    def login(self, token: str, client_address: str = "") -> WebSession:
+    def login(
+        self,
+        token: str,
+        client_address: str = "",
+        user_agent: str = "",
+    ) -> WebSession:
         """Authentifier un client et créer une session.
+
+        La session est liée à l'agent utilisateur du client (empreinte) :
+        un `session_id` rejoué depuis une autre pile cliente est refusé.
 
         Raises:
             WebAuthError: si aucun identifiant n'est configuré, si le client
@@ -313,6 +358,8 @@ class WebAuthenticator:
             csrf_token=secrets.token_hex(TOKEN_BYTES),
             created_at=now,
             expires_at=now + self.session_ttl_seconds,
+            absolute_expires_at=now + self.max_session_lifetime_seconds,
+            ua_digest=_ua_digest(user_agent),
         )
         with self._lock:
             self._sessions[session.session_id] = session
@@ -320,8 +367,23 @@ class WebAuthenticator:
         logger.info("Session web ouverte pour l'utilisateur %s.", user_id)
         return session
 
-    def authenticate(self, session_id: str) -> Optional[WebSession]:
-        """Retourner la session correspondante, ou None si elle est invalide."""
+    def authenticate(
+        self,
+        session_id: str,
+        user_agent: str = "",
+    ) -> Optional[WebSession]:
+        """Retourner la session correspondante, ou None si elle est invalide.
+
+        Refuse une session :
+        - inconnue, révoquée ou expirée (inactivité ou durée maximale) ;
+        - présentée depuis un agent utilisateur différent de celui qui l'a
+          ouverte (session detachée du client d'origine) ;
+        - dont l'identifiant est forged/deviné (aucune session ne correspond).
+
+        À chaque appel valide, l'expiration d'INACTIVITÉ est renouvelée
+        (renouvellement glissant), sans jamais dépasser la durée de vie
+        maximale.
+        """
         if not session_id:
             return None
         now = float(self._clock())
@@ -329,6 +391,15 @@ class WebAuthenticator:
             session = self._sessions.get(session_id)
             if session is None or session.revoked or session.is_expired(now):
                 return None
+            if session.ua_digest and not hmac.compare_digest(
+                session.ua_digest, _ua_digest(user_agent)
+            ):
+                # Session présentée par un autre client : refusée.
+                return None
+            # Renouvellement glissant, borné par la durée de vie maximale.
+            session.expires_at = min(
+                now + self.session_ttl_seconds, session.absolute_expires_at
+            )
             return session
 
     def verify_csrf(self, session: Optional[WebSession], csrf_token: str) -> bool:

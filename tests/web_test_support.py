@@ -35,6 +35,14 @@ TEST_TOKEN = "jeton-de-test-miles-0123456789"
 #: Identifiant utilisateur associé.
 TEST_USER = "utilisateur-test"
 
+#: Agent utilisateur des requêtes de test.
+#:
+#: La session web est liée à l'agent utilisateur du client qui l'ouvre
+#: (Phase 6.1, durcissement) : toutes les requêtes d'un même client de
+#: test doivent donc présenter le même agent. Le module l'envoie sur
+#: TOUTES ses requêtes, y compris la connexion.
+TEST_USER_AGENT = "MILES-Test-Agent/1.0"
+
 #: Second utilisateur (test d'isolation entre utilisateurs).
 OTHER_TOKEN = "jeton-de-test-autre-0123456789"
 OTHER_USER = "autre-utilisateur"
@@ -125,6 +133,8 @@ class WebTestServer:
         url = f"http://127.0.0.1:{self._port}{path}"
         data = None
         request_headers = dict(headers or {})
+        # Agent utilisateur constant : la session est liée au client.
+        request_headers.setdefault("User-Agent", TEST_USER_AGENT)
         if body is not None and not isinstance(body, (bytes, bytearray)):
             data = json.dumps(body).encode("utf-8")
             request_headers.setdefault("Content-Type", "application/json")
