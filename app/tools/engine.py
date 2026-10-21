@@ -227,10 +227,28 @@ class ToolEngine:
             )
 
         # 2. Appliquer la politique de sécurité sur les paramètres
+        #
+        # Les paramètres déclarés comme CHEMINS par le schéma de l'outil
+        # sont validés structurellement par la politique (caractères de
+        # contrôle et métacaractères) au lieu du contrôle par sous-chaîne
+        # réservé aux valeurs libres : un répertoire légitime dont le nom
+        # contient « source » ou « code » n'est ainsi pas refusé à tort.
+        # Le type est déclaré par l'application, jamais par le modèle ; le
+        # confinement des chemins (`app.security.paths`) reste l'unique
+        # autorité sur les fichiers réellement accessibles.
+        path_parameters = {
+            param.name for param in tool.parameters if param.is_path
+        }
         try:
-            self._policy.validate_no_shell_access(parameters)
-            self._policy.validate_no_code_execution(parameters)
-            self._policy.validate_no_secret_access(parameters)
+            self._policy.validate_no_shell_access(
+                parameters, path_parameters=path_parameters
+            )
+            self._policy.validate_no_code_execution(
+                parameters, path_parameters=path_parameters
+            )
+            self._policy.validate_no_secret_access(
+                parameters, path_parameters=path_parameters
+            )
         except PermissionError as exc:
             params_hash = self._hash_parameters(parameters)
             self._record(

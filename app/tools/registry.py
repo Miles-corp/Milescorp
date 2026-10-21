@@ -17,6 +17,23 @@ class ToolParameter:
     """Déclaration d'un paramètre d'outil.
 
     Sert à valider les arguments fournis par le modèle avant exécution.
+
+    Attributs :
+        name : nom du paramètre.
+        type : type Python attendu.
+        required : le paramètre doit-il être fourni ?
+        description : description lisible par l'humain.
+        min_value, max_value : bornes numériques.
+        allowed_values : ensemble des valeurs autorisées.
+        is_path : le paramètre porte-t-il un CHEMIN de fichier ? La
+            politique de sécurité lui applique alors un contrôle
+            **structurel** (caractères de contrôle et métacaractères de
+            commande) au lieu du contrôle par sous-chaîne réservé aux
+            valeurs libres : un répertoire légitime dont le nom contient
+            « source », « code » ou « script » est alors accepté par la
+            politique. Cela n'ouvre aucun accès : le confinement des
+            chemins (`app.security.paths`) reste la seule autorité sur les
+            fichiers réellement accessibles.
     """
 
     name: str
@@ -26,6 +43,7 @@ class ToolParameter:
     min_value: Optional[float] = None
     max_value: Optional[float] = None
     allowed_values: Optional[tuple] = None
+    is_path: bool = False
 
 
 @dataclass(frozen=True)

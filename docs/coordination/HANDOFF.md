@@ -81,6 +81,23 @@ Procédure à suivre par chaque agent à la fin de sa session de travail, afin q
 **Prochaine action recommandée :** Agent B prend TASK-DEV-024 (audit du commit D1-bis) et tranche la voie de correction de D3 pour TASK-DEV-025 ; ne pas fusionner avant ces validations.
 
 
+### H-005 — 2026-10-21 — Agent A → Agent B
+
+**Tâche :** TASK-DEV-026 (correction D3) ; TASK-DEV-027 (audit D3) transférée.
+
+**Travail réalisé :** correction du défaut D3 par typage explicite des paramètres de chemin (marqueur `is_path` dans le schéma d'outils, contrôle structurel des valeurs de chemin dans la politique, transmission du typage par le moteur), 40 tests de régression à trois niveaux (politique / validation du chemin / autorisation effective), vérification de 9 garanties de sécurité, reprise et correction de la matrice de 29 cas de l'analyse préalable après vérification du code réel.
+
+**Fichiers modifiés :** `app/tools/policy.py` ; `app/tools/engine.py` ; `app/tools/registry.py` ; `app/tools/builtin.py` ; `tests/test_policy_path_typing.py` (nouveau) ; `docs/reports/PHASE_6_3F_D3_IMPLEMENTATION_AGENT_A.md` (nouveau) ; `docs/user_guide/MILES_PLAN_DE_TEST_PHASE_6.md` ; `docs/coordination/{TASKS,STATUS,MESSAGES}.md`.
+
+**Commits :** branche `fix/miles-policy-path-typing` (base `1ef4878` = tete D1-bis), poussée sur `origin`. **Aucune fusion** ; `main` (`b9b7e7d`), la branche d'intégration auditée (`69bf670`), D1 (`3a59dae`), D2 (`d3240d2`) et D1-bis (`1ef4878`) inchangés. Travail en worktree isolé : l'artefact non suivi du checkout principal est préservé, aucune base du développeur n'a été écrite.
+
+**Tests exécutés :** 40 tests D3 (3 échouent sans le correctif, vérifié par revert du seul moteur) ; `test_tool_policy` 11/11 ; `test_tool_engine` 26/26 ; `test_tool_integration` 40/40 ; `test_tool_resources` 8/8 (1 ignoré) ; `test_path_security` 21/21 (3 ignorés) ; `test_web_security_phase6_1` 35/35 ; `test_web_security` 33/33 ; non-régression D1 6/6, D1-bis 20/20, D2 21/21 ; suite complète **615 tests OK (4 ignorés)** ; **70 tests d'audit Agent B rejoués tels quels : OK (2 ignorés)**. Non exécuté : Debian 13 (environnement indisponible). Aucun appel API payant.
+
+**Problèmes restants :** audit D3 non effectué (TASK-DEV-027) ; trois points signalés hors périmètre (clés imbriquées non vues par la politique, fragments de code non détectés, D1-ter) ; D1-ter et le contournement du jeton via `/mission/<id>/answer` toujours non corrigés.
+
+**Prochaine action recommandée :** Agent B prend TASK-DEV-027 et audite la branche `fix/miles-policy-path-typing` (caractère borné de l'exemption, choix des caractères bloqués, maintien des garanties G1-G9, Debian 13) ; ne pas fusionner avant cet audit.
+
+
 ## 3. Transmission de la main
 
 - Prévenir l'autre agent (par le canal convenu hors dépôt, ex. message) qu'une mise à jour est disponible sur GitHub ou dans le clone partagé.

@@ -94,6 +94,7 @@ def build_default_registry() -> ToolRegistry:
                     type=str,
                     required=False,
                     description="Répertoire à lister, relatif à la racine du projet.",
+                    is_path=True,
                 ),
                 ToolParameter(
                     name="depth",
@@ -128,6 +129,7 @@ def build_default_registry() -> ToolRegistry:
                     type=str,
                     required=True,
                     description="Fichier à lire, relatif à la racine du projet.",
+                    is_path=True,
                 ),
                 ToolParameter(
                     name="max_bytes",

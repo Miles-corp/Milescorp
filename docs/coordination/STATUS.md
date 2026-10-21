@@ -72,6 +72,20 @@
 - **Limites** : aucune validation Debian 13 ; D3 non corrige (decision d'Agent B requise) ; D1-ter cause racine non corrigee ; le jeton d'approbation reste contournable par le proprietaire via `/mission/<id>/answer` (comportement preexistant, signale).
 - **En attente** : audit independant par Agent B (TASK-DEV-024) et decision D3 (TASK-DEV-025).
 
+## Phase 6.3f — Correction D3 : typage explicite des paramètres de chemin (Agent A, 2026-10-21)
+
+- **Rapport** : `docs/reports/PHASE_6_3F_D3_IMPLEMENTATION_AGENT_A.md`
+- **Base retenue** : `1ef4878` (`fix/miles-d1bis-authorization-response`) — la tete la plus recente (D1 + D2 + D1-bis). `main` (`b9b7e7d`) ecartee : elle ne contient pas `app/tools/builtin.py`. Branche d'integration `69bf670` ecartee (anterieure aux correctifs en vol). **Aucune fusion.**
+- **Branche** : `fix/miles-policy-path-typing`, poussee sur `origin`. Travail en **worktree isole** (`Temp\miles-d3`) ; le checkout principal, son artefact non suivi et les bases du developeur n'ont pas ete touches.
+- **Defaut corrige (D3)** : la politique appliquait un controle par sous-chaine aux VALEURS, y compris aux chemins : `C:\dev\source`, `Documents\code`, `C:\Python39\Lib` etaient refuses, et toute mission sur un tel repertoire etait impossible. Meme famille dans les controles shell (`system`, `run`, `command`, `exec`) et secrets (`secret`).
+- **Correctif** : 4 fichiers — `app/tools/registry.py` (`ToolParameter.is_path`), `app/tools/builtin.py` (2 marqueurs), `app/tools/policy.py` (controle **structurel** des valeurs de chemin + factorisation des trois validateurs), `app/tools/engine.py` (transmission du typage declare). **`app/security/paths.py` n'est PAS modifie** ; le planificateur n'est pas modifie (son controle porte sur des motifs de commandes, sans faux positif). L'exemption exige **simultanement** un parametre **declare** chemin **et** une chaine directe ; elle ne s'applique ni aux valeurs libres, ni aux structures imbriquees, ni aux parametres non declares.
+- **Garanties verifiees (9)** : G1 cles interdites toujours interdites ; G2 valeurs libres toujours controlees ; G3 chemins valides structurellement ; G4 exemption bornee ; G5 confinement inchange (un chemin accepte par la politique est refuse par `resolve_authorized_path` hors racines) ; G6 traversees refusees ; G7 lectures inchangees (fichiers sensibles refusés) ; G8 aucun outil, permission ni racine nouveau ; G9 les trois niveaux (politique / validation du chemin / autorisation effective) sont distincts et testes separement.
+- **Tests** : `tests/test_policy_path_typing.py` (40 tests, 3 niveaux) — **3 echouent sans le correctif** (revert de `app/tools/engine.py` : le defect D3 reapparait au niveau outil) ; suite complete **615 tests OK (4 ignores)** ; **70 tests d'audit Agent B rejoues tels quels : OK (2 ignores)** ; `test_tool_policy` 11/11, `test_tool_engine` 26/26, `test_tool_integration` 40/40, `test_path_security` 21/21 (3 ignores), `test_web_security_phase6_1` 35/35, `test_web_security` 33/33, non-regression D1 (6), D1-bis (20), D2 (21).
+- **Matrice de 29 cas de l'analyse D3 verifiee contre le code reel** : deux attentes etaient erronees (la politique detecte des MOTS, pas des motifs de code ; les cles imbriquees ne sont pas vues par la politique) — corrigees dans la suite et signalees.
+- **Points signales, non corriges (hors perimetre)** : (1) `_iter_keys` ne descend pas dans les valeurs : une cle interdite imbriquee n'est pas vue par la politique (fermee par le schema) ; (2) la politique ne detecte pas les fragments de code sans mot interdit (« import os ») ; (3) D1-ter et le contournement du jeton via `/mission/<id>/answer` (rapport D1-bis).
+- **Limites** : aucune validation Debian 13 ; aucun appel API payant ; aucun acces a un fournisseur distant ; seule une directory temporaire de test est creee puis supprimee.
+- **En attente** : audit independant par Agent B (TASK-DEV-027). L'audit D3 n'est **pas** considere comme approuve.
+
 ## Blocages
 
 Aucun blocage à ce jour.
