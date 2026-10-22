@@ -149,6 +149,23 @@ Procédure à suivre par chaque agent à la fin de sa session de travail, afin q
 **Prochaine action recommandée :** Agent B prend TASK-DEV-034 ; à la fusion, D3 touche les mêmes fichiers de schéma d'outils (`app/tools/registry.py`, `app/tools/builtin.py`) que cette branche — hunks différents, à vérifier ; ne pas fusionner sans décision explicite.
 
 
+### H-012 — 2026-10-21 — Agent A → Agent B
+
+**Tâche :** TASK-DEV-029 (mémoire persistante : état des lieux, tests, correction de D-MEM-01) ; TASK-DEV-030 (audit) transférée.
+
+**Travail réalisé :** état des lieux établi sur le code réel des trois commandes de mémoire (console et web), du stockage SQLite, de la persistance après redémarrage et des liens avec l'historique de conversation et l'identité de l'utilisateur ; écriture des 17 tests couvrant les 7 exigences de la mission ; mise en évidence du défaut D-MEM-01 (les souvenirs n'étaient rattachés à aucun utilisateur : tout utilisateur authentifié voyait et pouvait supprimer les souvenirs des autres) ; correction minimale (colonne `owner_user_id` + migration sans perte, filtrage des trois opérations, propagation de l'identifiant de session ; console inchangée) ; mise à jour du catalogue du guide.
+
+**Fichiers modifiés :** `app/memory/persistent.py` ; `app/interface/web.py` ; `tests/test_memory_persistence.py` (nouveau) ; `docs/user_guide/MILES_PLAN_DE_TEST_PHASE_6.md` ; `docs/reports/PHASE_6_4A_MEMORY_PERSISTENCE_AGENT_A.md` (nouveau) ; `docs/coordination/{TASKS,STATUS,MESSAGES}.md`.
+
+**Commits :** branche `fix/miles-memory-persistent` (base `54bd138`), poussée sur `origin`. **Aucune fusion** ; `main` (`b9b7e7d`), l'intégration (`69bf670`) et les branches D1, D2, D1-bis, D3, A-α/B-α, D-B05 et D-B05-restants inchangés. Travail en worktree isolé : l'artefact non suivi du checkout principal est préservé, aucune base du développeur n'a été écrite.
+
+**Tests exécutés :** 17 tests dédiés (4 en erreur sans le correctif) ; `test_memory_persistent` 18/18 ; `test_web` 14/14 ; `test_cli_reliability` 5/5 ; `test_miles_entrypoint` 5/5 ; `test_settings_memory_config` 15/15 ; `test_defects_agent_b` 26/26 ; suite complète **671 tests OK (4 ignorés)** ; **70 tests d'audit Agent B rejoués tels quels : OK (2 ignorés)**. Non exécuté : Debian 13 (VM d'audit injoignable — la validation Debian 13 n'est pas déclarée). Aucun appel API payant, aucune donnée réelle lue ni écrite.
+
+**Problèmes restants :** la base n'est pas chiffrée ; les souvenirs « partagés » (propriétaire vide) sont visibles de tous ; le lien souvenirs / historique de conversation n'existe toujours pas ; le filtre anti-secret repose sur une liste de mots.
+
+**Prochaine action recommandée :** Agent B prend TASK-DEV-030 (audit de la branche) et tranche les deux sujets d'architecture ouverts (lien à l'historique, chiffrement) ; ne pas fusionner sans décision explicite.
+
+
 ## 3. Transmission de la main
 
 - Prévenir l'autre agent (par le canal convenu hors dépôt, ex. message) qu'une mise à jour est disponible sur GitHub ou dans le clone partagé.

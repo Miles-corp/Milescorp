@@ -36,7 +36,7 @@ class PersistentMemory:
         max_content_length: longueur max du contenu d'un souvenir.
     """
 
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
 
     def __init__(
         self,
@@ -92,11 +92,25 @@ class PersistentMemory:
                 content TEXT NOT NULL,
                 category TEXT NOT NULL DEFAULT 'general',
                 importance INTEGER NOT NULL DEFAULT 1,
+                owner_user_id TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
             """
         )
+        # Migration : une base créée avant la version 2 (souvenirs rattachés
+        # à un propriétaire) ne possède pas la colonne owner_user_id. Les
+        # souvenirs existants restent sans propriétaire : ils sont partagés
+        # (visibles par tous) plutôt qu'attribués arbitrairement à quelqu'un.
+        columns = {
+            str(row[1])
+            for row in cursor.execute("PRAGMA table_info(memories)").fetchall()
+        }
+        if "owner_user_id" not in columns:
+            cursor.execute(
+                "ALTER TABLE memories ADD COLUMN owner_user_id "
+                "TEXT NOT NULL DEFAULT ''"
+            )
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS preferences (
@@ -162,6 +176,7 @@ class PersistentMemory:
         content: str,
         category: str = "general",
         importance: int = 1,
+        owner_user_id: str = "",
     ) -> int:
         """Enregistrer un souvenir explicite.
 
@@ -169,6 +184,9 @@ class PersistentMemory:
             content: texte du souvenir.
             category: catégorie libre (ex. "travail", "personnel").
             importance: niveau d'importance (1 par défaut).
+            owner_user_id: propriétaire du souvenir. La chaîne vide
+                désigne un souvenir **partagé** (console locale) : il est
+                visible par tous mais n'est attribué à personne.
 
         Returns:
             l'identifiant du souvenir créé.
@@ -202,10 +220,20 @@ class PersistentMemory:
             cursor = self._conn.cursor()
             cursor.execute(
                 """
-                INSERT INTO memories (content, category, importance, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO memories (
+                    content, category, importance, owner_user_id,
+                    created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (content.strip(), category, int(importance), now, now),
+                (
+                    content.strip(),
+                    category,
+                    int(importance),
+                    str(owner_user_id or ""),
+                    now,
+                    now,
+                ),
             )
             self._conn.commit()
             return int(cursor.lastrowid)
@@ -214,15 +242,21 @@ class PersistentMemory:
         self,
         category: str | None = None,
         limit: int | None = None,
+        owner_user_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Lister les souvenirs enregistrés.
 
         Args:
             category: filtrer par catégorie (optionnel).
             limit: nombre max de souvenirs retournés (optionnel).
+            owner_user_id: si fourni, seuls les souvenirs de cet
+                utilisateur **et** les souvenirs partagés (sans
+                propriétaire) sont retournés : c'est l'isolation entre
+                utilisateurs.
 
         Returns:
-            liste de dictionnaires {id, content, category, importance, created_at, updated_at}.
+            liste de dictionnaires {id, content, category, importance,
+            owner_user_id, created_at, updated_at}.
         """
         if not self.is_available:
             raise PersistentMemoryError(
@@ -232,32 +266,40 @@ class PersistentMemory:
         with self._lock:
             assert self._conn is not None
             cursor = self._conn.cursor()
+            conditions = []
+            valeurs: list[Any] = []
             if category is not None:
-                rows = cursor.execute(
-                    """
-                    SELECT id, content, category, importance, created_at, updated_at
-                    FROM memories
-                    WHERE category = ?
-                    ORDER BY importance DESC, created_at DESC
-                    LIMIT ?
-                    """,
-                    (category, limit if limit is not None else -1),
-                ).fetchall()
-            else:
-                rows = cursor.execute(
-                    """
-                    SELECT id, content, category, importance, created_at, updated_at
-                    FROM memories
-                    ORDER BY importance DESC, created_at DESC
-                    LIMIT ?
-                    """,
-                    (limit if limit is not None else -1,),
-                ).fetchall()
+                conditions.append("category = ?")
+                valeurs.append(category)
+            if owner_user_id is not None:
+                conditions.append("(owner_user_id = ? OR owner_user_id = '')")
+                valeurs.append(str(owner_user_id))
+            where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            valeurs.append(limit if limit is not None else -1)
+            rows = cursor.execute(
+                f"""
+                SELECT id, content, category, importance, owner_user_id,
+                       created_at, updated_at
+                FROM memories
+                {where}
+                ORDER BY importance DESC, created_at DESC
+                LIMIT ?
+                """,
+                tuple(valeurs),
+            ).fetchall()
 
         return [dict(row) for row in rows]
 
-    def get_memory(self, memory_id: int) -> dict[str, Any] | None:
-        """Retourner un souvenir par son identifiant, ou None."""
+    def get_memory(
+        self, memory_id: int, owner_user_id: str | None = None
+    ) -> dict[str, Any] | None:
+        """Retourner un souvenir par son identifiant, ou None.
+
+        Args:
+            memory_id: identifiant du souvenir.
+            owner_user_id: si fourni, le souvenir n'est retourné que s'il
+                appartient à cet utilisateur ou s'il est partagé.
+        """
         if not self.is_available:
             raise PersistentMemoryError(
                 "Mémoire persistante indisponible ou désactivée."
@@ -265,18 +307,38 @@ class PersistentMemory:
 
         with self._lock:
             assert self._conn is not None
-            row = self._conn.execute(
-                """
-                SELECT id, content, category, importance, created_at, updated_at
-                FROM memories
-                WHERE id = ?
-                """,
-                (memory_id,),
-            ).fetchone()
+            if owner_user_id is None:
+                row = self._conn.execute(
+                    """
+                    SELECT id, content, category, importance, owner_user_id,
+                           created_at, updated_at
+                    FROM memories
+                    WHERE id = ?
+                    """,
+                    (memory_id,),
+                ).fetchone()
+            else:
+                row = self._conn.execute(
+                    """
+                    SELECT id, content, category, importance, owner_user_id,
+                           created_at, updated_at
+                    FROM memories
+                    WHERE id = ? AND (owner_user_id = ? OR owner_user_id = '')
+                    """,
+                    (memory_id, str(owner_user_id)),
+                ).fetchone()
         return dict(row) if row is not None else None
 
-    def delete_memory(self, memory_id: int) -> bool:
-        """Supprimer un souvenir ciblé. Retourner True si supprimé."""
+    def delete_memory(
+        self, memory_id: int, owner_user_id: str | None = None
+    ) -> bool:
+        """Supprimer un souvenir ciblé. Retourne True si supprimé.
+
+        Args:
+            memory_id: identifiant du souvenir.
+            owner_user_id: si fourni, seuls les souvenirs de cet
+                utilisateur (ou partagés) peuvent être supprimés.
+        """
         if not self.is_available:
             raise PersistentMemoryError(
                 "Mémoire persistante indisponible ou désactivée."
@@ -285,7 +347,16 @@ class PersistentMemory:
         with self._lock:
             assert self._conn is not None
             cursor = self._conn.cursor()
-            cursor.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+            if owner_user_id is None:
+                cursor.execute(
+                    "DELETE FROM memories WHERE id = ?", (memory_id,)
+                )
+            else:
+                cursor.execute(
+                    "DELETE FROM memories "
+                    "WHERE id = ? AND (owner_user_id = ? OR owner_user_id = '')",
+                    (memory_id, str(owner_user_id)),
+                )
             self._conn.commit()
             return cursor.rowcount > 0
 

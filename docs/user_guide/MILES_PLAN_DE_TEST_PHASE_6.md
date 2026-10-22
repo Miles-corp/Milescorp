@@ -25,8 +25,9 @@ que MILES sait faire réellement.
 | 9 | Interface web locale (auth, refus d'origine, types de contenu) | ✅ opérationnel | §5.1 |
 | 10 | Mission **déclenchée depuis l'interface web** | ✅ opérationnelle (défaut D1 corrigé, branche `fix/miles-d1-web-authorization`) | §5.2 |
 | 11 | Chemin Windows absolu et chemin avec espaces | ✅ opérationnel (défaut D2 corrigé, branche `fix/miles-windows-paths`) | §4.10 |
-| 12 | Conversation avec un fournisseur IA distant
-| 13 | Lecture de fichiers volumineux / capteurs matériels
+| 12 | Mémoire persistante (`/remember`, `/memory`, `/forget`) | ✅ opérationnelle (souvenirs conservés après redémarrage, isolation par utilisateur — branche `fix/miles-memory-persistent`) | §4.11 |
+| 13 | Conversation avec un fournisseur IA distant
+| 14 | Lecture de fichiers volumineux / capteurs matériels
 
 ---
 
@@ -245,6 +246,35 @@ tronqué) :
 ```
 
 → « Chemin hors périmètre autorisé : C:/Windows/System32 ».
+
+---
+
+### 4.11 Mémoire persistante
+
+Les souvenirs sont enregistrés **localement** (SQLite, `data/memory.db`) :
+aucun envoi vers un fournisseur distant, aucun appel API payant.
+
+```
+/remember Je préfère les réponses courtes
+/memory
+/forget 1
+```
+
+**Résultats vérifiés** (Windows, Python 3.12.10) : l'enregistrement renvoie
+un identifiant, `/memory` retrouve le souvenir, `/forget <id>` le supprime.
+Les souvenirs **survivent à la fermeture du programme** (la base est un
+fichier) et un souvenir supprimé ne réapparaît pas au redémarrage.
+
+**Isolation par utilisateur** : dans l'interface web, chaque souvenir est
+rattaché à l'utilisateur authentifié ; un utilisateur ne voit ni ne supprime
+les souvenirs d'un autre. Les souvenirs enregistrés **avant** cette isolation
+(sans propriétaire) restent partagés et visibles de tous.
+
+**Limites** : les souvenirs dont le contenu ressemble à un secret (clé API,
+mot de passe, jeton) sont **refusés** à l'enregistrement ; la longueur est
+bornée (1000 caractères par défaut) ; la base n'est pas chiffrée (elle reste
+sur la machine de l'utilisateur) ; la console locale n'attribue pas de
+propriétaire (ses souvenirs sont partagés).
 
 ---
 

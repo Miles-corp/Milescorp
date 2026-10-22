@@ -618,18 +618,32 @@ class WebApp:
             "available": self.memory.is_available,
         }
 
-    def list_memories(self) -> list[dict[str, Any]]:
-        """Lister les souvenirs persistants."""
+    def list_memories(self, owner_user_id: Optional[str] = None) -> list[dict[str, Any]]:
+        """Lister les souvenirs persistants.
+
+        Args:
+            owner_user_id: si fourni, seuls les souvenirs de cet
+                utilisateur (et les souvenirs partages) sont listes :
+                c'est l'isolation entre utilisateurs.
+        """
         if self.memory is None or not self.memory.is_available:
             return []
-        return self.memory.list_memories()
+        return self.memory.list_memories(owner_user_id=owner_user_id)
 
-    def add_memory(self, content: str) -> dict[str, Any]:
-        """Enregistrer un souvenir explicite."""
+    def add_memory(
+        self, content: str, owner_user_id: str = ""
+    ) -> dict[str, Any]:
+        """Enregistrer un souvenir explicite.
+
+        Args:
+            content: texte du souvenir.
+            owner_user_id: propriétaire du souvenir (utilisateur
+                authentifie) ; la chaine vide designe un souvenir partage.
+        """
         if self.memory is None or not self.memory.is_available:
             return {"error": "Mémoire persistante indisponible ou désactivée."}
         try:
-            mem_id = self.memory.add_memory(content)
+            mem_id = self.memory.add_memory(content, owner_user_id=owner_user_id)
             return {"id": mem_id, "content": content}
         except PersistentMemoryError as exc:
             # Message produit par MILES lui-même (texte fixe) : ne contient
@@ -646,12 +660,20 @@ class WebApp:
             )
             return {"error": "Erreur interne du service."}
 
-    def delete_memory(self, memory_id: int) -> dict[str, Any]:
-        """Supprimer un souvenir ciblé."""
+    def delete_memory(
+        self, memory_id: int, owner_user_id: Optional[str] = None
+    ) -> dict[str, Any]:
+        """Supprimer un souvenir ciblé.
+
+        Args:
+            memory_id: identifiant du souvenir.
+            owner_user_id: si fourni, seuls les souvenirs de cet
+                utilisateur (ou partages) peuvent etre supprimes.
+        """
         if self.memory is None or not self.memory.is_available:
             return {"error": "Mémoire persistante indisponible ou désactivée."}
         try:
-            deleted = self.memory.delete_memory(memory_id)
+            deleted = self.memory.delete_memory(memory_id, owner_user_id=owner_user_id)
             if deleted:
                 return {"id": memory_id, "deleted": True}
             return {"error": f"Aucun souvenir avec l'id {memory_id}."}
@@ -785,7 +807,7 @@ class MilesHandler(BaseHTTPRequestHandler):
         if path == "/status":
             self._handle_status()
         elif path == "/memory":
-            self._handle_list_memories()
+            self._handle_list_memories(session)
         elif path == "/tools":
             self._handle_list_tools()
         elif path == "/missions":
@@ -844,9 +866,9 @@ class MilesHandler(BaseHTTPRequestHandler):
         if path == "/message":
             self._handle_message(data)
         elif path == "/remember":
-            self._handle_remember(data)
+            self._handle_remember(data, session)
         elif path == "/forget":
-            self._handle_forget(data)
+            self._handle_forget(data, session)
         elif path == "/tool":
             self._handle_run_tool(data, session)
         elif path == "/mission":
@@ -1397,11 +1419,11 @@ showLogin();
         status = 200 if "error" not in payload else 404
         self._send_json(status, payload)
 
-    def _handle_list_memories(self) -> None:
+    def _handle_list_memories(self, session: WebSession) -> None:
         if self.app is None:
             self._send_json(500, {"error": "Application non initialisée"})
             return
-        memories = self.app.list_memories()
+        memories = self.app.list_memories(owner_user_id=session.user_id)
         self._send_json(200, memories)
 
     def _handle_message(self, data: dict[str, Any]) -> None:
@@ -1416,7 +1438,7 @@ showLogin();
         status = 200 if "response" in result else 400
         self._send_json(status, result)
 
-    def _handle_remember(self, data: dict[str, Any]) -> None:
+    def _handle_remember(self, data: dict[str, Any], session: WebSession) -> None:
         if self.app is None:
             self._send_json(500, {"error": "Application non initialisée"})
             return
@@ -1424,11 +1446,11 @@ showLogin();
         if not isinstance(content, str) or not content.strip():
             self._send_json(400, {"error": "Contenu vide ou invalide."})
             return
-        result = self.app.add_memory(content.strip())
+        result = self.app.add_memory(content.strip(), owner_user_id=session.user_id)
         status = 200 if "id" in result else 400
         self._send_json(status, result)
 
-    def _handle_forget(self, data: dict[str, Any]) -> None:
+    def _handle_forget(self, data: dict[str, Any], session: WebSession) -> None:
         if self.app is None:
             self._send_json(500, {"error": "Application non initialisée"})
             return
@@ -1438,7 +1460,7 @@ showLogin();
         except (TypeError, ValueError):
             self._send_json(400, {"error": "Identifiant invalide."})
             return
-        result = self.app.delete_memory(memory_id)
+        result = self.app.delete_memory(memory_id, owner_user_id=session.user_id)
         status = 200 if result.get("deleted") else 400
         self._send_json(status, result)
 
