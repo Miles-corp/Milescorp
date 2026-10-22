@@ -97,6 +97,15 @@
 - **Interactions avec les audits en cours** : D1 doit etre fusionne **avant** ce correctif (le refus cross-session repose sur son controle de session) ; D1-bis touche les **memes fichiers** (`runner.py`, `web.py`) mais dans des hunks distincts, avec un **conflit de contexte possible sur le bloc d imports** des constantes `REASON_*` (a resoudre manuellement, sans risque semantique) ; D2 et D3 n ont aucun fichier commun.
 - **En attente** : audit independant d Agent B (TASK-DEV-030) et decision sur l option **A-beta** (exiger le jeton sur `/answer` : changement de contrat d API, non applique).
 
+## Phase 6.3l — Mission P1 : `/answer` n'approuve plus (Agent A, 2026-10-21)
+
+- **Rapport** : `docs/reports/PHASE_6_3L_P1_ANSWER_AUTHORIZATION_AGENT_A.md`
+- **Base** : `25baa60` (`fix/miles-answer-d1ter` : D1 + D2 + D1-bis + D3 + A-alpha/B-alpha). Branche : `fix/miles-answer-authorization-only`. **Aucune fusion.** `main` (`b9b7e7d`), l'integration (`69bf670`), D1 (`3a59dae`), D2 (`d3240d2`), D1-bis (`1ef4878`), D3 (`0be08cd`), A-alpha/B-alpha (`25baa60`) sont inchanges. Travail en **worktree isole** (`Temp\miles-answeronly`) ; artefact non suivi et bases du developeur preserves.
+- **Correction (P1)** : `MissionRunner.answer` ne transforme **plus** une reponse textuelle (`o`, `oui`, etc.) en approbation d'autorisation : une demande d'autorisation leve `MissionAuthorizationError` (`authorization_requires_token`), et l'approbation exige `/authorize` et un jeton valide (usage unique, expiration, session, proprietaire). `MissionRunner.check_answer` est mise a jour (elle ne valide plus `check_authorization`) ; l'interface CLI intercepte l'exception. La mission n'est **ni approuvee ni tuee** : elle reste en attente.
+- **Tests** : `tests/test_answer_authorization_invariant.py` (8 tests d'invariant) : aucun mot d'approbation par `/answer` n'approuve, l'API interne n'approuve pas, `/authorize` sans jeton valide n'approuve pas, le jeton d'une autre mission / d'une autre session / d'un autre utilisateur est refuse, avec un jeton valide l'action est approuvee puis executee (grant unique lie a la session et a la mission), le jeton ne sert qu'une fois. **9 tests echouent sans le correctif** ; 655 tests OK (4 ignores) ; 70 tests d'audit Agent B OK (2 ignores). Verification HTTP reelle : 403 sur tous les mots d'approbation, mission terminee par `/authorize` avec le jeton.
+- **Limite** : les tests d'observation (`test_investigation_d1ter_answer_path.py`) sont mis a jour pour refléter le nouveau comportement ; ils ne contournent pas la protection.
+- **En attente** : audit independant d'Agent B (TASK-DEV-039). Les audits en cours ne sont pas consideres comme approuves. Aucune fusion.
+
 ## Blocages
 
 Aucun blocage à ce jour.

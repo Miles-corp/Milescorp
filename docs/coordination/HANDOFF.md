@@ -115,6 +115,25 @@ Procédure à suivre par chaque agent à la fin de sa session de travail, afin q
 **Prochaine action recommandée :** Agent B prend TASK-DEV-030 (audit de `fix/miles-answer-d1ter`) et tranche A-β ; ne pas fusionner avant cet audit ; à la fusion, respecter l'ordre D1 → D2 → D1-bis → D3 → A-α/B-α et résoudre manuellement le conflit de contexte possible sur le bloc d'imports de `web.py` (constantes `REASON_*`).
 
 
+### H-011 — 2026-10-21 — Agent A → Agent B
+
+**Tâche :** TASK-DEV-038 (Mission P1 : `/answer` n'approuve plus) ; TASK-DEV-039 (audit) transférée.
+
+**Travail réalisé :** suppression du contournement P1-6-06 sur la route `/answer`. L'audit Agent B avait signalé que `runner.answer()` transformait une réponse `o`/`oui`/`y`/`yes`/`ok`/`autorise` en approbation d'autorisation sans jeton d'approbation. `MissionRunner.answer` ne transforme plus une réponse textuelle en approbation ; `MissionRunner.check_answer` est mise à jour ; l'interface CLI intercepte l'exception ; la mission n'est ni approuvée ni arrêtée. 8 tests d'invariant vérifient qu'aucune route alternative ne peut approuver ou exécuter l'action sans autorisation valide. Les tests d'observation sont mis à jour pour refléter le nouveau comportement.
+
+**Fichiers modifiés :** `app/orchestration/runner.py` ; `app/interface/cli.py` ; `tests/test_answer_d1ter_fixes.py` ; `tests/test_answer_authorization_invariant.py` (nouveau) ; `docs/reports/PHASE_6_3L_P1_ANSWER_AUTHORIZATION_AGENT_A.md` (nouveau) ; `docs/coordination/{TASKS,STATUS,MESSAGES}.md`.
+
+**Commits :** branche `fix/miles-answer-authorization-only` (base `25baa60`), poussée sur `origin`. **Aucune fusion** ; `main` (`b9b7e7d`), l'intégration (`69bf670`), D1 (`3a59dae`), D2 (`d3240d2`), D1-bis (`1ef4878`), D3 (`0be08cd`) et A-α/B-α (`25baa60`) inchangés. Travail en worktree isolé ; artefact non suivi du checkout principal préservé, aucune base du développeur écrite.
+
+**Tests exécutés :** 8 tests d'invariant (9 échouent sans le correctif) ; `test_answer_d1ter_fixes` 19/19 ; `test_mission_authorize_response` 20/20 ; `test_mission_web_authorization` 6/6 ; `test_web_security_phase6_1` 35/35 ; `test_web_security` 33/33 ; `test_mission_orchestrator` 73/73 ; `test_mission_bounds` 20/20 ; suite complète **655 tests OK (4 ignorés)** ; **70 tests d'audit Agent B rejoués tels quels : OK (2 ignorés)**. Non exécuté : Debian 13 (environnement indisponible). Aucun appel API payant, aucune donnée réelle lue ni écrite.
+
+**Preuves reproductibles :** `/answer` avec `o`, `oui`, `yes`, `ok`, `autorise` → HTTP 403 `authorization_requires_token` ; mission terminée par `/authorize` avec le jeton valide → 200, `completed` ; aucune étape sensible exécutée sans autorisation valide.
+
+**Problèmes restants :** les tests d'observation (`test_investigation_d1ter_answer_path.py`) sont mis à jour pour refléter le nouveau comportement ; ils ne contournent pas la protection.
+
+**Prochaine action recommandée :** Agent B prend TASK-DEV-039 (audit de la branche) ; ne pas fusionner avant cet audit ; si Agent B demande un changement de contrat (exiger le jeton sur `/answer`), c'est un choix d'API à trancher séparément.
+
+
 ## 3. Transmission de la main
 
 - Prévenir l'autre agent (par le canal convenu hors dépôt, ex. message) qu'une mise à jour est disponible sur GitHub ou dans le clone partagé.

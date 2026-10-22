@@ -92,6 +92,7 @@ REASON_INVALID_APPROVAL_TOKEN = "invalid_approval_token"
 REASON_EXPIRED_APPROVAL_TOKEN = "expired_approval_token"
 REASON_SESSION_MISMATCH = "session_mismatch"
 REASON_INTERACTION_BUDGET_EXCEEDED = "interaction_budget_exceeded"
+REASON_AUTHORIZATION_REQUIRES_TOKEN = "authorization_requires_token"
 
 
 class MissionRunner:
@@ -315,11 +316,10 @@ class MissionRunner:
         - le demandeur est le propriétaire de la mission ;
         - une demande est bien en attente ;
         - le budget d'interactions n'est pas épuisé ;
-        - si la demande en attente est une **autorisation**, les mêmes
-          contrôles que l'octroi d'un grant s'appliquent (expiration de la
-          demande, session du demandeur). Le jeton utilisé est celui de la
-          demande en attente : le contrat de `/answer` n'impose pas au
-          client de présenter un jeton.
+        - la demande en attente est une **clarification** : une demande
+          d'autorisation ne peut pas être traitée par une réponse
+          textuelle (elle exige le jeton d'approbation, vérifié par
+          :meth:`authorize`).
 
         Returns:
             La mission sur laquelle porte la demande.
@@ -357,14 +357,14 @@ class MissionRunner:
                 REASON_INTERACTION_BUDGET_EXCEEDED,
             )
         if mission.pending.kind == "authorization":
-            # Même validation que l'octroi d'un grant (propriétaire,
-            # expiration, session) : la réponse porte sur une vraie demande
-            # d'autorisation.
-            self.check_authorization(
-                mission_id,
-                approval_token=mission.pending.approval_token,
-                requester_user_id=requester_user_id,
-                requester_session_id=requester_session_id,
+            # Une autorisation n'est jamais accordée par une réponse
+            # textuelle : le jeton d'approbation est exigé, et il est
+            # vérifié par `authorize` (usage unique, expiration, session et
+            # propriétaire). La mission n'est ni approuvée ni arrêtée.
+            raise MissionAuthorizationError(
+                "Une autorisation en attente doit être accordée par la route "
+                "d'autorisation, avec son jeton d'approbation.",
+                REASON_AUTHORIZATION_REQUIRES_TOKEN,
             )
         return mission
 
@@ -376,16 +376,20 @@ class MissionRunner:
         requester_user_id: Optional[str] = None,
         requester_session_id: Optional[str] = None,
     ) -> Optional[Mission]:
-        """Traiter une réponse de l'utilisateur à une demande en attente.
+        """Traiter une réponse de l'utilisateur à une demande de CLARIFICATION.
 
-        - demande de clarification : la réponse complète l'objectif et la
-          mission est replanifiée ;
-        - demande d'autorisation : une réponse positive autorise le
-          périmètre proposé, une autre réponse refuse et arrête la mission.
+        Une demande d'**autorisation** ne se traite PAS ici : elle
+        exige un appel explicite à :meth:`authorize` avec le jeton
+        d'approbation de la demande (correction P1 : `/answer` n'approuve plus
+        une action sensible). Une réponse textuelle ne peut donc ni
+        approuver, ni refuser, ni arrêter une mission en attente
+        d'autorisation : la demande reste en attente et l'utilisateur doit
+        passer par la route d'autorisation.
 
         Raises:
             MissionAuthorizationError: si le demandeur n'est pas le
-                propriétaire de la mission.
+                propriétaire de la mission, ou si la demande en attente est
+                une autorisation (qui exige le jeton d'approbation).
         """
         mission = self.check_answer(
             mission_id,
@@ -393,15 +397,6 @@ class MissionRunner:
             requester_session_id=requester_session_id,
         )
         text = (answer or "").strip()
-        if mission.pending.kind == "authorization":
-            approved = text.lower() in ("o", "oui", "y", "yes", "ok", "autorise")
-            return self.authorize(
-                mission_id,
-                approved=approved,
-                requester_user_id=requester_user_id,
-                requester_session_id=requester_session_id,
-                approval_token=mission.pending.approval_token,
-            )
 
         # Clarification : on cherche un chemin dans la réponse.
         candidate = extract_target_path(text)
