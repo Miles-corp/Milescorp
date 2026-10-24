@@ -53,6 +53,56 @@
 
 Aucun blocage à ce jour.
 
+## Préparation d'intégration des branches en attente (Agent A, 2026-10-24)
+
+### Chaîne de branches vérifiée (SHA complets vérifiés le 2026-10-24)
+
+Toutes les corrections post-D1 forment une chaîne linéaire au-dessus du correctif D1 (`3a59dae`, tip de `fix/miles-d1-web-authorization`, poussé) :
+
+1. `6b736d7` — D1 : autorisation des missions web (TASK-DEV-018, poussé)
+2. `3a59dae` — docs(coordination) TASK-DEV-018/019 (poussé)
+3. `d3240d2` — D2 : chemins Windows sur `fix/miles-windows-paths` (poussé)
+4. `1ef4878` — D1-bis : réponse honnête de l'autorisation de mission sur `fix/miles-d1bis-authorization-response` (poussé)
+5. `0be08cd` — D3 : typage des paramètres de chemin sur `fix/miles-policy-path-typing` (poussé)
+6. `25baa60` — réponse honnête de `/answer` (poussé)
+7. `79692fe` — persistance du propriétaire des missions sur `fix/miles-mission-persistence-owner` (poussé)
+8. `54bd138` — persistance des résultats et reprise sur `fix/miles-results-persistence` (poussé)
+
+Divergences terminales (trois pointes) :
+
+- `8b85722` (D-MEM-01, mémoire liée à l'utilisateur, poussé sur `fix/miles-memory-persistent`) → `78ac05c` (diagnostics `/status`/`/provider`, **NON poussé**, sur `fix/miles-diagnostics`)
+- `155dab3` (tests frontieres read_only sur `test/miles-read-only-trust-boundaries`, poussé) → `712f029` (read_only prudent sur `fix/miles-read-only-prudent-type`, poussé)
+- `8b9ab15` — `/answer` n'approuve plus (contournement P1-6-06) sur `fix/miles-answer-authorization-only` (poussé) ; part de `25baa60`, c'est-à-dire **avant** owner/results.
+
+Anomalie signalée : la branche `fix/miles-paths-posix-spaces` existe localement mais pointe sur `25baa60` (le commit de `/answer` honnête) ; elle ne contient **aucun commit dédié** et n'est pas poussée. Si un commit était attendu sur cette branche, il est absent du dépôt accessible — rien n'a été supposé ni supprimé.
+
+### État des tests et audits
+
+- **Tests exécutés par A et documentés** : correction D1 (534 tests OK, 4 ignorés) — rapport `PHASE_6_3B_D1_FIX_AGENT_A.md` ; diagnostics `/status`/`/provider` (78ac05c, exécutés le 24/10 : ciblés 14/14, concernés 99/99, suite complète **685 tests OK, 4 ignorés**) — pas encore de rapport dans `docs/reports/`.
+- **Tests non documentés** : pour les commits D2, D1-bis, D3, `/answer` honnête, owner, results, D-MEM-01, read_only : aucun rapport de mission présent dans `docs/reports/` (dernier rapport daté du 21/10). Les tests éventuellement exécutés par A ne peuvent être ni confirmés ni infirmés sur la base des documents.
+- **Audits indépendants réellement réalisés** : les audits B historiques (refs `origin/audit/agent-b-*`, Phases 4/5/6/6.1) existent dans le dépôt. **En revanche, aucune branche postérieure à `6b736d7` n'a été auditée par B.**
+
+### Audits encore manquants (prérequis avant toute fusion sur `main`)
+
+- TASK-DEV-019 : audit D1 (M-006, EN ATTENTE) — blocant pour toute la chaîne.
+- `1ef4878` (D1-bis) et `8b9ab15` (réponse `/authorize`, P1-6-06) : zones de sécurité web sensibles → audit B nécessaires.
+- Chaîne owner/results/D-MEM-01/read_only/diagnostics : revue B recommandée, pas de blocage sécurité identifié dans les messages (M-007 transmis).
+
+### Ordre d'intégration proposé (TASK-DEV-023, après audit D1)
+
+1. `d3240d2` (D2) → 2. `1ef4878` (D1-bis) → 3. `0be08cd` (D3) → 4. `25baa60` (answer) → 5. `79692fe` (owner) → 6. `54bd138` (results) : chaîne linéaire, intégration sans conflit tant que l'ordre est respecté (fast-forward). Puis les divergences :
+7. `712f029` (chaîne read_only, incluant 155dab3)
+8. `78ac05c` (chaîne diagnostics, incluant D-MEM-01)
+9. `8b9ab15` (answer-authorization-only) — **en dernier parmi les touches web** : risque de conflit réel avec owner/results dans `app/interface/web.py` (région autorisation/approbation et tests repris).
+
+### Risques d'intégration
+
+- Chaîne linéaire contiguë : aucun conflit prévisible avant `54bd138`.
+- `8b9ab15` vs owner/results : modifications probablement concurrentes dans les mêmes fichiers (`app/interface/web.py`, tests web repris) — fusion à faire avec revue manuelle du diff.
+- Plusieurs branches ont modifié les documents de coordination et ci-dessous des fichiers de tests superposés (p. ex. `tests/test_web.py`) : conflits probables dans `docs/coordination/*.md` ; à résoudre en suivant `AGENTS.md` (historique conservé, ajout en queue).
+- `fix/miles-diagnostics` non poussé : pousser avant tout audit B.
+- Validation Debian 13 reste manquante pour toute la chaîne (environnement indisponible).
+
 ## Phase 5 — Intégration du moteur d'outils (Agent A, 2026-10-20)
 
 - **Rapport** : `docs/reports/PHASE_5_TOOL_ENGINE_INTEGRATION_AGENT_A.md`

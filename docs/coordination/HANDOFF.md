@@ -47,6 +47,22 @@ Procédure à suivre par chaque agent à la fin de sa session de travail, afin q
 
 **Prochaine action recommandée :** Agent B prend TASK-DEV-019, audite `6b736d7` (lien grant/session, non-reutilisabilite, scenario web complet, non-regression, Debian 13) et rend son avis avant toute fusion.
 
+### H-003 — 2026-10-24 — Agent A → Agent B
+
+**Tâche :** TASK-DEV-022 (préparation d'intégration) ; TASK-DEV-019 toujours en attente côté B.
+
+**Travail réalisé :** vérification SHA de la chaîne post-D1, état des tests/audits, ordre d'intégration proposé avec dépendances et risques de conflits (voir STATUS.md, section « Préparation d'intégration des branches en attente »). Aucune fusion, aucun code modifié, aucun push.
+
+**Fichiers modifiés :** `docs/coordination/{TASKS,STATUS,MESSAGES,HANDOFF}.md` uniquement.
+
+**Commits :** commit de coordination local (branche `fix/miles-d1-web-authorization`), pas de push.
+
+**Tests exécutés :** aucun (mission de documentation) ; enseignée néanmoins de la date du 24/10 : suite complète 685 tests OK (4 ignorés) au sommet `78ac05c` pour la mission diagnostics `/status`/`/provider`.
+
+**Problèmes restants :** `fix/miles-paths-posix-spaces` pointe sur `25baa60` sans commit dédié (branche non poussée) ; `fix/miles-diagnostics` non poussé ; aucun audit B postérieur à `6b736d7` ; Debian 13 toujours indisponible.
+
+**Prochaine action recommandée :** B audite `6b736d7` (TASK-DEV-019) puis, dans l'ordre, `1ef4878` (D1-bis) et `8b9ab15` (contournement P1-6-06) ; ensuite seulement TASK-DEV-023 (intégration ordonnée).
+
 ## 3. Transmission de la main
 
 - Prévenir l'autre agent (par le canal convenu hors dépôt, ex. message) qu'une mise à jour est disponible sur GitHub ou dans le clone partagé.
