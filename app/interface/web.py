@@ -883,6 +883,8 @@ class MilesHandler(BaseHTTPRequestHandler):
 
         if path == "/message":
             self._handle_message(data)
+        elif path == "/logout":
+            self._handle_logout(session)
         elif path == "/remember":
             self._handle_remember(data, session)
         elif path == "/forget":
@@ -901,6 +903,18 @@ class MilesHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "Not found", "path": path})
 
     # --- Handlers ---
+
+    def _handle_logout(self, session: WebSession) -> None:
+        """POST /logout : révoquer immédiatement la session courante.
+
+        Réponse P3 S-E3-02 (audit interne E3) : au-delà de l'expiration
+        par inactivité, l'utilisateur peut désactiver sa session lui-même.
+        La révocation est définitive : la session ne peut plus être rejouée.
+        """
+        revoked = False
+        if self.app is not None and self.app.authenticator is not None:
+            revoked = self.app.authenticator.revoke(session.session_id)
+        self._send_json(200, {"revoked": bool(revoked)})
 
     def _serve_index(self) -> None:
         html_content = self._build_index_html()
