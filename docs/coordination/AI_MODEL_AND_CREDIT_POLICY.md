@@ -32,7 +32,7 @@ sur l'API directe, pas de confiance sans test réel).
 | 3 — Complexe | MiMo-V2.6-Pro → DeepSeek V4 Pro → GLM-5.3 → Kimi K2.7 Code | ~16 300 / ~5 200 / ~1 080 / ~6 750 | remonter à GPT 6 Luna (~21 130) |
 | 4 — Critique | MiMo-V2.6-Pro → DeepSeek V4 Pro → GPT 6 Luna → Kimi K3 | ~16 300 / ~5 200 / ~21 130 / ~490 | **toujours + audit indépendant requis** |
 
-Modèle actuellement actif dans cette session : **GLM-5.3-Flash** (niveaux 1-2).
+Modèle actuellement actif dans cette session : **MiMo-V2.6-Pro** (remplace GLM-5.3-Flash, buggant — changement constaté côté utilisateur le 2026-10-24 ; niveaux 2-4).
 
 ### Catalogue complet (limites estimées/mois, source utilisateur — non vérifiées)
 
