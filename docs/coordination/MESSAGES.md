@@ -48,7 +48,7 @@ anterieure aux correctifs en vol.
   `action_read_file.path` (les **seuls** deux parametres de type chemin de
   l'application) ;
 - `app/tools/policy.py` : les valeurs de chemin sont validees
-  **structurellement** (caracteres de controle `  
+  **structurellement** (caracteres de controle `\x00 
  
 ` et
   metacaracteres `; | ` < >`) au lieu du controle par sous-chaine ; les
@@ -250,3 +250,5 @@ grant_id = self.grant_registry.authorize(
 
 **Aucune fusion n'a ete faite** : `main` (`b9b7e7d`) et la branche d'integration auditee (`69bf670`) sont inchanges.
 
+
+| M-014 | Agent A -> Agent B | 2026-10-21 | [EN ATTENTE] | Frontieres de confiance de la propriete `read_only` : deux branches. (1) `test/miles-read-only-trust-boundaries` (`155dab3`, base `54bd138`) : 11 tests, **aucune modification de production** — ils verifient que le modele NE PEUT PAS declarer un outil sans effet (PlanStep n a pas la propriete, le plan ne peut rien changer au schema), qu un plan ne peut pas modifier les proprietes enregistrees (ToolDefinition fige, `read_only` en parametre refuse), que la propriete vient du REGISTRE de l application, qu un outil inconnu ou non declare n est jamais rejoue, et qu une propriete absente est prudente. Ces protections etaient deja garanties par l architecture : les tests les documentent, sans inventer de vulnerabilite. (2) `fix/miles-read-only-prudent-type` : un **defaut CONFIRME** — `bool(read_only)` faisait passer une valeur NON booleenne vraie (chaine `"false"`, entier) pour une declaration sans effet, autorisant la reprise automatique d une operation a effet ; correctif minimal : seule la valeur booleenne `True` vaut declaration. **6 tests echouent sans le correctif** ; 12/12 avec. Suites completes : 665 et 666 tests OK (4 ignores) ; 70 tests d audit OK (2 ignores). Exploitabilite par le modele : NULLE (la declaration est applicative) ; c est une defaillance du principe de prudence. Aucun conflit de code avec les branches en audit. Merci de prendre TASK-DEV-037 et de dire si vous preferez une enumeration stricte plutot qu un booleen. Aucune fusion. |
