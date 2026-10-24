@@ -22,6 +22,8 @@ les preuves dans `docs/reports/` et `docs/coordination/STATUS.md`/`HANDOFF.md`.
 | MI-005 | Corriger l'octet NULL du blob D3 `0be08cd` (sans réécriture d'historique) | TODO (correction contrôlée distincte) | Basse | Agent A | Correction lors de l'intégration (MI-002) | `continuations/MI-005.md` |
 | MI-006 | Validation complète sur Debian 13 lorsque disponible | BLOCKED (environnement indisponible) | Haute | Agent B | Exécuter la suite `python -m unittest discover -s tests` dès qu'un environnement existe | `continuations/MI-006.md` |
 | MI-007 | S5 — Journal d'activité visible `/log` (idée utilisateur 24/10) | TODO | Moyenne | Agent A | Conception : lecture du journal d'audit `app/tools/audit.py`, filtre sans secrets, CLI `/log` + route web si adapté | `continuations/MI-007.md` |
+| MI-008 | S6 — Raccourcis de connexion fournisseurs (clé API min. de clics, comptes partagés) — catalogue v1.3 + cahier 0.1 | TODO (niveau 4 : secrets) | Haute | Agent A | Questions de clarification posées ; conception après réponses | `continuations/MI-008.md` |
+| MI-009 | Refonte UI web — IA de conception spécialisée (parallèle) | TODO (prompt de lancement livré) | Moyenne | Utilisateur + Agent A | Utilisateur lance l'IA design (prompt : `docs/web_design/PROMPT_DE_LANCEMENT_WEB.md`) ; revue Agent A à réception | `docs/web_design/PROMPT_DE_LANCEMENT_WEB.md` |
 
 ## Archives
 
