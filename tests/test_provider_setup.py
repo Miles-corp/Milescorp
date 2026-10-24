@@ -64,8 +64,8 @@ class TestWriteEnv(unittest.TestCase):
 class TestRunSetup(unittest.TestCase):
     """L'assistant n'affiche jamais la clé et sécurise les cas d'erreur."""
 
-    def _run(self, env_path: str, choice: str, model: str, key: str):
-        answers = iter([choice, model, key])
+    def _run(self, env_path: str, choice: str, model: str, key: str, extra: tuple = ()):
+        answers = iter((choice, model, key) + extra)
 
         def fake(prompt: str) -> str:
             return next(answers)
@@ -78,17 +78,104 @@ class TestRunSetup(unittest.TestCase):
     def test_setup_never_echoes_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             env_path = os.path.join(tmp, ".env")
-            result, output = self._run(env_path, "groq", "", "cle-tres-secrete-99")
+            result, output = self._run(
+                env_path, "groq", "", "cle-tres-secrete-99", extra=("n",)
+            )
             self.assertEqual(result, 0)
             self.assertNotIn("cle-tres-secrete-99", output)
             with open(env_path, encoding="utf-8") as fh:
                 env_content = fh.read()
             self.assertIn("MILES_REMOTE_API_KEY=cle-tres-secrete-99", env_content)
+            self.assertIn("MILES_API_KEY_GROQ=cle-tres-secrete-99", env_content)
             self.assertIn("MILES_PROVIDER=remote", env_content)
             # Modèle par défaut du catalogue appliqué
             self.assertIn(
                 f"MILES_REMOTE_MODEL={PROVIDERS['groq'][1]}", env_content
             )
+
+    def test_sibling_services_reduced_steps(self) -> None:
+        """Un service du même compte (groupe Google) : clé seule, pas de modèle."""
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = os.path.join(tmp, ".env")
+            answers = iter(
+                [
+                    "gemini",  # fournisseur
+                    "",        # modèle (défaut)
+                    "cle-gemini-111",
+                    "o",       # configurer le service du même compte (mistral)
+                    "cle-mistral-222",
+                    "n",       # aucun autre fournisseur
+                ]
+            )
+
+            def fake(prompt: str) -> str:
+                return next(answers)
+
+            captured = io.StringIO()
+            with redirect_stdout(captured):
+                result = run_setup(env_path, ask=fake, pick=fake, show=print)
+            self.assertEqual(result, 0)
+            output = captured.getvalue()
+            self.assertIn("[étapes réduites]", output)
+            self.assertNotIn("cle-gemini-111", output)
+            self.assertNotIn("cle-mistral-222", output)
+            with open(env_path, encoding="utf-8") as fh:
+                env_content = fh.read()
+            self.assertIn("MILES_API_KEY_GEMINI=cle-gemini-111", env_content)
+            self.assertIn("MILES_API_KEY_MISTRAL=cle-mistral-222", env_content)
+            # Le PREMIER fournisseur reste le bloc actif.
+            self.assertIn("MILES_REMOTE_API_KEY=cle-gemini-111", env_content)
+            self.assertNotIn("MILES_REMOTE_API_KEY=cle-mistral-222", env_content)
+
+    def test_sibling_declined_keeps_single_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = os.path.join(tmp, ".env")
+            answers = iter(
+                ["gemini", "", "cle-gemini-111", "n", "n"]
+            )
+
+            def fake(prompt: str) -> str:
+                return next(answers)
+
+            captured = io.StringIO()
+            with redirect_stdout(captured):
+                result = run_setup(env_path, ask=fake, pick=fake, show=print)
+            self.assertEqual(result, 0)
+            with open(env_path, encoding="utf-8") as fh:
+                env_content = fh.read()
+            self.assertIn("MILES_API_KEY_GEMINI=cle-gemini-111", env_content)
+            self.assertNotIn("MILES_API_KEY_MISTRAL", env_content)
+
+    def test_additional_provider_quick_and_active_unchanged(self) -> None:
+        """Un second fournisseur configuré n'écrase pas le bloc actif."""
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = os.path.join(tmp, ".env")
+            answers = iter(
+                [
+                    "groq",             # fournisseur actif
+                    "",                 # modèle (défaut)
+                    "cle-groq-111",
+                    "o",                # autre fournisseur
+                    "gemini",
+                    "cle-gemini-222",   # rapide : clé seule
+                    "n",                # pas de service Google supplémentaire
+                    "n",                # fin
+                ]
+            )
+
+            def fake(prompt: str) -> str:
+                return next(answers)
+
+            captured = io.StringIO()
+            with redirect_stdout(captured):
+                result = run_setup(env_path, ask=fake, pick=fake, show=print)
+            self.assertEqual(result, 0)
+            with open(env_path, encoding="utf-8") as fh:
+                env_content = fh.read()
+            self.assertIn("MILES_API_KEY_GROQ=cle-groq-111", env_content)
+            self.assertIn("MILES_API_KEY_GEMINI=cle-gemini-222", env_content)
+            self.assertIn("MILES_REMOTE_API_KEY=cle-groq-111", env_content)
+            self.assertNotIn("MILES_REMOTE_API_KEY=cle-gemini-222", env_content)
 
     def test_unknown_provider_no_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

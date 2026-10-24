@@ -35,6 +35,36 @@ MANAGED_KEYS = (
     "MILES_REMOTE_API_KEY",
 )
 
+#: Groupes de fournisseurs partageant un même fournisseur d'identité (S6.2).
+#:
+#: Exemple d'usage : le groupe `google` regroupe les services joignables
+#: avec un compte Google (ex. Gemini) : après en avoir configuré un, les
+#: autres du groupe sont proposés avec le MINIMUM de questions (clé seule).
+#: Le raccourci OAuth réel (connexion navigateur) n'est PAS implémenté ici :
+#: il exigerait un flux réseau/navigateur hors périmètre local.
+IDENTITY_GROUPS: dict[str, tuple[str, ...]] = {
+    "google": ("gemini", "mistral"),
+    "groq": ("groq",),
+    "openai": ("openai",),
+    "claude": ("claude",),
+}
+
+
+def _identity_of(provider_name: str) -> str | None:
+    """Retourner le groupe d'identité d'un fournisseur, ou None."""
+    for group, members in IDENTITY_GROUPS.items():
+        if provider_name in members:
+            return group
+    return None
+
+
+def _siblings_of(provider_name: str, already: set[str]) -> list[str]:
+    """Retourner les services du même groupe d'identité pas encore configurés."""
+    group = _identity_of(provider_name)
+    if not group:
+        return []
+    return [p for p in IDENTITY_GROUPS[group] if p not in already]
+
 
 def write_env(
     env_path: str,
@@ -95,26 +125,16 @@ def run_setup(
     désormais conditionné au plafond de coût autorisé.
     """
     pick = pick or input
-    show("Assistant de configuration de MILES (portée minimale).")
+    yes = ("o", "oui", "y", "yes")
+    show("Assistant de configuration de MILES (S6 : comptes liés).")
     show("Fournisseurs disponibles : " + ", ".join(PROVIDERS))
-    show("Réutilisation du lien d'identité (comptes partagés) : à venir.")
-    choice = pick("Fournisseur (nom exact) : ").strip().lower()
-    if choice not in PROVIDERS:
-        show(f"Fournisseur inconnu : {choice}. Aucun fichier modifié.")
-        return 1
+    show(
+        "Après un fournisseur, les services du même compte (groupe "
+        "d'identité) sont proposés avec le minimum d'étapes."
+    )
 
-    base_url, default_model = PROVIDERS[choice]
-    model = pick(f"Modèle [{default_model}] : ").strip() or default_model
-    api_key = ask(f"Clé API {choice} (saisie masquée) : ").strip()
-    if not api_key:
-        show("Clé vide : configuration abandonnée, aucun fichier modifié.")
-        return 1
-    if any(ch in api_key for ch in ("\"", "'", "\\", "\n")):
-        show("Clé inattendue : configuration abandonnée, aucun fichier modifié.")
-        return 1
-
-    existing = ""
     env_path = env_path or ENV_NAME
+    existing = ""
     if os.path.isfile(env_path):
         try:
             with open(env_path, "r", encoding="utf-8") as fh:
@@ -123,17 +143,92 @@ def run_setup(
             show(f"Impossible de lire le `.env` existant : {exc}")
             return 1
 
-    variables = {
-        "MILES_PROVIDER": "remote",
-        "MILES_REMOTE_BASE_URL": base_url,
-        "MILES_REMOTE_MODEL": model,
-        "MILES_REMOTE_API_KEY": api_key,
-    }
+    configured: set[str] = set()
+    variables: dict[str, str] = {}
+    active = ""
+
+    def _collect(name: str, quick: bool, set_active: bool) -> dict[str, str] | None:
+        """Collecter la configuration d'un fournisseur.
+
+        `quick=True` : étapes réduites — modèle par défaut, **clé seule**.
+        `set_active=True` : ce fournisseur devient le bloc actif
+        (`MILES_REMOTE_*`) ; sinon seule sa clé par fournisseur est stockée.
+        """
+        base_url, default_model = PROVIDERS[name]
+        if quick:
+            model = default_model
+            show(f"[étapes réduites] {name} : modèle par défaut {model}.")
+        else:
+            model = pick(f"Modèle [{default_model}] : ").strip() or default_model
+        api_key = ask(f"Clé API {name} (saisie masquée) : ").strip()
+        if not api_key:
+            show(f"Clé vide : {name} ignoré.")
+            return None
+        if any(ch in api_key for ch in ("\"", "'", "\\", "\n")):
+            show(f"Clé inattendue : {name} ignoré.")
+            return None
+        block = {f"MILES_API_KEY_{name.upper()}": api_key}
+        if set_active:
+            block.update(
+                {
+                    "MILES_PROVIDER": "remote",
+                    "MILES_REMOTE_BASE_URL": base_url,
+                    "MILES_REMOTE_MODEL": model,
+                    "MILES_REMOTE_API_KEY": api_key,
+                }
+            )
+        return block
+
+    # 1. Premier fournisseur : questions complètes, il devient le fournisseur actif.
+    choice = pick("Fournisseur (nom exact) : ").strip().lower()
+    if choice not in PROVIDERS:
+        show(f"Fournisseur inconnu : {choice}. Aucun fichier modifié.")
+        return 1
+    block = _collect(choice, quick=False, set_active=True)
+    if block is None:
+        show("Configuration abandonnée, aucun fichier modifié.")
+        return 1
+    variables.update(block)
+    configured.add(choice)
+    active = choice
+
+    # 2. Suite : services du même compte (clé seule) puis autres fournisseurs.
+    while True:
+        siblings = _siblings_of(choice, configured)
+        if siblings:
+            answer = pick(
+                "Services du même compte ("
+                + ", ".join(siblings)
+                + ") : configurer ? [o/N] : "
+            ).strip().lower()
+            if answer in yes:
+                for sibling in siblings:
+                    block = _collect(sibling, quick=True, set_active=False)
+                    if block is not None:
+                        variables.update(block)
+                        configured.add(sibling)
+                continue
+        answer = pick("Configurer un autre fournisseur ? [o/N] : ").strip().lower()
+        if answer not in yes:
+            break
+        choice = pick("Fournisseur (nom exact) : ").strip().lower()
+        if choice not in PROVIDERS:
+            show(f"Fournisseur inconnu : {choice}. Ignoré.")
+            continue
+        block = _collect(choice, quick=True, set_active=False)
+        if block is not None:
+            variables.update(block)
+            configured.add(choice)
+
+    if not variables:
+        show("Aucune configuration enregistrée.")
+        return 1
     path = write_env(env_path, variables, existing)
-    show(f"Configuration enregistrée dans {path}.")
+    show(f"Configuration enregistrée dans {path} ({len(configured)} fournisseur(s)).")
     show(
-        f"Fournisseur : {choice} (mode remote). "
-        "Test réel de connexion à exécuter séparément, après autorisation du coût."
+        f"Fournisseur actif : {active} (mode remote). Les clés sont stockées "
+        "par fournisseur (MILES_API_KEY_<NOM>) ; le test réel de connexion "
+        "reste à exécuter après autorisation du coût."
     )
     return 0
 
