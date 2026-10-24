@@ -312,6 +312,19 @@ python miles.py --help
 | `/new` | Démarrer une nouvelle conversation |
 | `/status` | Afficher l'état du programme |
 
+### Routes web de consultation (authentifiées par session)
+
+| Route | Action |
+|-------|--------|
+| `GET /status` | État du programme : fournisseur, mode, historique, mémoire, orchestrateur |
+| `GET /provider` (nouveau) | Configuration courante du fournisseur : nom, mode (remote/local), URL de base, modèle |
+| `GET /tools` | Catalogue des outils enregistrés |
+
+**Règle de disponibilité** : aucune de ces routes ne déclenche de requête réseau
+implicite et aucune n'appelle `is_available()` : la disponibilité du fournisseur
+reste « non testée (aucune requête réseau effectuée) » tant qu'aucun contrôle
+explicite n'a été exécuté. Les clés API ne sont jamais incluses dans ces réponses.
+
 ## 5. Dépendances vocales (optionnelles)
 
 La voix est désactivée par défaut (`MILES_VOICE_ENABLED=false`). Pour l'activer :
