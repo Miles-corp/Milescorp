@@ -1,5 +1,7 @@
 # docs/coordination/HANDOFF.md — Procédure de transmission entre agents
 
+> Point d'entrée des agents : `AGENT_START.md` à la racine du dépôt ; état courant des missions : `MISSIONS_REGISTRY.md`.
+
 Procédure à suivre par chaque agent à la fin de sa session de travail, afin que l'autre agent puisse reprendre le contexte sans perte d'information.
 
 ## 1. Avant de quitter

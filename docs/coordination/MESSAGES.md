@@ -1,5 +1,7 @@
 # MILES — Messages asynchrones (MESSAGES.md)
 
+> Point d'entrée des agents : `AGENT_START.md` à la racine du dépôt ; état courant des missions : `MISSIONS_REGISTRY.md`.
+
 Canal persistant entre l'agent A et l'agent B. Les messages s'ajoutent en queue de fichier, jamais d'effacement d'historique.
 
 ## Règles

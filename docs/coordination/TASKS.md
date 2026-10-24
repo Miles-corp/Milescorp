@@ -1,5 +1,7 @@
 # docs/coordination/TASKS.md — Tableau de suivi des tâches MILES
 
+> Point d'entrée des agents : `AGENT_START.md` à la racine du dépôt ; état courant des missions : `MISSIONS_REGISTRY.md`.
+
 Convention :
 - ID : `TASK-###`
 - Statuts : `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`, `CANCELLED`

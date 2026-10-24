@@ -1,5 +1,7 @@
 # docs/coordination/STATUS.md — État du projet MILES
 
+> Point d'entrée des agents : `AGENT_START.md` à la racine du dépôt ; état courant des missions : `MISSIONS_REGISTRY.md`.
+
 ## État général (2026-10-19)
 
 - **Projet** : MILES — dépôt GitHub privé `https://github.com/Miles-corp/Milescorp.git`
@@ -102,6 +104,13 @@ Anomalie signalée : la branche `fix/miles-paths-posix-spaces` existe localement
 - Plusieurs branches ont modifié les documents de coordination et ci-dessous des fichiers de tests superposés (p. ex. `tests/test_web.py`) : conflits probables dans `docs/coordination/*.md` ; à résoudre en suivant `AGENTS.md` (historique conservé, ajout en queue).
 - `fix/miles-diagnostics` non poussé : pousser avant tout audit B.
 - Validation Debian 13 reste manquante pour toute la chaîne (environnement indisponible).
+
+### Vérifications complémentaires du 2026-10-24 (préparation locale de l'audit)
+
+- **`fix/miles-diagnostics`** : SHA vérifié `78ac05c3732cbed3bf98bd344effb594c95c1e2f`, parent `8b85722` ; **aucun upstream** (`no upstream configured`, `git ls-remote` : branche absente d'origin) — locale uniquement. Rapport Agent A rédigé : `docs/reports/PHASE_6_4B_DIAGNOSTICS_AGENT_A.md` (modification locale, non commitée sur ordre de l'utilisateur).
+- **`fix/miles-paths-posix-spaces`** : reflog prouve qu'elle a été **créée depuis `25baa60` sans jamais recevoir de commit** (`branch: Created from ...`) ; aucun travail à intégrer. Couverture POSIX/espaces déjà présente dans `tests/test_policy_path_typing.py` et `tests/test_windows_paths.py` (introduits par D3/D2). Suppression éventuelle : décision humaine.
+- **Octet NULL dans le blob D3** : le commit `0be08cd` introduit **exactement 1 octet NULL** dans `docs/coordination/MESSAGES.md` (parent : 0 octet nul), collé dans le texte documentaire « caracteres de controle `\x00 \n \r` ». Git considère donc la version D3→`25baa60` du fichier comme binaire (diff `Bin`). Le blob courant de la branche de coordination (`9f044f8`) ne contient **aucun octet nul** : la contamination ne concerne que la lignée D3→answer (et la variante investigation `dce2dee`). Correction possible par un simple commit d'intégration remplaçant le texte littéral, **sans réécriture d'historique**.
+- **Tests** : aucune campagne n'a été relancée pour cette mission de documentation (les chiffres du 24/10 cités sont ceux déjà exécutés et consignés au sommet `78ac05c`).
 
 ## Phase 5 — Intégration du moteur d'outils (Agent A, 2026-10-20)
 
