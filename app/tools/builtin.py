@@ -27,10 +27,12 @@ from app.tools.local_actions import (
     DEFAULT_MAX_READ_BYTES,
     HARD_MAX_READ_BYTES,
     MAX_LIST_DEPTH,
+    MAX_NOTE_CHARS,
     datetime_handler,
     list_files_handler,
     read_file_handler,
     workdir_handler,
+    write_note_handler,
 )
 from app.tools.registry import ToolDefinition, ToolParameter, ToolRegistry
 from app.tools.status_tool import status_tool_handler
@@ -154,11 +156,48 @@ def build_default_registry() -> ToolRegistry:
         )
     )
 
+    registry.register(
+        ToolDefinition(
+            tool_id="action_write_note",
+            description=(
+                "Écrire une note dans le répertoire autorisé data/notes "
+                "(première action d'écriture de MILES). Écrasement interdit, "
+                "chemin confiné, confirmation humaine exigée."
+            ),
+            handler=write_note_handler,
+            parameters=(
+                ToolParameter(
+                    name="path",
+                    type=str,
+                    required=True,
+                    description=(
+                        "Note à créer, strictement sous data/notes "
+                        "(extension .md ou .txt)."
+                    ),
+                    is_path=True,
+                ),
+                ToolParameter(
+                    name="content",
+                    type=str,
+                    required=True,
+                    description=(
+                        "Contenu texte de la note "
+                        f"(maximum {MAX_NOTE_CHARS} caractères)."
+                    ),
+                ),
+            ),
+            risk_level="MEDIUM",
+            required_permissions=("ecriture_note",),
+            timeout_seconds=10,
+            read_only=False,
+        )
+    )
+
     return registry
 
 
 #: Permissions connues du modèle d'outils.
-KNOWN_PERMISSIONS = ("lecture_systeme",)
+KNOWN_PERMISSIONS = ("lecture_systeme", "ecriture_note")
 
 #: Outils d'observation (lecture seule) utilisables par une mission.
 READ_ONLY_TOOLS = (

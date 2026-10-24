@@ -527,7 +527,11 @@ class TestAucunDroitNouveau(unittest.TestCase):
     """Le correctif n'accorde aucun outil, permission ni racine supplémentaire."""
 
     def test_la_liste_des_outils_est_inchangee(self) -> None:
-        """Les outils enregistrés sont exactement les mêmes."""
+        """Les outils enregistrés sont exactement les mêmes.
+
+        S3 : action_write_note est la seule addition volontaire (écriture
+        bornée à data/notes, confirmée) — listée ici pour le tracer.
+        """
         registry = build_default_registry()
         self.assertEqual(
             registry.list_tools(),
@@ -536,6 +540,7 @@ class TestAucunDroitNouveau(unittest.TestCase):
                 "action_list_files",
                 "action_read_file",
                 "action_workdir",
+                "action_write_note",
                 "status_read",
             ],
         )
@@ -548,6 +553,8 @@ class TestAucunDroitNouveau(unittest.TestCase):
             "action_list_files": ("lecture_systeme",),
             "action_read_file": ("lecture_systeme",),
             "action_workdir": (),
+            # S3 : permission dédiée, sciemment limitée à l'écriture de note.
+            "action_write_note": ("ecriture_note",),
             "status_read": (),
         }
         for tool_id, permissions in attendu.items():
@@ -569,6 +576,7 @@ class TestAucunDroitNouveau(unittest.TestCase):
         }
         self.assertEqual(typer["action_list_files"], ["path"])
         self.assertEqual(typer["action_read_file"], ["path"])
+        self.assertEqual(typer["action_write_note"], ["path"])
         self.assertEqual(typer["action_datetime"], [])
         self.assertEqual(typer["action_workdir"], [])
         self.assertEqual(typer["status_read"], [])

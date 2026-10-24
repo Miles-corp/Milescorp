@@ -1463,16 +1463,27 @@ class TestNoRegression(unittest.TestCase):
         self.assertIn("path", names)
 
     def test_permissions_non_elargies(self) -> None:
-        """La nouvelle lecture réutilise la permission existante."""
+        """Seules les permissions connues existent.
+
+        S3 (action_write_note) introduit la permission `ecriture_note`,
+        sciemment : elle est bornée au répertoire data/notes et couplée à
+        la confirmation humaine. Aucune autre permission n'existe.
+        """
         registry = build_default_registry()
         permissions = set()
         for tool_id in registry.list_tools():
             tool = registry.get_tool(tool_id)
             permissions.update(tool.required_permissions)
-        self.assertEqual(permissions, {"lecture_systeme"})
+        self.assertEqual(permissions, {"lecture_systeme", "ecriture_note"})
 
     def test_orchestrateur_n_ajoute_aucun_outil_d_ecriture(self) -> None:
-        """La mission pilote reste en lecture seule."""
+        """La mission pilote reste en lecture seule.
+
+        S3 : un outil d'écriture (action_write_note) existe désormais, mais
+        il est INTERDIT aux missions autonomes : il doit rester hors de
+        READ_ONLY_TOOLS, exiger la confirmation humaine (MEDIUM) et une
+        permission dédiée. Toute écriture reste interactive et bornée.
+        """
         from app.tools.builtin import READ_ONLY_TOOLS
 
         registry = build_default_registry()
@@ -1481,11 +1492,20 @@ class TestNoRegression(unittest.TestCase):
             self.assertIn(
                 tool.risk_level, ("LOW", "MEDIUM"), f"{tool_id} doit rester borné"
             )
-        # Aucun outil d'écriture n'est déclaré
+        # Les outils d'écriture ne doivent jamais être autonomes :
+        # ni dans les missions, ni sans confirmation ni sans permission.
         for tool_id in registry.list_tools():
             tool = registry.get_tool(tool_id)
-            self.assertNotIn("write", tool.tool_id)
-            self.assertNotIn("delete", tool.tool_id)
+            if "write" in tool.tool_id or "delete" in tool.tool_id:
+                self.assertNotIn(
+                    tool.tool_id, READ_ONLY_TOOLS, f"{tool.tool_id} doit rester interactif"
+                )
+                self.assertFalse(tool.read_only, f"{tool.tool_id} doit marquer read_only=False")
+                self.assertIn(tool.risk_level, ("MEDIUM", "HIGH"))
+                self.assertTrue(
+                    tool.required_permissions,
+                    f"{tool.tool_id} doit exiger une permission dédiée",
+                )
 
     def test_mission_n_utilise_pas_d_outil_hors_registre(self) -> None:
         runner, service, _ = _build_runner()

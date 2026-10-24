@@ -23,9 +23,14 @@ from __future__ import annotations
 
 import datetime
 import os
+import tempfile
 from typing import Any, Dict, List
-
-from app.security.paths import PathSecurityError, resolve_authorized_path
+from app.security.paths import (
+    PathSecurityError,
+    canonical_path,
+    is_within,
+    resolve_authorized_path,
+)
 from app.utilities.redaction import sanitize_text
 
 #: Taille maximale lue par défaut (octets).
@@ -274,3 +279,93 @@ def read_file_handler(path: str, max_bytes: int = DEFAULT_MAX_READ_BYTES) -> str
         return f"Fichier illisible : {path}"
 
     return sanitize_text(content)
+
+
+#: Répertoire strictement autorisé pour les notes d'écriture (S3).
+NOTES_DIR = "data/notes"
+
+#: Extensions autorisées pour une note.
+NOTE_EXTENSIONS = (".md", ".txt")
+
+#: Taille maximale d'une note (caractères).
+MAX_NOTE_CHARS = 4000
+
+
+def write_note_handler(path: str, content: str) -> Dict[str, Any]:
+    """Écrire une note dans le répertoire autorisé ``data/notes`` (S3).
+
+    Première action d'écriture de MILES, strictement bornée :
+
+    - confinement canonique : le chemin doit rester **sous** ``data/notes``
+      (y compris les liens symboliques, résolus par ``canonical_path``) ;
+    - nom de fichier sain : pas de nom sensible (``.env``, clés), extension
+      ``.md`` ou ``.txt``, nom simple sans traversée de répertoire ;
+    - **refus d'écrasement** : un fichier existant n'est jamais modifié ;
+    - écriture atomique (fichier temporaire + ``os.replace``) ;
+    - contenu borné (4 000 caractères).
+
+    La confirmation humaine n'est pas gérée ici : c'est le moteur d'outils
+    (``ToolPolicy``, risque MEDIUM) qui l'exige avant tout appel.
+
+    Args:
+        path: chemin de la note, relatif à la racine du projet et sous
+            ``data/notes`` (ex. ``data/notes/journal.md``).
+        content: contenu texte de la note.
+
+    Returns:
+        Un dictionnaire ``{"written": chemin, "bytes": taille}``, ou
+        ``{"error": motif}`` en cas de refus d'écriture.
+
+    Raises:
+        PermissionError: chemin hors de ``data/notes`` ou fichier sensible.
+        ValueError: contenu ou nom invalide (vide, trop long, extension,
+            écrasement demandé).
+    """
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("Le contenu de la note est vide.")
+    if len(content) > MAX_NOTE_CHARS:
+        raise ValueError(
+            f"Contenu trop long : {len(content)} caractères "
+            f"(maximum {MAX_NOTE_CHARS})."
+        )
+
+    notes_root = resolve_authorized_path(NOTES_DIR)
+    try:
+        target = resolve_authorized_path(path)
+    except PathSecurityError as exc:
+        raise PermissionError(str(exc)) from exc
+
+    try:
+        if not is_within(canonical_path(str(target)), canonical_path(str(notes_root))):
+            raise PermissionError(
+                "Écriture refusée : seul le répertoire data/notes est autorisé."
+            )
+    except (OSError, ValueError) as exc:
+        raise PermissionError("Chemin de note invalide.") from exc
+
+    name = os.path.basename(str(target))
+    if is_sensitive_filename(name):
+        raise PermissionError(f"Fichier sensible : écriture interdite ({name}).")
+    if not name.lower().endswith(NOTE_EXTENSIONS):
+        raise ValueError("Extension de note invalide : .md ou .txt attendu.")
+    if name != os.path.basename(path.replace("\\", "/").split("/")[-1]):
+        raise ValueError("Nom de note invalide.")
+    if os.path.exists(str(target)):
+        raise ValueError("Une note du même nom existe déjà : écrasement interdit.")
+
+    os.makedirs(str(notes_root), exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=".miles-note-", suffix=".tmp", dir=str(notes_root)
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(content)
+        os.replace(tmp_path, str(target))
+    except OSError as exc:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        return {"error": f"Écriture impossible : {type(exc).__name__}."}
+    return {
+        "written": os.path.relpath(str(target)),
+        "bytes": len(content.encode("utf-8")),
+    }

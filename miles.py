@@ -208,7 +208,13 @@ def main(argv: list[str] | None = None) -> int:
     # peuvent pas être rejouées dans un autre contexte.
     session_id = default_session_id("miles")
     grant_registry = GrantRegistry()
-    tool_service = ToolService(grant_checker=grant_registry)
+    tool_service = ToolService(
+        grant_checker=grant_registry,
+        # Permissions de l'application : lecture système + écriture de note
+        # (S3). L'écriture reste bornée à data/notes et exige la confirmation
+        # humaine (outils MEDIUM) — la permission ne supprime pas le jeton.
+        granted_permissions={"lecture_systeme", "ecriture_note"},
+    )
 
     memory = None
     if settings.memory_enabled:
