@@ -14,7 +14,7 @@ from app.ai_providers.base import AIProvider, AIProviderError
 from app.ai_providers.public_errors import public_provider_error, technical_detail
 from app.core.conversation import Conversation
 from app.memory.persistent import PersistentMemory, PersistentMemoryError
-from app.orchestration.runner import MissionRunner
+from app.orchestration.runner import MissionAuthorizationError, MissionRunner
 from app.security.validator import ActionValidator, ActionResult
 from app.tools.grants import default_session_id
 from app.tools.service import ToolService
@@ -535,7 +535,13 @@ class CLI:
                 print(f"  - {item}")
 
     def _handle_mission_answer_command(self, args: list[str]) -> None:
-        """Répondre à une demande en attente (clarification ou autorisation)."""
+        """Répondre à une demande de clarification en attente.
+
+        Une demande d'**autorisation** n'est pas traitable ici : elle
+        exige le jeton d'approbation et passe par la route d'autorisation
+        (en console, la question d'autorisation est posée par la mission
+        elle-même). Répondre « o » à une autorisation ne l'accorde donc plus.
+        """
         if self.mission_runner is None:
             print("Orchestrateur de missions indisponible.")
             return
@@ -549,7 +555,11 @@ class CLI:
         if mission.pending is None:
             print("Cette mission n'a aucune demande en attente.")
             return
-        mission = self.mission_runner.answer(args[0], " ".join(args[1:]))
+        try:
+            mission = self.mission_runner.answer(args[0], " ".join(args[1:]))
+        except MissionAuthorizationError as exc:
+            print(str(exc))
+            return
         self._drive_mission(mission)
 
     def _handle_mission_cancel_command(self, args: list[str]) -> None:

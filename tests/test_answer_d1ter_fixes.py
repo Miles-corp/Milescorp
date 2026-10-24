@@ -45,6 +45,7 @@ from app.interface.web_auth import WebAuthenticator, WebCredentialStore, WebSess
 from app.orchestration.models import ExecutionLimits, Plan, PlanStep
 from app.orchestration.planner import PlanContext, ProviderPlanner
 from app.orchestration.runner import (
+    REASON_AUTHORIZATION_REQUIRES_TOKEN,
     REASON_INTERACTION_BUDGET_EXCEEDED,
     REASON_MISSION_FINISHED,
     REASON_MISSION_NOT_FOUND,
@@ -275,21 +276,50 @@ class TestReponseHonneteDeAnswer(unittest.TestCase):
         pending = attente.get("pending") or {}
         return mission_id, str(pending.get("approval_token"))
 
-    def test_reponse_valide_acceptee_et_mission_avancee(self) -> None:
-        """1. Une réponse valide : réponse positive ET mission poursuivie."""
+    def test_reponse_o_n_approuve_plus_une_autorisation(self) -> None:
+        """1 (corrigé P1) : une réponse « o » n'approuve PLUS une
+        autorisation : elle est refusée explicitement.
+
+        Avant la correction P1, `/answer` transformait « o » en
+        approbation d'autorisation. La mission n'est désormais ni
+        approuvée ni arrêtée : elle reste en attente, et l'approbation
+        passe par `/authorize` avec le jeton d'approbation.
+        """
         mission_id, _ = self._mission_en_attente()
         reponse = self.app.answer_mission(
             mission_id, {"answer": "o"}, self.session
         )
-        self.assertNotIn("error", reponse)
-        self.assertIs(reponse.get("answered"), True)
-        final = _attendre_etat(
-            self.app,
-            mission_id,
-            self.session,
-            ("completed", "partial", "failed", "limit_reached"),
+        self.assertIn("error", reponse)
+        self.assertNotIn("answered", reponse)
+        self.assertEqual(
+            reponse.get("reason"), REASON_AUTHORIZATION_REQUIRES_TOKEN
         )
-        self.assertIn(final.get("state"), ("completed", "partial"))
+        # La mission n'est ni approuvée ni tuée.
+        detail = self.app.mission_detail(mission_id, self.session)
+        self.assertEqual(detail.get("state"), "awaiting_authorization")
+        self.assertEqual(self.grants.list_grants(), [])
+
+    def test_une_reponse_non_approbative_ne_tue_pas_la_mission(self) -> None:
+        """1b (corrigé P1) : une réponse qui n'est pas une approbation
+        (« non », « peut-être »…) n'arrête plus la mission : elle est
+        refusée comme toute réponse à une demande d'autorisation."""
+        for texte in ("non", "peut-etre", "n'importe quoi"):
+            with self.subTest(texte=texte):
+                mission_id, _ = self._mission_en_attente(
+                    f"Analyse {texte}"
+                )
+                reponse = self.app.answer_mission(
+                    mission_id, {"answer": texte}, self.session
+                )
+                self.assertIn("error", reponse)
+                self.assertEqual(
+                    reponse.get("reason"), REASON_AUTHORIZATION_REQUIRES_TOKEN
+                )
+                self.assertEqual(
+                    self.runner.get(mission_id).state.value,
+                    "awaiting_authorization",
+                )
+                self.assertEqual(self.grants.list_grants(), [])
 
     def test_autre_session_refusee_explicitement(self) -> None:
         """2. Une autre session : REFUS EXPLICITE (et non une fausse
@@ -301,7 +331,9 @@ class TestReponseHonneteDeAnswer(unittest.TestCase):
         )
         self.assertIn("error", reponse)
         self.assertNotIn("answered", reponse)
-        self.assertEqual(reponse.get("reason"), REASON_SESSION_MISMATCH)
+        self.assertEqual(
+            reponse.get("reason"), REASON_AUTHORIZATION_REQUIRES_TOKEN
+        )
         # Aucune autorisation n'a été accordée.
         self.assertEqual(self.grants.list_grants(), [])
         self.assertEqual(
@@ -309,9 +341,16 @@ class TestReponseHonneteDeAnswer(unittest.TestCase):
         )
 
     def test_mission_terminee_refusee_explicitement(self) -> None:
-        """3. Une mission terminée : REFUS EXPLICITE."""
-        mission_id, _ = self._mission_en_attente()
-        self.app.answer_mission(mission_id, {"answer": "o"}, self.session)
+        """3. Une mission terminée : REFUS EXPLICITE.
+
+        La mission est terminée par `/authorize` (et non plus par
+        `/answer`) : c'est la seule voie d'approbation depuis la
+        correction P1.
+        """
+        mission_id, token = self._mission_en_attente()
+        self.app.authorize_mission(
+            mission_id, {"approved": True, "approval_token": token}, self.session
+        )
         _attendre_etat(
             self.app,
             mission_id,
@@ -389,15 +428,30 @@ class TestReponseHonneteDeAnswer(unittest.TestCase):
         self.assertIn("error", reponse)
         self.assertNotIn("answered", reponse)
 
-    def test_le_contrat_de_answer_est_inchange(self) -> None:
-        """10. Le contrat est préservé : AUCUN jeton n'est exigé (A-β n'est
-        pas appliqué)."""
+    def test_le_contrat_de_answer_a_change(self) -> None:
+        """10 (corrigé P1) : `/answer` n'approuve plus rien.
+
+        La correction P1 inverse le choix de l'audit : le contrat de la
+        route `/answer` n'exige plus de jeton, mais elle ne traite plus
+        que les **clarifications** ; l'approbation d'une autorisation
+        passe par `/authorize` et son jeton (usage unique, expiration,
+        session, propriétaire).
+        """
         mission_id, _ = self._mission_en_attente()
         reponse = self.app.answer_mission(
             mission_id, {"answer": "o"}, self.session
         )
-        self.assertNotIn("error", reponse)
-        self.assertIs(reponse.get("answered"), True)
+        self.assertIn("error", reponse)
+        self.assertEqual(
+            reponse.get("reason"), REASON_AUTHORIZATION_REQUIRES_TOKEN
+        )
+        # L'approbation reste possible par /authorize, avec le jeton.
+        token = self.runner.get(mission_id).pending.approval_token
+        accept = self.app.authorize_mission(
+            mission_id, {"approved": True, "approval_token": token}, self.session
+        )
+        self.assertNotIn("error", accept)
+        self.assertIs(accept.get("approved"), True)
 
     def test_les_reponses_ne_divulguent_ni_jeton_ni_session(self) -> None:
         """11. Aucune réponse ne contient de jeton ni de session."""
@@ -432,33 +486,31 @@ class TestReponseHonneteDeAnswer(unittest.TestCase):
                     break
                 time.sleep(0.05)
 
-            # Refus : autre session.
-            autre = serveur.raw_request(
-                "POST", "/session", {"token": JETON_ALICE}
-            )
-            session_autre = autre["json"] or {}
-            entetes_autre = {
-                "X-MILES-Session": session_autre["session_id"],
-                "X-MILES-CSRF": session_autre["csrf_token"],
-            }
+            # Refus : /answer n'approuve pas une autorisation (P1), meme
+            # pour la session propriétaire.
             refus = serveur.raw_request(
                 "POST",
                 f"/mission/{mission_id}/answer",
                 {"answer": "o"},
-                headers=entetes_autre,
-                authenticate=False,
             )
             self.assertEqual(refus["status"], 403)
             self.assertEqual(
-                (refus["json"] or {}).get("reason"), REASON_SESSION_MISMATCH
+                (refus["json"] or {}).get("reason"),
+                REASON_AUTHORIZATION_REQUIRES_TOKEN,
             )
 
-            # Réponse valide.
+            # Approbation : par /authorize, avec le jeton.
+            detail = serveur.raw_request("GET", f"/mission/{mission_id}")
+            jeton = ((detail["json"] or {}).get("pending") or {}).get(
+                "approval_token"
+            )
             accept = serveur.raw_request(
-                "POST", f"/mission/{mission_id}/answer", {"answer": "o"}
+                "POST",
+                f"/mission/{mission_id}/authorize",
+                {"approved": True, "approval_token": jeton},
             )
             self.assertEqual(accept["status"], 200)
-            self.assertIs((accept["json"] or {}).get("answered"), True)
+            self.assertIs((accept["json"] or {}).get("approved"), True)
 
 
 # ---------------------------------------------------------------------------
