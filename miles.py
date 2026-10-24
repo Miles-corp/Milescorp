@@ -3,6 +3,7 @@
 
 import sys
 import argparse
+import os
 
 from app.ai_providers.local import LocalProvider
 from app.ai_providers.remote import RemoteProvider
@@ -72,6 +73,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=8080,
         help="Port d'écoute de l'interface web (défaut: 8080)",
+    )
+    parser.add_argument(
+        "--setup",
+        action="store_true",
+        help="Assistant de configuration : enregistrer le fournisseur et sa clé API dans .env (saisie masquée, aucun affichage de secret)",
     )
     return parser
 
@@ -166,6 +172,15 @@ def _list_conversations(transcript: ConversationTranscript | None) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    # L'assistant de configuration est exécutable même avec une configuration
+    # défaillante : il écrit le `.env`, il ne le lit pas via Settings.
+    if args.setup:
+        from app.config.setup import run_setup
+
+        return run_setup(
+            env_path=os.environ.get("MILES_ENV_FILE", ".env"),
+        )
 
     try:
         settings = Settings(config_path=args.config)
