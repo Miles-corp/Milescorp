@@ -268,6 +268,12 @@ class GrantRegistry:
         Returns:
             L'identifiant du grant, ou None si aucun grant ne convient.
         """
+        # S-E3-04 (audit interne E3) : fail-closed — sans identifiant
+        # d'acteur démontré, aucun grant ne peut être retourné. Le contrat
+        # `GrantChecker` accepte `Optional[str]`, mais l'absence de preuve
+        # d'appartenance ne doit jamais valoir autorisation.
+        if not actor_id:
+            return None
         now = float(self._clock())
         with self._lock:
             for stored in self._grants.values():
