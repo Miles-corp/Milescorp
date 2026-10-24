@@ -826,6 +826,8 @@ class MilesHandler(BaseHTTPRequestHandler):
             self._handle_list_memories(session)
         elif path == "/tools":
             self._handle_list_tools()
+        elif path == "/log":
+            self._handle_log()
         elif path == "/missions":
             self._handle_list_missions(session)
         elif path.startswith("/mission/"):
@@ -1220,6 +1222,35 @@ showLogin();
         payload = self.app.list_tools()
         status = 200 if "error" not in payload else 503
         self._send_json(status, payload)
+
+    def _handle_log(self) -> None:
+        """Répondre GET /log : journal des outils (lecture seule).
+
+        Route de consultation derrière `_require_session` comme /tools.
+        Seules les métadonnées et les empreintes de paramètres sont
+        renvoyées (le `AuditLogger` ne stocke jamais le contenu brut).
+        """
+        if self.app is None:
+            self._send_json(500, {"error": "Application non initialisée"})
+            return
+        service = self.app.tool_service
+        if service is None:
+            self._send_json(503, {"error": "Aucun journal d'outils disponible."})
+            return
+        entries = service.audit.get_entries()[-200:]
+        payload = [
+            {
+                "timestamp": e.timestamp,
+                "tool_id": e.tool_id,
+                "user_confirmed": e.user_confirmed,
+                "permission_granted": e.permission_granted,
+                "result": e.result,
+                "error_message": e.error_message,
+                "parameters_hash": e.parameters_hash,
+            }
+            for e in entries
+        ]
+        self._send_json(200, {"entries": payload, "count": len(payload)})
 
     def _handle_run_tool(self, data: dict[str, Any], session: WebSession) -> None:
         if self.app is None:

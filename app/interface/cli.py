@@ -39,6 +39,7 @@ HELP_TEXT = """\nCommandes disponibles :
   /new         Démarrer une nouvelle conversation
   /tools       Lister les outils disponibles
   /tool        Exécuter un outil (usage: /tool <id> [cle=valeur ...])
+  /log [n]     Afficher les n derniers évènements du journal d'outils (défaut 10)
   /mission     Lancer une mission (usage: /mission <objectif>)
   /missions    Lister les missions
   /mission-status Consulter une mission (usage: /mission-status <id>)
@@ -257,6 +258,8 @@ class CLI:
                 print("Impossible de créer une nouvelle conversation.")
         elif cmd == "/tools":
             self._handle_tools_command()
+        elif cmd == "/log":
+            self._handle_log_command(args)
         elif cmd == "/tool":
             self._handle_tool_command(args)
         elif cmd == "/mission":
@@ -315,6 +318,41 @@ class CLI:
             print(f"Commande inconnue : {cmd}. Tapez /help pour l'aide.")
 
     # --- Outils ---
+
+    def _handle_log_command(self, args: list[str]) -> None:
+        """Afficher les derniers évènements du journal d'outils (lecture seule).
+
+        Le journal est celui du `ToolService` partagé (`AuditLogger`) :
+        chaque entrée ne contient que des métadonnées et une empreinte
+        des paramètres, jamais le contenu brut (ni secret).
+        """
+        if self.tool_service is None:
+            print("Aucun journal d'outils disponible.")
+            return
+        count = 10
+        if args:
+            try:
+                count = int(args[0])
+            except ValueError:
+                print("Usage : /log [nombre]")
+                return
+            if count < 1:
+                print("Le nombre doit être positif.")
+                return
+        entries = self.tool_service.audit.get_entries()
+        if not entries:
+            print("Aucune activité enregistrée.")
+            return
+        recent = entries[-count:]
+        print(f"Journal des outils ({len(recent)} dernier(s) évènement(s)) :")
+        for entry in recent:
+            flags = []
+            flags.append("confirmé" if entry.user_confirmed else "sans confirmation")
+            flags.append("accordé" if entry.permission_granted else "refusé")
+            line = f"  {entry.timestamp}  {entry.tool_id}  {entry.result}  ({', '.join(flags)})"
+            if entry.error_message:
+                line += f"  — {entry.error_message}"
+            print(line)
 
     def _handle_tools_command(self) -> None:
         """Lister les outils disponibles (catalogue, sans exécution)."""
