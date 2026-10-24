@@ -37,12 +37,19 @@ class TestWriteEnv(unittest.TestCase):
             self.assertIn("MILES_REMOTE_API_KEY=cle-secret", content)
 
     def test_replace_existing_managed_line(self) -> None:
-        out = write_env(
-            ".unused",  # jamais créé : on passe le contenu directement
-            {"MILES_PROVIDER": "remote"},
-            "MILES_PROVIDER=local\nAUTRE=valeur\n",
-        )
-        self.assertEqual(out, ".unused")
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = os.path.join(tmp, ".env")
+            out = write_env(
+                env_path,
+                {"MILES_PROVIDER": "remote"},
+                "MILES_PROVIDER=local\nAUTRE=valeur\n",
+            )
+            with open(env_path, encoding="utf-8") as fh:
+                content = fh.read()
+            self.assertEqual(out, env_path)
+            self.assertIn("MILES_PROVIDER=remote", content)
+            self.assertNotIn("MILES_PROVIDER=local", content)
+            self.assertIn("AUTRE=valeur", content)
 
     def test_atomic_no_tmp_file_left(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
