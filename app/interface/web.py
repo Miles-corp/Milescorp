@@ -544,18 +544,32 @@ class WebApp:
     # --- Fournisseur ---
 
     def provider_state(self) -> dict[str, Any]:
-        """Retourner l'état du fournisseur IA."""
+        """Retourner l'état du fournisseur IA, sans test de disponibilité.
+
+        Aucune requête réseau implicite n'est effectuée et is_available()
+        n'est jamais appelé : la disponibilité reste inconnue tant qu'
+        aucun contrôle explicite n'a été exécuté. Aucun secret n'est
+        exposé : les clés API ne sont jamais incluses et l'URL de base
+        est expurgée par précaution.
+        """
         name = self.provider.name if self.provider else "non configuré"
-        available = False
-        if self.provider is not None:
-            try:
-                available = self.provider.is_available()
-            except Exception:  # noqa: BLE001 — ne pas faire tomber le serveur
-                available = False
+        mode = self.settings.provider
+        if mode == "remote":
+            base_url = self.settings.get("remote_base_url")
+            model = self.settings.get("remote_model")
+        else:
+            base_url = self.settings.get("local_base_url")
+            model = self.settings.get("local_model")
         return {
             "name": name,
-            "available": available,
-            "provider": self.settings.provider,
+            "provider": mode,
+            "mode": mode,
+            "base_url": sanitize_text(base_url),
+            "model": sanitize_text(model),
+            # Aucun test explicite n'a été exécuté : disponibilité inconnue
+            # (jamais un booléen fictif issu d'un appel réseau implicite).
+            "available": None,
+            "availability": "non testée (aucune requête réseau effectuée)",
         }
 
     # --- Conversation ---
@@ -806,6 +820,8 @@ class MilesHandler(BaseHTTPRequestHandler):
 
         if path == "/status":
             self._handle_status()
+        elif path == "/provider":
+            self._handle_provider()
         elif path == "/memory":
             self._handle_list_memories(session)
         elif path == "/tools":
@@ -1184,6 +1200,18 @@ showLogin();
         state = self.app.provider_state()
         state["memory_available"] = self.app.memory.is_available if self.app.memory else False
         self._send_json(200, state)
+
+    def _handle_provider(self) -> None:
+        """Répondre GET /provider : configuration du fournisseur courant.
+
+        Lecture seule, expurgée de tout secret et sans contrôle réseau :
+        la route suit exactement la même protection de session que les
+        autres routes de consultation.
+        """
+        if self.app is None:
+            self._send_json(500, {"error": "Application non initialisée"})
+            return
+        self._send_json(200, self.app.provider_state())
 
     def _handle_list_tools(self) -> None:
         if self.app is None:

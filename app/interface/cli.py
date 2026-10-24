@@ -18,6 +18,7 @@ from app.orchestration.runner import MissionRunner
 from app.security.validator import ActionValidator, ActionResult
 from app.tools.grants import default_session_id
 from app.tools.service import ToolService
+from app.utilities.redaction import sanitize_text
 
 logger = logging.getLogger("miles.cli")
 if not logger.handlers:
@@ -187,22 +188,49 @@ class CLI:
                     "l'historique persisté a échoué."
                 )
         elif cmd == "/provider":
-            name = self.provider.name if self.provider else "non configuré"
-            print(f"Fournisseur courant : {name}")
+            if self.provider is None:
+                print("Fournisseur courant : non configure")
+                print("Mode : aucun")
+                print("URL de base : (aucune)")
+                print("Modele : (aucun)")
+                print("Disponibilite : inconnue (aucun test effectue)")
+            else:
+                mode = self.settings.provider
+                if mode == "remote":
+                    base_url = self.settings.get("remote_base_url")
+                    model = self.settings.get("remote_model")
+                else:
+                    base_url = self.settings.get("local_base_url")
+                    model = self.settings.get("local_model")
+                print(f"Fournisseur courant : {self.provider.name}")
+                print(f"Mode : {mode}")
+                # Expurgation par precaution : une URL ou un nom de modele
+                # mal formes ne doivent jamais divulguer un secret.
+                print(f"URL de base : {sanitize_text(base_url)}")
+                print(f"Modele : {sanitize_text(model)}")
+                # Aucune commande d'affichage ne teste la disponibilite :
+                # sans controle explicite, l'etat reste inconnu.
+                print("Disponibilite : inconnue (aucun test effectue)")
         elif cmd == "/status":
-            provider_name = self.provider.name if self.provider else "non configuré"
-            available = self.provider.is_available() if self.provider else False
+            provider_name = self.provider.name if self.provider else "non configure"
+            mode = self.settings.provider if self.provider else "non configure"
             print(f"Fournisseur : {provider_name}")
-            print(f"Disponible : {'oui' if available else 'non'}")
+            print(f"Mode : {mode}")
+            print("Disponibilite : non testee (aucune requete reseau effectuee)")
             print(f"Messages dans l'historique : {len(self.conversation)}")
             if self.conversation.is_persistent:
-                print(f"Conversation persistée : {self.conversation.conversation_id}")
+                print(f"Conversation persistee : {self.conversation.conversation_id}")
             else:
-                print("Conversation persistée : non")
+                print("Conversation persistee : non")
             if self.memory is not None:
-                print(
-                    f"Mémoire persistante : {'activée' if self.memory.is_available else 'désactivée/indisponible'}"
+                memory_state = (
+                    "activee" if self.memory.is_available else "desactivee/indisponible"
                 )
+                print(f"Memoire persistante : {memory_state}")
+            if self.mission_runner is not None:
+                print("Orchestrateur : disponible")
+            else:
+                print("Orchestrateur : non configure")
         elif cmd == "/conversations":
             transcript = self.conversation.transcript
             if transcript is None or not transcript.is_available:

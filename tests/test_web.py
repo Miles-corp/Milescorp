@@ -155,7 +155,10 @@ class TestWebStatus(unittest.TestCase):
             result = server.request("GET", "/status")
             self.assertEqual(result["_status"], 200)
             self.assertEqual(result["_json"]["name"], "remote-test")
-            self.assertTrue(result["_json"]["available"])
+            # Aucun test implicite de disponibilite : la valeur reste
+            # inconnue (None), jamais un booleen fabrique par is_available.
+            self.assertIsNone(result["_json"]["available"])
+            self.assertIn("non testée", result["_json"]["availability"])
 
     def test_status_no_provider(self) -> None:
         app = build_app(settings=Settings())
@@ -163,7 +166,7 @@ class TestWebStatus(unittest.TestCase):
             result = server.request("GET", "/status")
             self.assertEqual(result["_status"], 200)
             self.assertEqual(result["_json"]["name"], "non configuré")
-            self.assertFalse(result["_json"]["available"])
+            self.assertIsNone(result["_json"]["available"])
 
 
 class TestWebMessage(unittest.TestCase):
