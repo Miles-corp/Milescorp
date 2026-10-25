@@ -157,8 +157,9 @@ class TestRunSetup(unittest.TestCase):
                     "cle-groq-111",
                     "o",                # autre fournisseur
                     "gemini",
-                    "cle-gemini-222",   # rapide : clé seule
-                    "n",                # pas de service Google supplémentaire
+                    "",                 # modèle (défaut) — gemini non lié
+                    "cle-gemini-222",   # clé
+                    "n",                # pas de service Google supplémentaire (mistral)
                     "n",                # fin
                 ]
             )

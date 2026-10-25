@@ -13,6 +13,9 @@ import getpass
 import os
 import tempfile
 from pathlib import Path
+from typing import Callable, Optional
+
+from app.config.oauth import linked_providers, OAUTH_PROVIDERS
 from typing import Callable
 
 #: Catalogue connu : nom affichable -> (base_url, modèle par défaut).
@@ -128,10 +131,11 @@ def run_setup(
     yes = ("o", "oui", "y", "yes")
     show("Assistant de configuration de MILES (S6 : comptes liés).")
     show("Fournisseurs disponibles : " + ", ".join(PROVIDERS))
-    show(
-        "Après un fournisseur, les services du même compte (groupe "
-        "d'identité) sont proposés avec le minimum d'étapes."
-    )
+
+    linked = linked_providers(env_path)
+    if linked:
+        show("Comptes déjà liés (OAuth) : " + ", ".join(linked))
+        show("Les services de ces comptes seront configurés avec le minimum d'étapes.")
 
     env_path = env_path or ENV_NAME
     existing = ""
@@ -179,12 +183,15 @@ def run_setup(
             )
         return block
 
-    # 1. Premier fournisseur : questions complètes, il devient le fournisseur actif.
+    # 1. Premier fournisseur : questions complètes (ou réduites si compte lié).
     choice = pick("Fournisseur (nom exact) : ").strip().lower()
     if choice not in PROVIDERS:
         show(f"Fournisseur inconnu : {choice}. Aucun fichier modifié.")
         return 1
-    block = _collect(choice, quick=False, set_active=True)
+    is_linked = choice in linked
+    if is_linked:
+        show(f"[compte lié] {choice} : étapes réduites (clé seule).")
+    block = _collect(choice, quick=is_linked, set_active=True)
     if block is None:
         show("Configuration abandonnée, aucun fichier modifié.")
         return 1
@@ -215,7 +222,10 @@ def run_setup(
         if choice not in PROVIDERS:
             show(f"Fournisseur inconnu : {choice}. Ignoré.")
             continue
-        block = _collect(choice, quick=True, set_active=False)
+        is_linked = choice in linked
+        if is_linked:
+            show(f"[compte lié] {choice} : étapes réduites (clé seule).")
+        block = _collect(choice, quick=is_linked, set_active=False)
         if block is not None:
             variables.update(block)
             configured.add(choice)

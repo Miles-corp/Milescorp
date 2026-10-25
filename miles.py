@@ -79,6 +79,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Assistant de configuration : enregistrer le fournisseur et sa clé API dans .env (saisie masquée, aucun affichage de secret)",
     )
+    parser.add_argument(
+        "--link",
+        metavar="PROVIDER",
+        default=None,
+        help="Lier un compte OAuth (ex. google) pour réduire les étapes de configuration (flux authorization code, serveur de rappel local)",
+    )
     return parser
 
 
@@ -179,6 +185,14 @@ def main(argv: list[str] | None = None) -> int:
         from app.config.setup import run_setup
 
         return run_setup(
+            env_path=os.environ.get("MILES_ENV_FILE", ".env"),
+        )
+
+    if args.link is not None:
+        from app.config.oauth import link_account
+
+        return link_account(
+            args.link,
             env_path=os.environ.get("MILES_ENV_FILE", ".env"),
         )
 
