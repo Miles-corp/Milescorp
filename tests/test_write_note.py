@@ -145,6 +145,12 @@ class TestWriteNoteBoundaries(unittest.TestCase):
         result = self._run(f"data/notes/{_unique_name()}", "   ")
         self.assertFalse(result.success)
 
+    def test_content_over_limit_refused(self) -> None:
+        # P3 audit B : contenu borné à 4000 caractères.
+        too_long = "a" * 4001
+        result = self._run(f"data/notes/{_unique_name()}", too_long)
+        self.assertFalse(result.success)
+
     def test_bad_extension_refused(self) -> None:
         result = self._run("data/notes/mauvais.exe", "contenu")
         self.assertFalse(result.success)

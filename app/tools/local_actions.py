@@ -55,6 +55,13 @@ _SENSITIVE_NAMES = frozenset(
         ".git-credentials",
         "credentials",
         "secrets",
+        "secret",
+        "password",
+        "passwd",
+        "token",
+        "api_key",
+        "apikey",
+        "private_key",
     }
 )
 
