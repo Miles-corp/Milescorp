@@ -978,9 +978,20 @@ class TestPilotMission(unittest.TestCase):
         self.assertTrue(mission.facts)
 
     def test_chemin_hors_perimetre_refuse(self) -> None:
-        """19. Un dossier hors racines autorisées est refusé."""
+        """19. Un dossier hors racines autorisées est refusé.
+
+        La cible doit être RÉELLEMENT hors des racines autorisées quelle
+        que soit la plateforme : sous Linux « C:/Windows/System32 » est un
+        chemin relatif IN-PROJET (diagnostic WSL 2026-10-25) et l'état
+        AWAITING_AUTHORIZATION y est légitime, non un refus.
+        """
         runner, _, _ = _build_runner()
-        mission = runner.create("Analyse C:/Windows/System32")
+        if os.name == "nt":
+            cible = "C:/Windows/System32"
+        else:
+            cible = tempfile.mkdtemp(prefix="hors-perimetre-")
+            self.addCleanup(shutil.rmtree, cible, True)
+        mission = runner.create(f"Analyse {cible}")
         mission = runner.run(mission.mission_id)
         self.assertIn(
             mission.state, (MissionState.FAILED, MissionState.NEEDS_CLARIFICATION)

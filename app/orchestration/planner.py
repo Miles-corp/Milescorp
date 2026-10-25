@@ -165,17 +165,20 @@ def _word_continues_path(word: str, token: str) -> bool:
 
     Un mot qui contient lui-même un séparateur prolonge le chemin
     (« C:\\Program Files\\MonDossier »). Un mot capitalisé le prolonge
-    également quand le chemin est un chemin Windows absolu, car les noms de
-    dossiers Windows contiennent souvent des espaces (« C:\\Users\\Jean\\Mes
-    Documents ») ; cette seconde règle est volontairement limitée aux chemins
-    Windows pour ne pas avaler la prose qui suit un chemin POSIX.
+    également quand le chemin est un chemin ABSOLU (Windows « C:\\… » ou
+    POSIX « /… »), car les noms de dossiers contiennent souvent des
+    espaces (« C:\\Users\\Jean\\Mes Documents », « /home/jean/Mes
+    Documents ») ; cette seconde règle est volontairement limitée aux
+    chemins absolus pour ne pas avaler la prose qui suit un chemin relatif.
 
-    Les chemins relatifs et POSIX ne sont jamais prolongés par un mot
-    capitalisé : « docs/ identifie son organisation » doit rester « docs/ ».
+    Les chemins relatifs ne sont jamais prolongés par un mot capitalisé :
+    « docs/ identifie son organisation » doit rester « docs/ ».
     """
     if "/" in word or "\\" in word:
         return True
-    if word[:1].isupper() and _WINDOWS_ABSOLUTE.match(token):
+    if word[:1].isupper() and (
+        _WINDOWS_ABSOLUTE.match(token) or token.startswith("/")
+    ):
         return True
     return False
 
@@ -284,7 +287,26 @@ def extract_target_path(objective: str) -> Optional[str]:
         # et l'orchestrateur demandera une clarification.
         if _DRIVE_ONLY.fullmatch(cleaned):
             continue
-        if cleaned not in distinct:
+        # Deduplication par prefixe (diagnostic WSL 2026-10-25, cas #6) :
+        # si un candidat est un prefixe strict d'un autre ("Dossier" et
+        # "Dossier Avec Espace"), on garde le plus long. Cela evite qu'un
+        # chemin tronque et le chemin complet soient comptes comme deux
+        # cibles distinctes, ce qui forcerait une clarification inutile.
+        replaced = False
+        for i, existing in enumerate(distinct):
+            if cleaned == existing:
+                replaced = True
+                break
+            if existing.startswith(cleaned + " ") or existing.startswith(cleaned + "/") or existing.startswith(cleaned + chr(92)):
+                # cleaned est un prefixe de existing : on garde existing.
+                replaced = True
+                break
+            if cleaned.startswith(existing + " ") or cleaned.startswith(existing + "/") or cleaned.startswith(existing + chr(92)):
+                # existing est un prefixe de cleaned : on le remplace.
+                distinct[i] = cleaned
+                replaced = True
+                break
+        if not replaced:
             distinct.append(cleaned)
 
     if len(distinct) == 1:
@@ -639,3 +661,4 @@ class ProviderPlanner:
             return json.loads(text[start : end + 1])
         except json.JSONDecodeError as exc:
             raise PlanRejected(f"JSON invalide : {exc.msg}") from exc
+

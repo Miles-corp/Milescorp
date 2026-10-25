@@ -305,9 +305,20 @@ class TestMissionAvecCheminWindows(unittest.TestCase):
         self.assertEqual(mission.target_path, cible)
 
     def test_mission_avec_chemin_windows_externe_echoue(self) -> None:
-        """7d. Un chemin Windows externe n'est jamais analysé."""
+        """7d. Un chemin Windows externe n'est jamais analysé.
+
+        Sous Linux, « C:/Windows/System32 » est un chemin relatif in-projet
+        (diagnostic WSL 2026-10-25) : la cible est adaptée à la plateforme
+        pour rester réellement EXTERNE sur chacune.
+        """
         runner, _ = _build_runner()
-        mission = runner.create("Analyse C:/Windows/System32 en lecture")
+        if os.name == "nt":
+            cible = "C:/Windows/System32 en lecture"
+        else:
+            externe = tempfile.mkdtemp(prefix="hors-perimetre-")
+            self.addCleanup(shutil.rmtree, externe, True)
+            cible = f"{externe} en lecture"
+        mission = runner.create(f"Analyse {cible}")
         mission = runner.run(mission.mission_id)
         self.assertIn(
             mission.state, (MissionState.FAILED, MissionState.NEEDS_CLARIFICATION)

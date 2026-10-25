@@ -48,25 +48,25 @@ from app.tools.grants import GrantRegistry
 from app.tools.registry import ToolDefinition, ToolParameter, ToolRegistry
 from app.tools.service import ToolService
 
-#: Variable d'environnement portant le fichier de comptage des appels.
-VAR_COMPTEUR = "MILES_TEST_COMPTEUR"
+#: Fichier de comptage des appels d'outils.
+#:
+#: Chemin DÉTERMINISTE, identique dans le parent et dans le processus
+#: enfant : le canal par variable d'environnement ne fonctionnait pas
+#: sous Linux (`forkserver`, env figée — diagnostic WSL 2026-10-25).
+COMPTEUR = os.path.join(tempfile.gettempdir(), "miles-test-compteur-trust.txt")
 
 
 def _noter_appel(nom: str) -> None:
     """Noter un appel d'outil (exécuté dans le processus enfant)."""
-    chemin = os.environ.get(VAR_COMPTEUR, "")
-    if not chemin:
-        return
-    with open(chemin, "a", encoding="utf-8") as fh:
+    with open(COMPTEUR, "a", encoding="utf-8") as fh:
         fh.write(nom + "\n")
 
 
 def _appels(nom: str) -> int:
     """Compter les appels d'un outil."""
-    chemin = os.environ.get(VAR_COMPTEUR, "")
-    if not chemin or not os.path.exists(chemin):
+    if not os.path.exists(COMPTEUR):
         return 0
-    with open(chemin, encoding="utf-8") as fh:
+    with open(COMPTEUR, encoding="utf-8") as fh:
         return sum(1 for ligne in fh if ligne.strip() == nom)
 
 
@@ -100,16 +100,15 @@ class _BaseFrontiere(unittest.TestCase):
         self._dossier = tempfile.mkdtemp(prefix="trust-")
         self.addCleanup(shutil.rmtree, self._dossier, True)
         self.chemin = os.path.join(self._dossier, "missions.db")
-        self._compteur = os.path.join(self._dossier, "appels.txt")
-        self._precedent = os.environ.get(VAR_COMPTEUR)
-        os.environ[VAR_COMPTEUR] = self._compteur
+        self._reinitialiser_le_compteur()
         self.store = MissionStore(enabled=True, db_path=self.chemin)
 
     def tearDown(self) -> None:
-        if self._precedent is None:
-            os.environ.pop(VAR_COMPTEUR, None)
-        else:
-            os.environ[VAR_COMPTEUR] = self._precedent
+        self._reinitialiser_le_compteur()
+
+    def _reinitialiser_le_compteur(self) -> None:
+        if os.path.exists(COMPTEUR):
+            os.remove(COMPTEUR)
 
     def _outil(self, tool_id: str = "outil_test", **kwargs: Any) -> ToolDefinition:
         """Construire un outil de test."""
