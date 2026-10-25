@@ -34,6 +34,8 @@ HELP_TEXT = """\nCommandes disponibles :
   /status      Afficher l'état du programme
   /remember    Enregistrer un souvenir explicite (usage: /remember <texte>)
   /memory      Lister les souvenirs persistants
+  /memory-search Rechercher un terme dans les souvenirs (usage: /memory-search <terme>)
+  /export      Exporter la conversation vers data/notes (usage: /export [nom.md])
   /forget      Supprimer un souvenir (usage: /forget <id>)
   /conversations Lister les conversations enregistrées
   /new         Démarrer une nouvelle conversation
@@ -298,6 +300,10 @@ class CLI:
             print("Souvenirs persistants :")
             for m in memories:
                 print(f"  [{m['id']}] {m['content']} (catégorie: {m['category']}, importance: {m['importance']})")
+        elif cmd == "/memory-search":
+            self._handle_memory_search_command(args)
+        elif cmd == "/export":
+            self._handle_export_command(args)
         elif cmd == "/forget":
             if self.memory is None or not self.memory.is_available:
                 print("Mémoire persistante indisponible ou désactivée.")
@@ -353,6 +359,81 @@ class CLI:
             if entry.error_message:
                 line += f"  — {entry.error_message}"
             print(line)
+
+    def _handle_memory_search_command(self, args: list[str]) -> None:
+        """Rechercher un terme (insensible à la casse) dans les souvenirs.
+
+        Lecture seule : aucun souvenir n'est modifié, aucun secret n'est
+        produit (le contenu affiché est celui déjà stocké par l'utilisateur).
+        """
+        if self.memory is None or not self.memory.is_available:
+            print("Mémoire persistante indisponible ou désactivée.")
+            return
+        if not args:
+            print("Usage : /memory-search <terme>")
+            return
+        term = " ".join(args).strip().lower()
+        matches = [
+            m
+            for m in self.memory.list_memories()
+            if term in str(m.get("content", "")).lower()
+        ]
+        if not matches:
+            print(f"Aucun souvenir ne contient « {' '.join(args).strip()} ».")
+            return
+        print(f"Souvenirs correspondants ({len(matches)}) :")
+        for m in matches:
+            print(
+                f"  [{m['id']}] {m['content']} "
+                f"(catégorie: {m['category']}, importance: {m['importance']})"
+            )
+
+    def _handle_export_command(self, args: list[str]) -> None:
+        """Exporter la conversation courante en markdown (S3 : écriture confirmée).
+
+        L'écriture réutilise les garanties de `action_write_note` :
+        confinement strict à `data/notes/`, extension `.md`, refus
+        d'écrasement, et **confirmation humaine obligatoire** — la
+        commande utilisateur ne suffit pas : une confirmation distincte
+        est exigée avant toute écriture sur disque.
+        """
+        if not self.conversation.get_context():
+            print("Aucune conversation à exporter.")
+            return
+        name = args[0] if args else f"export-{self.conversation.conversation_id or 'session'}.md"
+        if not name.lower().endswith(".md"):
+            name = name + ".md"
+        name = name.split("/")[-1].split("\\")[-1]
+        target = f"data/notes/{name}"
+
+        try:
+            answer = input(f"Exporter vers {target} ? (o/N) ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\nExport annulé.")
+            return
+        if answer not in ("o", "oui", "y", "yes"):
+            print("Export annulé.")
+            return
+
+        lines = [f"# Conversation {self.conversation.conversation_id or '(éphémère)'}", ""]
+        for message in self.conversation.get_context():
+            role = message.get("role", "?")
+            content = sanitize_text(message.get("content", ""))
+            lines.append(f"## {role}")
+            lines.append("")
+            lines.append(content)
+            lines.append("")
+        try:
+            from app.tools.local_actions import write_note_handler
+
+            result = write_note_handler(target, "\n".join(lines))
+        except (PermissionError, ValueError) as exc:
+            print(f"Export refusé : {exc}")
+            return
+        if "error" in result:
+            print(f"Export impossible : {result['error']}")
+            return
+        print(f"Conversation exportée vers {result['written']} ({result['bytes']} octets).")
 
     def _handle_tools_command(self) -> None:
         """Lister les outils disponibles (catalogue, sans exécution)."""
