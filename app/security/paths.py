@@ -50,6 +50,14 @@ def canonical_path(
     jonctions, et normalise les segments ``..``.
     """
     raw = os.fspath(path)
+    # Sur une plateforme non-Windows, un chemin de type "C:/..." est un
+    # chemin Windows absolu : il ne doit JAMAIS etre resolu comme un chemin
+    # relatif sous la racine du projet (contournement de confinement --
+    # diagnostic Agent B 2026-10-25). On le refuse explicitement.
+    if os.name != "nt" and len(raw) >= 3 and raw[1:3] in (":/", ":\\"):
+        raise PathSecurityError(
+            "Chemin Windows absolu refuse sur cette plateforme : " + repr(raw)
+        )
     if not os.path.isabs(raw):
         raw = os.path.join(os.fspath(base if base is not None else project_root()), raw)
     return Path(os.path.realpath(os.path.abspath(raw)))
