@@ -27,6 +27,7 @@ les preuves dans `docs/reports/` et `docs/coordination/STATUS.md`/`HANDOFF.md`.
 | MI-010 | E2 — Étude fournisseur local (RTX 3050 4 Go) | TESTED-conclusion (rapport `LOCAL_PROVIDER_FEASIBILITY_STUDY.md` `79f8552`) — SANS AUDIT ; décision utilisateur attendue (llama.cpp vs Ollama) | Moyenne | Agent A + utilisateur | Décision moteur local, puis test de connectivité réel | `docs/reports/LOCAL_PROVIDER_FEASIBILITY_STUDY.md` |
 | MI-011 | E3 (audit interne + correctif S-E3-04 fail-closed `6d8f42c`), E4 démarrage/arrêt web, P3 `POST /logout` | TESTED (E4 vérifié en réel : 200 OK, écoute 127.0.0.1, jeton affiché, arrêt propre ; logout `d0ed840`, 741 tests OK/4 ignorés) — SANS AUDIT INDÉPENDANT | Moyenne | Agent A | Revue B opportuniste ; test d'accès externe (refus attendu) si VM dispo | `docs/reports/E4_WEB_STARTUP_CHECK_AGENT_A.md` |
 | MI-012 | S3 — Première action d'écriture confirmée `action_write_note` | TESTED (`a802715` : confinée à `data/notes/`, anti-écrasement, confirmation humaine MEDIUM + permission `ecriture_note`, 8 tests ; 5 gardes anti-régression mises à jour volontairement ; suite **749 OK/4 ignorés**) — SANS AUDIT INDÉPENDANT | Haute | Agent A | Revue B (zone permissions d'écriture) ; élargissement du périmètre d'écriture interdit sans décision humaine | `app/tools/local_actions.py` (handler), `tests/test_write_note.py` |
+| MI-016 | P3 audit B memoire - clear_all_memories et get_context_memories filtrent par owner_user_id (isolation) | TESTED (`bb82341 : 20 tests OK, suite 772 OK/4 ignores) - SANS AUDIT | Moyenne | Agent A | Revue B | app/memory/persistent.py |
 | MI-015 | Correction securite paths.py - refus chemins Windows absolus (C:/...) sur Linux (diagnostic Agent B) + test | TESTED (cce7243 : 761 OK Linux+Windows) - SANS AUDIT | Moyenne | Agent A | Revue B | app/security/paths.py |
 | MI-014 | Portabilite Linux/WSL - compteur deterministe (forkserver-safe), chemins externes adaptes, extraction POSIX avec espaces, dedup par prefixe | TESTED (`03e6948 : 761 tests OK sous Linux et Windows, 0 echec) - SANS AUDIT | Moyenne | Agent A | Verification Debian 13 (MI-006) pour confirmer forkserver sur Debian | app/orchestration/planner.py, tests concernes |
 | MI-013 | Premieres fonctions d'assistant : `/memory-search` + `/export` conversation | TESTED (`3357de3` : recherche mémoire en lecture seule ; export markdown confiné `data/notes/` avec confirmation, réutilisant S3 ; 9 tests, suite **761 OK/4 ignorés**) — SANS AUDIT INDÉPENDANT | Moyenne | Agent A | Suite logique : exports enrichis, résumés (dès qu'un fournisseur IA réel sera autorisé) | `tests/test_cli_assistant_functions.py` |
@@ -39,6 +40,7 @@ les preuves dans `docs/reports/` et `docs/coordination/STATUS.md`/`HANDOFF.md`.
 | (vide — aucune mission clôturée depuis la création du registre) | | | | |
 
 Index détaillé : `archive/INDEX.md`.
+
 
 
 
