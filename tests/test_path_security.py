@@ -87,6 +87,30 @@ class TestAllowedRoots(unittest.TestCase):
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
+    def test_chemin_windows_absolu_refuse_sur_non_windows(self) -> None:
+        """Sur Linux, un chemin Windows absolu (C:/...) est refusé.
+
+        Diagnostic Agent B 2026-10-25 : le correctif initial (cce7243)
+        était contournable par espacement. Le renforcement utilise une
+        regex sur la chaîne strippée.
+        """
+        import os
+        if os.name == "nt":
+            self.skipTest("Test spécifique aux plateformes non-Windows")
+        from app.security.paths import PathSecurityError, resolve_authorized_path
+        for variante in (
+            "C:/Windows/System32",
+            " C:/Windows/System32",
+            "\tC:/Windows/System32",
+            "C: /Windows/System32",
+            "C :/Windows/System32",
+            "D:/data",
+            "Z:\\secret",
+        ):
+            with self.subTest(variante=repr(variante)):
+                with self.assertRaises(PathSecurityError):
+                    resolve_authorized_path(variante.strip() if False else variante)
+
     def test_traversee_ou_dossier_refusee(self) -> None:
         """Une traversée '..' sortant de la racine est refusée."""
         traversal = os.path.join(str(project_root()), "..", "..", "etc")

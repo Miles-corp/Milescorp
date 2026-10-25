@@ -54,10 +54,17 @@ def canonical_path(
     # chemin Windows absolu : il ne doit JAMAIS etre resolu comme un chemin
     # relatif sous la racine du projet (contournement de confinement --
     # diagnostic Agent B 2026-10-25). On le refuse explicitement.
-    if os.name != "nt" and len(raw) >= 3 and raw[1:3] in (":/", ":\\"):
-        raise PathSecurityError(
-            "Chemin Windows absolu refuse sur cette plateforme : " + repr(raw)
-        )
+    # La recherche utilise une regex pour couvrir les contournements par
+    # espacement (espace/tab avant le chemin, espace avant le slash ou
+    # les deux-points) identifies par l'audit B.
+    if os.name != "nt":
+        import re as _re
+        # Couvrir aussi les contournements par espacement identifies par
+        # l'audit B : " C:/...", "\tC:/...", "C: /...", "C :/...".
+        if _re.search(r"[A-Za-z]\s*:\s*[\\/]", raw.strip()):
+            raise PathSecurityError(
+                "Chemin Windows absolu refuse sur cette plateforme : " + repr(raw)
+            )
     if not os.path.isabs(raw):
         raw = os.path.join(os.fspath(base if base is not None else project_root()), raw)
     return Path(os.path.realpath(os.path.abspath(raw)))
