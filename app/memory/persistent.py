@@ -360,8 +360,15 @@ class PersistentMemory:
             self._conn.commit()
             return cursor.rowcount > 0
 
-    def clear_all_memories(self) -> int:
-        """Effacer tous les souvenirs. Retourner le nombre supprimé."""
+    def clear_all_memories(self, owner_user_id: str | None = None) -> int:
+        """Effacer les souvenirs. Retourner le nombre supprimé.
+
+        Args:
+            owner_user_id: si fourni, seuls les souvenirs de cet
+                utilisateur sont effacés (les souvenirs partagés — sans
+                propriétaire — ne sont pas touchés). Sans filtre, tous
+                les souvenirs sont effacés (comportement historique).
+        """
         if not self.is_available:
             raise PersistentMemoryError(
                 "Mémoire persistante indisponible ou désactivée."
@@ -370,19 +377,34 @@ class PersistentMemory:
         with self._lock:
             assert self._conn is not None
             cursor = self._conn.cursor()
-            cursor.execute("DELETE FROM memories")
+            if owner_user_id is None:
+                cursor.execute("DELETE FROM memories")
+            else:
+                cursor.execute(
+                    "DELETE FROM memories WHERE owner_user_id = ?",
+                    (str(owner_user_id),),
+                )
             self._conn.commit()
             return cursor.rowcount
 
-    def get_context_memories(self) -> list[dict[str, Any]]:
+    def get_context_memories(
+        self, owner_user_id: str | None = None
+    ) -> list[dict[str, Any]]:
         """Retourner les souvenirs les plus pertinents pour le contexte IA.
 
         Respecte max_memories_in_context et max_content_length.
+
+        Args:
+            owner_user_id: si fourni, seuls les souvenirs de cet
+                utilisateur (et les partagés) sont retournés — isolation
+                entre utilisateurs en contexte IA.
         """
         if not self.is_available:
             return []
 
-        memories = self.list_memories(limit=self.max_memories_in_context)
+        memories = self.list_memories(
+            limit=self.max_memories_in_context, owner_user_id=owner_user_id
+        )
         # Tronquer le contenu si nécessaire
         for m in memories:
             if len(m.get("content", "")) > self.max_content_length:

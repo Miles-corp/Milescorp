@@ -112,6 +112,37 @@ class TestPersistentMemory(unittest.TestCase):
         self.assertEqual(len(mem.list_memories()), 0)
         mem.close()
 
+    def test_clear_all_memories_filtre_par_owner(self) -> None:
+        # S-E3-04 (audit B) : clear_all avec owner ne touche que les
+        # souvenirs de cet utilisateur.
+        mem = self._make_memory()
+        mem.add_memory("A", category="a", owner_user_id="alice")
+        mem.add_memory("B", category="b", owner_user_id="bob")
+        mem.add_memory("C", category="c")  # partagé
+        count = mem.clear_all_memories(owner_user_id="alice")
+        self.assertEqual(count, 1)
+        restants = mem.list_memories()
+        self.assertEqual(len(restants), 2)
+        # Le souvenir partagé et celui de bob survivent.
+        contents = {m["content"] for m in restants}
+        self.assertIn("B", contents)
+        self.assertIn("C", contents)
+        self.assertNotIn("A", contents)
+        mem.close()
+
+    def test_get_context_memories_filtre_par_owner(self) -> None:
+        # S-E3-04 (audit B) : get_context_memories respecte l'isolation.
+        mem = self._make_memory()
+        mem.add_memory("info d'alice", category="a", owner_user_id="alice")
+        mem.add_memory("info de bob", category="b", owner_user_id="bob")
+        mem.add_memory("info partagée", category="c")
+        ctx = mem.get_context_memories(owner_user_id="alice")
+        contents = {m["content"] for m in ctx}
+        self.assertIn("info d'alice", contents)
+        self.assertIn("info partagée", contents)
+        self.assertNotIn("info de bob", contents)
+        mem.close()
+
     def test_list_memories_by_category(self) -> None:
         mem = self._make_memory()
         mem.add_memory("Travail 1", category="travail")
