@@ -343,7 +343,7 @@ python3 -m unittest discover -s tests -v
 | `ModuleNotFoundError: app` | Mauvaise exécution depuis un autre répertoire | Lancer depuis la racine du dépôt |
 | `SettingsError: Fournisseur inconnu` | `MILES_PROVIDER` incorrect | Valeur attendue : `remote` ou `local` |
 | `VoiceUnavailableError` | Dépendances vocales absentes | Installer `pyttsx3` et `speech-recognition` ou désactiver la voix |
-| Erreur de connexion fournisseur | Endpoint non joignable | Vérifier `MILES_REMOTE_BASE_URL` ou `MILES_LOCAL_BASE_URL` |
+| Erreur de connexion fournisseur | Endpoint non joignable | Aucun serveur IA inclus dans MILES. Configurez MILES_REMOTE_BASE_URL vers un fournisseur externe (Groq, OpenAI) ou utilisez MILES_PROVIDER=local avec Ollama. |
 
 ## 9. Répertoire des logs et données
 
