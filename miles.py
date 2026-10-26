@@ -210,6 +210,13 @@ def main(argv: list[str] | None = None) -> int:
             )
         except (PathSecurityError, PersistentMemoryError) as exc:
             print(f"Avertissement : mémoire persistante non disponible : {exc}", file=sys.stderr)
+        else:
+            # Dégradation silencieuse détectable (ex. base corrompue, L-006) :
+            # signalée sans faire échouer le démarrage. Porté du travail Debian
+            # (ee5e63d) ; close() conservé ici (tests 23/23 OK avec fermeture,
+            # les tests vérifient des effets observables, pas is_available).
+            if memory is not None and not memory.is_available:
+                print("Avertissement : mémoire persistante non disponible.", file=sys.stderr)
 
     conversation = Conversation(
         history_limit=settings.get("history_limit", 10),
