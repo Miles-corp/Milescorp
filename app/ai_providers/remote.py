@@ -64,7 +64,7 @@ class RemoteProvider(AIProvider):
         de texte. Retourne False si le service est injoignable ou si la cle est
         invalide.
         """
-        headers = {"Accept": "application/json"}
+        headers = {"Accept": "application/json", "User-Agent": "MILES/1.0 (Python urllib)"}
         if self._api_key:
             headers["Authorization"] = "Bearer " + self._api_key
         try:
@@ -90,6 +90,7 @@ class RemoteProvider(AIProvider):
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
+            "User-Agent": "MILES/1.0 (Python urllib)",
         }
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"

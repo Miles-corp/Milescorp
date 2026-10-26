@@ -222,5 +222,112 @@ class TestRemoteProviderXaiCompatibility(unittest.TestCase):
             self.assertFalse(provider.is_available())
 
 
+
+    def test_is_reachable_true(self) -> None:
+        """is_reachable retourne True si la connexion TCP reussit."""
+        provider = RemoteProvider(
+            base_url="https://api.x.ai/v1",
+            model="grok-4.7",
+        )
+        with mock.patch("socket.create_connection") as mock_conn:
+            mock_conn.return_value.__enter__ = mock.MagicMock()
+            mock_conn.return_value.__exit__ = mock.MagicMock(return_value=False)
+            self.assertTrue(provider.is_reachable())
+
+    def test_is_reachable_false_on_error(self) -> None:
+        """is_reachable retourne False si la connexion echoue."""
+        provider = RemoteProvider(
+            base_url="https://api.x.ai/v1",
+            model="grok-4.7",
+        )
+        with mock.patch("socket.create_connection", side_effect=OSError("refused")):
+            self.assertFalse(provider.is_reachable())
+
+    def test_is_available_calls_v1_models(self) -> None:
+        """is_available appelle GET /v1/models (pas /health)."""
+        mock_resp = mock.MagicMock()
+        mock_resp.status = 200
+        mock_resp.__enter__ = mock.MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = mock.MagicMock(return_value=False)
+        provider = RemoteProvider(
+            base_url="https://api.x.ai/v1",
+            model="grok-4.7",
+            api_key="test-key",
+        )
+        with mock.patch("urllib.request.urlopen", return_value=mock_resp) as mock_urlopen:
+            self.assertTrue(provider.is_available())
+            req = mock_urlopen.call_args[0][0]
+            self.assertEqual(req.full_url, "https://api.x.ai/v1/models")
+
+    def test_is_available_false_on_401(self) -> None:
+        """is_available retourne False si la cle est invalide (401)."""
+        import urllib.error
+        provider = RemoteProvider(
+            base_url="https://api.x.ai/v1",
+            model="grok-4.7",
+            api_key="bad-key",
+        )
+        http_error = urllib.error.HTTPError(
+            url="https://api.x.ai/v1/models",
+            code=401,
+            msg="Unauthorized",
+            hdrs={},
+            fp=io.BytesIO(b'{"error": "invalid api key"}'),
+        )
+        with mock.patch("urllib.request.urlopen", side_effect=http_error):
+            self.assertFalse(provider.is_available())
+
+
+
+    def test_user_agent_header_sent(self) -> None:
+        """Le User-Agent MILES est envoye pour eviter le blocage Cloudflare 1010."""
+        provider = RemoteProvider(
+            base_url="https://api.groq.com/openai/v1",
+            model="llama-3.3-70b-versatile",
+            api_key="test-key",
+        )
+        mock_resp = self._make_response()
+        with mock.patch("urllib.request.urlopen", return_value=mock_resp) as mock_urlopen:
+            provider.chat([{"role": "user", "content": "hello"}])
+            req = mock_urlopen.call_args[0][0]
+            self.assertEqual(req.get_header("User-agent"), "MILES/1.0 (Python urllib)")
+
+    def test_user_agent_in_is_available(self) -> None:
+        """Le User-Agent est aussi envoye lors de la verification de disponibilite."""
+        mock_resp = mock.MagicMock()
+        mock_resp.status = 200
+        mock_resp.__enter__ = mock.MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = mock.MagicMock(return_value=False)
+        provider = RemoteProvider(
+            base_url="https://api.groq.com/openai/v1",
+            model="llama-3.3-70b-versatile",
+            api_key="test-key",
+        )
+        with mock.patch("urllib.request.urlopen", return_value=mock_resp) as mock_urlopen:
+            provider.is_available()
+            req = mock_urlopen.call_args[0][0]
+            self.assertEqual(req.get_header("User-agent"), "MILES/1.0 (Python urllib)")
+
+    def test_cloudflare_403_handled(self) -> None:
+        """Une erreur 403 Cloudflare est correctement transformee en AIProviderError."""
+        import urllib.error
+        provider = RemoteProvider(
+            base_url="https://api.groq.com/openai/v1",
+            model="llama-3.3-70b-versatile",
+            api_key="test-key",
+        )
+        http_error = urllib.error.HTTPError(
+            url="https://api.groq.com/openai/v1/chat/completions",
+            code=403,
+            msg="Forbidden",
+            hdrs={},
+            fp=io.BytesIO(b'{"error": {"message": "Cloudflare Error 1010"}}'),
+        )
+        with mock.patch("urllib.request.urlopen", side_effect=http_error):
+            with self.assertRaises(AIProviderError) as ctx:
+                provider.chat([{"role": "user", "content": "hello"}])
+            self.assertIn("403", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
