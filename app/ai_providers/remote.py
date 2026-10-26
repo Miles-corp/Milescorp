@@ -33,18 +33,49 @@ class RemoteProvider(AIProvider):
     @property
     def name(self) -> str:
         return self._name
+    def is_reachable(self) -> bool:
+        """Verifier la connectivite reseau vers l'hote (sans authentification).
+
+        Teste uniquement l'ouverture d'une connexion TCP vers l'hote et le port
+        de l'URL de base. Aucune requete HTTP n'est envoyee et aucune cle API
+        n'est transmise.
+        """
+        import socket
+        import urllib.parse
+
+        parsed = urllib.parse.urlparse(self._base_url)
+        host = parsed.hostname
+        port = parsed.port
+        if port is None:
+            port = 443 if parsed.scheme == "https" else 80
+        if not host:
+            return False
+        try:
+            with socket.create_connection((host, port), timeout=min(self._timeout, 5)):
+                return True
+        except (OSError, socket.timeout, socket.gaierror):
+            return False
 
     def is_available(self) -> bool:
-        """Vérifier rapidement si l'endpoint répond (HEAD/GET léger)."""
+        """Verifier la disponibilite authentifiee du fournisseur.
+
+        Appelle GET /v1/models avec la cle API (si presente). Cette route est
+        documentee par OpenAI, Groq et xAI. Elle ne declenche aucune generation
+        de texte. Retourne False si le service est injoignable ou si la cle est
+        invalide.
+        """
+        headers = {"Accept": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = "Bearer " + self._api_key
         try:
             req = urllib.request.Request(
-                f"{self._base_url}/health",
+                self._base_url + "/v1/models",
                 method="GET",
-                headers={"Accept": "application/json"},
+                headers=headers,
             )
             with urllib.request.urlopen(req, timeout=min(self._timeout, 5)) as resp:
                 return resp.status < 400
-        except Exception:  # noqa: BLE001 — toute erreur d'indisponibilité
+        except Exception:
             return False
 
     def chat(self, messages: list[dict[str, str]]) -> str:
