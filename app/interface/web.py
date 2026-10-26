@@ -885,6 +885,8 @@ class MilesHandler(BaseHTTPRequestHandler):
             self._handle_message(data)
         elif path == "/logout":
             self._handle_logout(session)
+        elif path == "/configure":
+            self._handle_configure(data, session)
         elif path == "/remember":
             self._handle_remember(data, session)
         elif path == "/forget":
@@ -915,6 +917,69 @@ class MilesHandler(BaseHTTPRequestHandler):
         if self.app is not None and self.app.authenticator is not None:
             revoked = self.app.authenticator.revoke(session.session_id)
         self._send_json(200, {"revoked": bool(revoked)})
+
+    def _handle_configure(self, data: dict[str, Any], session: WebSession) -> None:
+        """POST /configure : connexion rapide d'un fournisseur IA (S6 web).
+
+        Route sensible (niveau 4, SANS AUDIT INDÉPENDANT à ce stade) :
+        - session + jeton CSRF exigés (flux identique aux autres POST) ;
+        - fournisseur limité à la liste blanche `app.config.setup.PROVIDERS` ;
+        - clé refusée si vide ou si elle contient des caractères dangereux ;
+        - écriture ATOMIQUE via `write_env` dans le `.env` local
+          (`MILES_ENV_FILE` ou `.env` du répertoire serveur) ;
+        - la clé n'est **jamais** retournée, journalisée ni affichée.
+
+        Limite honnête (réponse `restart_required`): le fournisseur est
+        instancié au démarrage : un redémarrage de `miles.py` est requis
+        pour activer la nouvelle clé.
+        """
+        from app.config.setup import PROVIDERS as SETUP_PROVIDERS, write_env
+
+        provider = str(data.get("provider", "")).strip().lower()
+        api_key = str(data.get("api_key", ""))
+        model = str(data.get("model", "") or "").strip()
+
+        if provider not in SETUP_PROVIDERS:
+            self._send_json(400, {
+                "error": "Fournisseur inconnu.",
+                "choix": sorted(SETUP_PROVIDERS),
+            })
+            return
+        if not api_key or len(api_key) > 512 or any(
+            ch in api_key for ch in ("\"", "'", "\\", "\n", "\r")
+        ):
+            self._send_json(400, {"error": "Cle API invalide (vide ou caracteres interdits)."})
+            return
+
+        base_url, default_model = SETUP_PROVIDERS[provider]
+        model = model or default_model
+        env_path = os.environ.get("MILES_ENV_FILE", ".env")
+        variables = {
+            "MILES_PROVIDER": "remote",
+            "MILES_REMOTE_BASE_URL": base_url,
+            "MILES_REMOTE_MODEL": model,
+            "MILES_REMOTE_API_KEY": api_key,
+            f"MILES_API_KEY_{provider.upper()}": api_key,
+        }
+        existing = ""
+        try:
+            if os.path.isfile(env_path):
+                with open(env_path, "r", encoding="utf-8") as fh:
+                    existing = fh.read()
+            write_env(env_path, variables, existing)
+        except OSError:
+            logger.error("Ecriture .env impossible (chemin : %s).", env_path)
+            self._send_json(500, {"error": "Ecriture de la configuration impossible."})
+            return
+        self._send_json(200, {
+            "ok": True,
+            "provider": provider,
+            "model": model,
+            "base_url": base_url,
+            "restart_required": True,
+            "message": ("Configuration enregistree dans .env. Redemarrez miles.py "
+                        "pour activer ce fournisseur (aucune cle n'est renvoyee)."),
+        })
 
     def _serve_index(self) -> None:
         html_content = self._build_index_html()
