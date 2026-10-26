@@ -151,6 +151,18 @@ class TestWriteNoteBoundaries(unittest.TestCase):
         result = self._run(f"data/notes/{_unique_name()}", too_long)
         self.assertFalse(result.success)
 
+    def test_sensitive_stem_refused(self) -> None:
+        # MI-017 audit B : le stem (nom sans extension) est vérifié —
+        # "secret.md" doit être refusé malgré son extension valide.
+        from app.tools.local_actions import is_sensitive_filename
+        self.assertTrue(is_sensitive_filename("secret.md"))
+        self.assertTrue(is_sensitive_filename("token.txt"))
+        self.assertTrue(is_sensitive_filename("password.md"))
+        self.assertFalse(is_sensitive_filename("mon-script.md"))
+        result = self._run("data/notes/secret.md", "contenu bénin")
+        self.assertFalse(result.success)
+        self.assertFalse(os.path.exists(os.path.join(NOTES_DIR, "secret.md")))
+
     def test_bad_extension_refused(self) -> None:
         result = self._run("data/notes/mauvais.exe", "contenu")
         self.assertFalse(result.success)

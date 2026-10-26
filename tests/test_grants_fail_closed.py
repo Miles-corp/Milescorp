@@ -35,6 +35,14 @@ class TestGrantFailClosed(unittest.TestCase):
         )
         self.assertIsNone(grant_id)
 
+    def test_none_context_is_refused(self) -> None:
+        """S-E3-04b (audit B) : sans contexte de mission, aucun grant."""
+        registry = self._registry_with_grant()
+        grant_id = registry.authorize(
+            "action_list_files", {}, None, "session-legitime"
+        )
+        self.assertIsNone(grant_id)
+
     def test_legitimate_actor_still_works(self) -> None:
         registry = self._registry_with_grant()
         grant_id = registry.authorize(

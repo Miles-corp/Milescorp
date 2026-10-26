@@ -106,9 +106,14 @@ def is_sensitive_filename(name: str) -> bool:
     """Indiquer si un nom de fichier correspond à un fichier sensible.
 
     Un fichier sensible n'est jamais lu : ni son contenu, ni un aperçu.
+    Vérifie le nom complet ET le stem (nom sans extension) : les notes
+    ont toutes une extension (.md/.txt), les noms sensibles (secret,
+    token, password…) doivent donc être détectés aussi sur le stem
+    (audit B MI-017 : `secret.md` passait autrement le filtre).
     """
     lowered = name.lower()
-    if lowered in _SENSITIVE_NAMES:
+    stem = os.path.splitext(lowered)[0]
+    if lowered in _SENSITIVE_NAMES or stem in _SENSITIVE_NAMES:
         return True
     if any(lowered.endswith(suffix) for suffix in _SENSITIVE_SUFFIXES):
         return True

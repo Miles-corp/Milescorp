@@ -268,11 +268,14 @@ class GrantRegistry:
         Returns:
             L'identifiant du grant, ou None si aucun grant ne convient.
         """
-        # S-E3-04 (audit interne E3) : fail-closed — sans identifiant
-        # d'acteur démontré, aucun grant ne peut être retourné. Le contrat
+        # S-E3-04 / S-E3-04b (audit interne E3 + audit B 2026-10-25) :
+        # fail-closed complet — sans identifiant d'acteur ET sans contexte
+        # de mission démontrés, aucun grant ne peut être retourné. Le contrat
         # `GrantChecker` accepte `Optional[str]`, mais l'absence de preuve
         # d'appartenance ne doit jamais valoir autorisation.
         if not actor_id:
+            return None
+        if context_id is None:
             return None
         now = float(self._clock())
         with self._lock:
@@ -284,9 +287,9 @@ class GrantRegistry:
                     continue
                 if not grant.covers_tool(tool_id):
                     continue
-                if actor_id is not None and grant.session_id != actor_id:
+                if grant.session_id != actor_id:
                     continue
-                if context_id is not None and grant.mission_id != context_id:
+                if grant.mission_id != context_id:
                     continue
                 path = parameters.get("path")
                 if isinstance(path, str) and path:
