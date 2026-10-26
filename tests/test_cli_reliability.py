@@ -8,7 +8,9 @@ Ces tests vérifient que :
 
 from __future__ import annotations
 
+import io
 import unittest
+from unittest import mock
 
 from app.ai_providers.base import AIProvider, AIProviderError
 from app.core.conversation import Conversation
@@ -81,6 +83,60 @@ class TestCLIProviderError(unittest.TestCase):
             self.cli._handle_command("/status")
         except Exception as exc:
             self.fail(f"/status a levé une exception : {exc}")
+
+
+
+
+class TestCLIInputEncoding(unittest.TestCase):
+    """Tests de lecture de l'entree standard (encodage UTF-8)."""
+
+    def setUp(self) -> None:
+        self.settings = Settings()
+        self.cli = CLI(settings=self.settings)
+
+    def test_read_input_normal(self) -> None:
+        """Lecture normale de 'hello'."""
+        with mock.patch("sys.stdin", io.BytesIO(b"hello\n")):
+            result = self.cli._read_input()
+        self.assertEqual(result, "hello")
+
+    def test_read_input_french_accents(self) -> None:
+        """Lecture d'un texte francais avec accents."""
+        text = "Bonjour, ?a fonctionne ? No?l."
+        with mock.patch("sys.stdin", io.BytesIO(text.encode("utf-8") + b"\n")):
+            result = self.cli._read_input()
+        self.assertEqual(result, text)
+
+    def test_read_input_unicode(self) -> None:
+        """Lecture de caracteres Unicode valides."""
+        text = "H?llo 🌍 caf?"
+        with mock.patch("sys.stdin", io.BytesIO(text.encode("utf-8") + b"\n")):
+            result = self.cli._read_input()
+        self.assertEqual(result, text)
+
+    def test_read_input_eof(self) -> None:
+        """Comportement en fin de fichier (EOF)."""
+        with mock.patch("sys.stdin", io.BytesIO(b"")):
+            with self.assertRaises(EOFError):
+                self.cli._read_input()
+
+    def test_read_input_encoding_error(self) -> None:
+        """Gestion controlee d'une erreur d'encodage simulee."""
+        with mock.patch("sys.stdin", io.BytesIO(b"hell\xc3\n")):
+            result = self.cli._read_input()
+        self.assertIsInstance(result, str)
+
+    def test_process_input_help(self) -> None:
+        """La commande /help fonctionne."""
+        out = io.StringIO()
+        with mock.patch("sys.stdout", out):
+            self.cli._process_input("/help")
+        self.assertIn("Commandes disponibles", out.getvalue())
+
+    def test_process_input_quit(self) -> None:
+        """La commande /quit arrete la boucle."""
+        self.cli._process_input("/quit")
+        self.assertFalse(self.cli._running)
 
 
 if __name__ == "__main__":

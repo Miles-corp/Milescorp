@@ -121,13 +121,62 @@ class CLI:
         print("Tapez /help pour l'aide, /quit pour sortir.")
         print("=" * 50)
 
-    def _read_input(self) -> str:
+    def _read_input(self, prompt: str = "\n> ") -> str:
+        """Lire une ligne depuis l'entree standard.
+
+        La lecture se fait en mode binaire pour controler explicitement le
+        decodage UTF-8 et eviter le crash UnicodeDecodeError du TextIOWrapper
+        par defaut lorsque le terminal envoie des octets non conformes.
+        """
+        print(prompt, end="", flush=True)
+
+        # Source de lecture : buffer binaire si disponible, sinon le flux tel quel.
+        if hasattr(sys.stdin, "buffer"):
+            stream = sys.stdin.buffer
+        else:
+            stream = sys.stdin
+
         try:
-            return input("\n> ")
-        except EOFError:
+            raw = stream.readline()
+        except (EOFError, KeyboardInterrupt):
             raise
-        except KeyboardInterrupt:
-            raise
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"\nErreur de lecture de l'entree : {exc}",
+                file=sys.stderr,
+            )
+            raise EOFError
+
+        # Fin de fichier (EOF) : aucune donnee lue.
+        if not raw:
+            raise EOFError
+
+        # Decoder en UTF-8 avec surrogateescape pour preserver tous les octets
+        # sans crasher. Les surrogates sont detectes et signales.
+        if isinstance(raw, bytes):
+            text = raw.decode("utf-8", errors="surrogateescape")
+        elif isinstance(raw, str):
+            text = raw
+        else:
+            text = str(raw)
+
+        # Detecter les caracteres de remplacement (surrogates) et avertir.
+        has_invalid = any("\udc80" <= c <= "\udcff" for c in text)
+        if has_invalid:
+            print(
+                "\nAvertissement : entree contenant des octets non valides en UTF-8. "
+                "Verifiez la locale du terminal (attendu UTF-8, "
+                "ex. : export LANG=C.UTF-8).",
+                file=sys.stderr,
+            )
+
+        # Supprimer le saut de ligne final (comportement de input()).
+        if text.endswith("\n"):
+            text = text[:-1]
+        if text.endswith("\r"):
+            text = text[:-1]
+
+        return text
 
     def _process_input(self, text: str) -> None:
         if text.startswith("/"):
@@ -336,7 +385,7 @@ class CLI:
             token = result.confirmation_token
             print(f"Confirmation humaine requise pour l'outil '{tool_id}'.")
             try:
-                answer = input("Confirmer ? (o/N) ").strip().lower()
+                answer = self._read_input("Confirmer ? (o/N) ").strip().lower()
             except (EOFError, KeyboardInterrupt):
                 print("\nAction annulée.")
                 return
@@ -418,7 +467,7 @@ class CLI:
             print()
             print(pending.question)
             try:
-                answer = input("> ").strip()
+                answer = self._read_input("> ").strip()
             except (EOFError, KeyboardInterrupt):
                 print("\nMission laissée en attente.")
                 return

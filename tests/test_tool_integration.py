@@ -129,6 +129,17 @@ class _WebFixture:
 # 1, 2 : découverte, registre vide, outil inconnu
 # ---------------------------------------------------------------------------
 
+class _AlwaysInput(io.StringIO):
+    """Flux d'entree qui renvoie toujours la meme valeur."""
+
+    def __init__(self, value: str) -> None:
+        super().__init__()
+        self._value = value + "\n"
+
+    def readline(self) -> str:
+        return self._value
+
+
 class TestToolDiscovery(unittest.TestCase):
     """1. Découverte des outils enregistrés."""
 
@@ -273,7 +284,7 @@ class TestToolAuthorization(unittest.TestCase):
         cli = CLI(settings=Settings(), tool_service=ToolService())
         out = io.StringIO()
         with redirect_stdout(out):
-            with mock.patch("builtins.input", return_value="o"):
+            with mock.patch("sys.stdin", _AlwaysInput("o")):
                 cli._handle_tool_command(["action_list_files", "path=data"])
         self.assertIn("Confirmation humaine requise", out.getvalue())
         self.assertIn("[Outil exécuté] action_list_files", out.getvalue())
@@ -282,7 +293,7 @@ class TestToolAuthorization(unittest.TestCase):
         cli = CLI(settings=Settings(), tool_service=ToolService())
         out = io.StringIO()
         with redirect_stdout(out):
-            with mock.patch("builtins.input", return_value="n"):
+            with mock.patch("sys.stdin", _AlwaysInput("n")):
                 cli._handle_tool_command(["action_list_files", "path=data"])
         self.assertIn("Action annulée", out.getvalue())
         self.assertNotIn("[Outil exécuté]", out.getvalue())

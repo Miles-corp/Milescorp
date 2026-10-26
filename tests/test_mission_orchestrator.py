@@ -1290,6 +1290,17 @@ def _registry_with(tools) -> ToolRegistry:
 # 17. Intégration CLI
 # ---------------------------------------------------------------------------
 
+class _AlwaysInput(io.StringIO):
+    """Flux d'entree qui renvoie toujours la meme valeur."""
+
+    def __init__(self, value: str) -> None:
+        super().__init__()
+        self._value = value + "\n"
+
+    def readline(self) -> str:
+        return self._value
+
+
 class TestCliIntegration(unittest.TestCase):
     """17. Intégration CLI."""
 
@@ -1298,7 +1309,7 @@ class TestCliIntegration(unittest.TestCase):
         cli = CLI(settings=Settings(), mission_runner=runner)
         out = io.StringIO()
         with redirect_stdout(out):
-            with mock.patch("builtins.input", return_value="o"):
+            with mock.patch("sys.stdin", _AlwaysInput("o")):
                 cli._handle_mission_command(
                     ["Analyse", "le", "dossier", "docs/"]
                 )
@@ -1311,7 +1322,7 @@ class TestCliIntegration(unittest.TestCase):
         cli = CLI(settings=Settings(), mission_runner=runner)
         out = io.StringIO()
         with redirect_stdout(out):
-            with mock.patch("builtins.input", return_value="n"):
+            with mock.patch("sys.stdin", _AlwaysInput("n")):
                 cli._handle_mission_command(["Analyse", "le", "dossier", "docs/"])
         contenu = out.getvalue()
         self.assertIn("Autoriser l'accès en lecture", contenu)

@@ -86,7 +86,8 @@ class RemoteProvider(AIProvider):
             ) from exc
         except urllib.error.URLError as exc:
             raise AIProviderError(
-                f"Impossible de joindre le fournisseur distant ({self._base_url}): {exc}"
+                f"Impossible de joindre le fournisseur distant ({self._base_url}): {exc}. "
+                f"Verifiez MILES_REMOTE_BASE_URL ou utilisez MILES_PROVIDER=local avec un serveur Ollama."
             ) from exc
         except Exception as exc:  # noqa: BLE001
             raise AIProviderError(

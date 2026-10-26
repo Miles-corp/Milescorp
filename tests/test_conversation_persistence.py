@@ -545,15 +545,18 @@ class TestRuntimeV1(unittest.TestCase):
     def test_fermeture_propre_sur_fin_de_saisie(self) -> None:
         buffer = io.StringIO()
         with mock.patch("sys.stdout", buffer):
-            with mock.patch("builtins.input", side_effect=EOFError):
+            with mock.patch("sys.stdin", io.BytesIO(b"")):
                 exit_code = miles.main(["--no-persist"])
         self.assertEqual(exit_code, 0)
         self.assertIn("Fin de saisie", buffer.getvalue())
 
     def test_fermeture_propre_sur_ctrl_c(self) -> None:
+        class _KeyboardInterruptStdin(io.StringIO):
+            def readline(self):
+                raise KeyboardInterrupt
         buffer = io.StringIO()
         with mock.patch("sys.stdout", buffer):
-            with mock.patch("builtins.input", side_effect=KeyboardInterrupt):
+            with mock.patch("sys.stdin", _KeyboardInterruptStdin()):
                 exit_code = miles.main(["--no-persist"])
         self.assertEqual(exit_code, 0)
 
@@ -561,7 +564,7 @@ class TestRuntimeV1(unittest.TestCase):
         """--no-persist n'active pas la persistance de conversation."""
         buffer = io.StringIO()
         with mock.patch("sys.stdout", buffer):
-            with mock.patch("builtins.input", side_effect=EOFError):
+            with mock.patch("sys.stdin", io.BytesIO(b"")):
                 miles.main(["--no-persist"])
         self.assertNotIn("Conversation enregistrée sous", buffer.getvalue())
 

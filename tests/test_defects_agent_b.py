@@ -132,7 +132,7 @@ class TestDB1UnknownConversationId(_TranscriptFixture):
             out, err = io.StringIO(), io.StringIO()
             with mock.patch.dict(os.environ, env):
                 with redirect_stdout(out), redirect_stderr(err):
-                    with mock.patch("builtins.input", side_effect=EOFError):
+                    with mock.patch("sys.stdin", io.BytesIO(b"")):
                         miles.main(["--conversation", "inconnu-123"])
             # Le message d'avertissement est sur stderr et cite l'identifiant
             self.assertIn("introuvable", err.getvalue())
@@ -156,7 +156,7 @@ class TestDB1UnknownConversationId(_TranscriptFixture):
         try:
             with mock.patch.dict(os.environ, env):
                 with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-                    with mock.patch("builtins.input", side_effect=EOFError):
+                    with mock.patch("sys.stdin", io.BytesIO(b"")):
                         miles.main(["--conversation", "inconnu-456"])
             # La conversation créée est visible et sans message orphelin
             transcript = ConversationTranscript(enabled=True, db_path=db_path)
@@ -239,7 +239,7 @@ class TestDB4MemoryClose(unittest.TestCase):
         with mock.patch("miles.CLI") as mock_cli:
             mock_cli.return_value.run.return_value = None
             with redirect_stdout(io.StringIO()):
-                with mock.patch("builtins.input", side_effect=EOFError):
+                with mock.patch("sys.stdin", io.BytesIO(b"")):
                     miles.main(["--no-persist"])
 
         memory = mock_cli.call_args.kwargs["memory"]
@@ -267,7 +267,7 @@ class TestDB4MemoryClose(unittest.TestCase):
                 with mock.patch("miles.CLI") as mock_cli:
                     mock_cli.return_value.run.return_value = None
                     with redirect_stdout(io.StringIO()):
-                        with mock.patch("builtins.input", side_effect=EOFError):
+                        with mock.patch("sys.stdin", io.BytesIO(b"")):
                             miles.main([])
 
         transcript.close.assert_called()
@@ -406,7 +406,7 @@ class TestRisquesConfirmes(unittest.TestCase):
         err = io.StringIO()
         with mock.patch.dict(os.environ, env):
             with redirect_stderr(err):
-                with mock.patch("builtins.input", side_effect=EOFError):
+                with mock.patch("sys.stdin", io.BytesIO(b"")):
                     miles.main([])
         self.assertIn("racines autoris", err.getvalue())
         self.assertFalse(os.path.exists(hors_racines))
