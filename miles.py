@@ -210,6 +210,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         except (PathSecurityError, PersistentMemoryError) as exc:
             print(f"Avertissement : mémoire persistante non disponible : {exc}", file=sys.stderr)
+        else:
+            if memory is not None and not memory.is_available:
+                print("Avertissement : mémoire persistante non disponible.", file=sys.stderr)
 
     conversation = Conversation(
         history_limit=settings.get("history_limit", 10),
