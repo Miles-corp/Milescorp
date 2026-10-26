@@ -325,8 +325,6 @@ def main(argv: list[str] | None = None) -> int:
         # Libération des ressources dans tous les cas (sortie normale,
         # exception, interruption). La mémoire est fermée après la
         # conversation : elle n'est plus utilisée à ce stade.
-        if memory is not None:
-            memory.close()
         if transcript is not None:
             transcript.close()
         if mission_store is not None:
