@@ -1,41 +1,37 @@
 # docs/coordination/STATUS.md — État du projet MILES
 
-## État général (2026-10-19)
+## État instantané (2026-10-27, Agent A)
 
-- **Projet** : MILES — dépôt GitHub privé `https://github.com/Miles-corp/Milescorp.git`
-- **Branche** : `main` (à jour avec `origin/main`, working tree propre)
-- **Contenu actuel** : `.gitattributes` (initial), documents de coordination (Mission 001, commit c71d3af), prototype DEV-001 (commit 416dc2e), correction Agent B (commit 153bb16), fiabilisation Agent B (commit e156a24), audit Agent A (commit a63609f), MILESTONE-005 (commit 5c63332), MILESTONE-006 (commit fe5a017), Phase 2 fournisseur distant + web + .env (commit 0ad3a41). Code fonctionnel : interface terminal, fournisseurs IA hybride distant connecté, contexte conversationnel, actions locales, tests, configuration, utilitaire GPU, mémoire persistante SQLite, interface web http.server.
-- **Mission en cours** : Mission 001 — terminée. Prototype DEV-001 — créé et publié (Agent A). Fiabilisation TASK-DEV-004 — terminée (Agent B, 38 tests OK). Audit final TASK-DEV-003 — terminé (Agent A, rapport AUDIT-TASK-DEV-003). MILESTONE-005 — terminé (Agent A, commit 5c63332). MILESTONE-006 — terminé (Agent A, commit fe5a017). Phase 2 — fournisseur distant connecté, interface web http.server, chargement .env, tests simulés (terminé, commit 0ad3a41, 95 tests OK sur Windows). Phase 3B validation fonctionnelle — terminée (Agent B, commit de ce rapport).
+- **Référence du code** : `integration/miles-post-d1` (05b7b82) — 201 fichiers suivis, 60 fichiers de tests, **847 tests exécutés : 845 OK, 2 échecs environnementaux, 5 ignorés**. Les 2 échecs viennent du fichier `.env` local copié sur ce poste, qui écrase les valeurs par défaut attendues par `tests/test_status_provider_diagnostics.py` ; sans `.env`, les 14 tests du module passent. Aucune régression de code.
+- **`main` (b9b7e7d)** : encore à la Phase 4, **69 commits de retard** sur l'intégration, 146 tests OK. Ce n'est plus la vérité du code ; le réalignement est demandé (voir `docs/reports/REPO_TRIAGE_AGENT_A.md`).
+- **Branches** : 29 branches distantes hors `main` — **22 déjà fusionnées** dans l'intégration, **7 non fusionnées** (correctifs et rapports d'audit à préserver) ; **2 branches locales n'existent sur aucun remote** (`feature/miles-memoire-avancee`, `feature/miles-multi-provider`) et portent du travail unique. **Aucune suppression sans liste préalable et accord explicite.**
+- **Worktrees** : **16 enregistrés, dont 14 sous `%TEMP%`** (travaux D1, D2, D3, audits) ; deux sont sales (`miles-diag` : un rapport non suivi ; `miles-merge` : travail multi-fournisseurs non commité). Inventaire complet dans le rapport de tri.
+- **Coordination remise à la vérité (DEC-013)** : identifiants de tâche désormais uniques (`TASK-DEV-040`, `041`, `042` issus de doublons), `M-004` dupliqué renuméroté `M-017` (`M-010` n'a jamais existé), ligne Phase 3B réparée (colonne Description manquante).
+- **Tâches** : **30 DONE · 15 TODO · 1 IN_PROGRESS** (détail dans `TASKS.md`).
 
 ## Prochain objectif
 
-- Poursuivre TASK-002 à TASK-004 (revue indépendante de l'organisation par Agent B).
-- Proposition technique fournisseur local hors ligne (TASK-DEV-007) : moteur et modèle adaptés à RTX 3050 4 Go, sans Ollama, sans téléchargement sans accord (Agent A).
-- Tests réels sur le fournisseur distant (uniquement après accord utilisateur pour coût API).
-- Validation sur Debian 13 des tests Phase 3B (test_env_loading, test_web, test_provider_selection) : à faire sur la VM.
+- **Phase 7 — cockpit web de contrôle du projet** (`TASK-DEV-043`, Agent A) : **terminée** le 2026-10-27 (31 tests dédiés, audit design du Lab 100/100, vérification navigateur réelle). Rapport `docs/reports/PHASE_7_COCKPIT_AGENT_A.md`. Branche `feat/miles-cockpit-ui`, aucune fusion.
+- **Audits Agent B en attente de décision** : `TASK-DEV-019`, `021`, `024`, `027`, `030`, `032`, `034`, `037`, `039`, `041`.
+- **Tri Git** : liste de suppression (branches fusionnées + worktrees temporaires) à valider avant exécution.
+- **Réalignement de `main`** sur l'intégration : opération locale d'abord, aucun push sans accord (DEC-004).
 
-## Tâches actives
+## Tâches actives (extrait)
 
 | ID | Titre | Statut | Assigné à |
 |----|-------|--------|-----------|
-| TASK-001 | Mise en place de la structure de coordination | DONE | Agent A |
-| TASK-002 | Revue indépendante de l'organisation | TODO | Agent B |
-| TASK-003 | Vérification des consignes et tests documentés | TODO | Agent B |
-| TASK-004 | Détection des oublis et des ambiguïtés | TODO | Agent B |
-| TASK-DEV-001 | Premier prototype fonctionnel MILES | DONE | Agent A |
-| TASK-DEV-002 | Revue indépendante des tests et vérification | TODO | Agent B |
-| TASK-DEV-003 | Consolidation du prototype et validation sur Debian 13 | DONE | Agent B |
-| TASK-DEV-004 | Fiabilisation du prototype (Mission 004B) | DONE | Agent B |
-| TASK-DEV-005 | MILESTONE-005 : Assistant personnel hybride distant/local | DONE | Agent A |
-| TASK-DEV-006 | MILESTONE-006 : Mémoire persistante locale | DONE | Agent A |
+| TASK-DEV-043 | Phase 7 : cockpit web de controle du projet | DONE | Agent A |
+| TASK-DEV-019 | Audit independant de la correction D1 (Phase 6.3b) | TODO | Agent B |
+| TASK-DEV-041 | Audit independant du correctif memoire (D-MEM-01) | TODO | Agent B |
+| TASK-DEV-039 | Audit independant de la Mission P1 | TODO | Agent B |
 | TASK-DEV-007 | MILESTONE-007 : Fournisseur local hors ligne (RTX 3050) | TODO | Agent A |
-| TASK-DEV-009 | MILES V1 : Persistance de conversation + fournisseur distant connecté | DONE | Agent A |
-| TASK-DEV-010 | Corrections des défauts D-B1 à D-B5 (audit Agent B) | DONE | Agent A |
-| TASK-DEV-011 | Documentation R3 (INSTALL.md) et erreurs fournisseur R6 | DONE | Agent A |
-| TASK-DEV-012 | Correctif D-C1 (detection symlink) et documentation D-C2 | DONE | Agent A |
-| TASK-DEV-008 | Phase 4 : Moteur d'outils sécurisé | DONE | Agent A |
-| TASK-DEV-008 | Phase 3B : validation fonctionnelle (terminal, web, mémoire) | DONE | Agent B |
-| TASK-DEV-013 | Phase 5 : intégration du moteur d'outils dans le CLI et l'interface web | DONE | Agent A |
+| TASK-002 a TASK-004 | Revue independante de l'organisation | TODO | Agent B |
+
+## Blocages
+
+- Aucun blocage technique.
+- Limite assumée : la validation sur Debian 13 reste non faite sur ce poste (VM d'audit injoignable les 2026-10-21 et 2026-10-24).
+- Limite assumée : les 2 échecs de tests sont dus au fichier `.env` du poste, pas au code ; ils sont documentés et reproductibles.
 
 ## Phase 6.3b — Correction D1 : autorisation des missions web (Agent A, 2026-10-21)
 
@@ -221,3 +217,12 @@ Aucun blocage à ce jour.
 - **Tests** : `tests/test_answer_authorization_invariant.py` (8 tests d'invariant) : aucun mot d'approbation par `/answer` n'approuve, l'API interne n'approuve pas, `/authorize` sans jeton valide n'approuve pas, le jeton d'une autre mission / d'une autre session / d'un autre utilisateur est refuse, avec un jeton valide l'action est approuvee puis executee (grant unique lie a la session et a la mission), le jeton ne sert qu'une fois. **9 tests echouent sans le correctif** ; 655 tests OK (4 ignores) ; 70 tests d'audit Agent B OK (2 ignores). Verification HTTP reelle : 403 sur tous les mots d'approbation, mission terminee par `/authorize` avec le jeton.
 - **Limite** : les tests d'observation (`test_investigation_d1ter_answer_path.py`) sont mis a jour pour refléter le nouveau comportement ; ils ne contournent pas la protection.
 - **En attente** : audit independant d'Agent B (TASK-DEV-039). Les audits en cours ne sont pas consideres comme approuves. Aucune fusion.
+## Phase 7 — Cockpit web de contrôle du projet (Agent A, 2026-10-27)
+
+- **Rapport** : `docs/reports/PHASE_7_COCKPIT_AGENT_A.md` — **Tâche** : `TASK-DEV-043` (DONE).
+- **Branche** : `feat/miles-cockpit-ui`, créée depuis `origin/integration/miles-post-d1` (`05b7b82`). **Aucune fusion, aucun push.**
+- **Livré** : cockpit de pilotage dans l'interface web existante — lecture de `TASKS.md`, `STATUS.md`, `DECISIONS.md` et `MESSAGES.md` (module `app/interface/project_board.py`, stdlib), routes `GET /api/project`, `GET /api/tasks`, `POST /api/tasks/<id>/status`, HTML/CSS/JS sortis du `f-string` vers `assets/web/`.
+- **Écriture contrôlée** : un seul fichier modifiable (`TASKS.md`), transitions bornées (`TODO`/`IN_PROGRESS`/`BLOCKED` → `DONE`/`CANCELLED`), propriétaire vérifié (règle anti-conflit), écriture atomique, refus explicite si la ligne est ambiguë, journal d'audit JSONL hors Git (`data/project_board_audit.jsonl`).
+- **Tests** : 31 tests dédiés (`tests/test_web_project_board.py`), suite complète **845/847** (les 2 échecs sont les tests `test_status_provider_diagnostics` faussés par le `.env` du poste, sans rapport avec le changement), 5 ignorés de plateforme.
+- **Design** : audit `competences/web-design/AUDIT.py` du Lab sur copie de travail (`Lab/workspaces/miles-cockpit/`) — **100/100** ; vérification navigateur réelle sur `127.0.0.1:8099` (session, CSRF, 46 tâches, un seul `h1`, colonne terminée repliée).
+- **Limites** : l'identité « Agent A / Agent B » est déclarée par l'utilisateur dans l'interface, pas authentifiée par le serveur (aucune correspondance compte ↔ agent n'existe) ; la réouverture d'une tâche `DONE` reste manuelle ; aucun test sous Debian 13.
