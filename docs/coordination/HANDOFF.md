@@ -206,3 +206,19 @@ Procédure à suivre par chaque agent à la fin de sa session de travail, afin q
 **Preuves reproductibles :** `/answer` avec `o`, `oui`, `yes`, `ok`, `autorise` → HTTP 403 `authorization_requires_token` ; mission terminée par `/authorize` avec le jeton valide → 200, `completed` ; aucune étape sensible exécutée sans autorisation valide.
 **Problèmes restants :** les tests d'observation (`test_investigation_d1ter_answer_path.py`) sont mis à jour pour refléter le nouveau comportement ; ils ne contournent pas la protection.
 **Prochaine action recommandée :** Agent B prend TASK-DEV-039 (audit de la branche) ; ne pas fusionner avant cet audit ; si Agent B demande un changement de contrat (exiger le jeton sur `/answer`), c'est un choix d'API à trancher séparément.
+
+
+---
+
+## H-013 — Miles Companion intégré au dépôt, télémétrie réelle du poste
+
+**Date :** 2026-10-27
+**De :** Agent A
+**Vers :** Agent B (revue indépendante, `TASK-DEV-044`)
+**Tâche :** `TASK-DEV-044` (revue) ; suite de `TASK-DEV-043` (cockpit).
+**Travail réalisé :** l'application « Miles Companion » a été copiée dans le dépôt sous `app/interface/companion/`, détachée de Readdy (ressources locales, routes propres, filigrane et analytics neutralisés), servie sur `127.0.0.1:8787` avec relais des routes de l'agent vers MILES. La page « Boîtier » n'affiche plus aucune valeur fabriquée : `GET /api/device` renvoie des mesures réelles du poste (hôte, cœurs, disque, pid, durée du processus, fournisseur, latence loopback mesurée, mémoire) et déclare `available: false` avec une raison pour les capteurs absents ; le pont remplace les tuiles de démonstration et n'allume l'indicateur d'état que si MILES a réellement répondu. Les images relatives du bundle sont servies depuis `/assets/img` (plus aucun 404 local).
+**Fichiers modifiés :** `app/interface/device_telemetry.py` (nouveau), `app/interface/web.py` (route `/api/device`), `app/interface/companion/miles-bridge.js`, `app/interface/companion/projet.html`, `app/interface/companion/assets/index-DSIZJMQZ.js`, `tests/test_web_device.py` (nouveau), `docs/coordination/{DECISIONS,MESSAGES,STATUS,HANDOFF,MEMORY-BUFFY,TASKS}.md`.
+**Commits :** `b8cb2c8` sur `integration/miles-post-d1` (fusion `f53b03d`). **Aucun push.**
+**Tests exécutés :** `tests/test_web.py` + `tests/test_web_project_board.py` + `tests/test_web_device.py` -> **56 OK**. Essai réel : `POST /api/tasks/TASK-DEV-007/status` (via l'interface) -> `TODO -> IN_PROGRESS`, une seule ligne modifiée, entrée horodatée dans `data/project_board_audit.jsonl`, puis restauration manuelle du document. Vérification navigateur réelle sur `127.0.0.1:8787` : toutes les ressources en 200, aucune requête sortante, mesures stables sur 7 s (aucun flottement entre valeur simulée et mesure). Audit du Lab : `AUDIT-TOUS.py` **vert** (49 fichiers) — portée : espace du Lab, **pas le dépôt MILES**.
+**Problèmes restants :** capteurs matériels de la Miles Box non exposés (déclarés indisponibles, jamais inventés) ; deux worktrees temporaires conservés car ils portent des modifications locales ; l'identité « Agent A / Agent B » reste déclarée par l'utilisateur, non authentifiée.
+**Prochaine action recommandée :** Agent B relit l'intégration et la télémétrie, et tranche sur la présentation des valeurs non mesurées (annotation explicite aujourd'hui).

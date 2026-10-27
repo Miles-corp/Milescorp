@@ -128,3 +128,17 @@ Convention : chaque décision reçoit un ID `DEC-###` (ou `D-###`), une date, un
 - **Consequences** : la tracabilite redevient verifiable, `STATUS.md` reflete l'etat reel, et le pilotage devient visible sans ouvrir les `.md` a la main. La suppression des branches et worktrees reste une action separee, listee et soumise a accord.
 - **Statut** : ACCEPTEE
 
+
+## DEC-014 — Miles Companion = façade unique, dépendances coupées, données du boîtier réelles
+
+- **Date** : 2026-10-27
+- **Auteur** : Agent A
+- **Statut** : ACCEPTEE (décision de l'utilisateur)
+- **Contexte** : deux interfaces coexistaient pour le même usage — le cockpit du dépôt (`assets/web`) et « Miles Companion », application React servie depuis le Lab, **hors dépôt**, chargeant ses polices, ses icônes, ses images et son analytics depuis des hôtes tiers (cdnjs, Google Fonts, `readdy.ai`, PostHog via jsDelivr), avec des liens vers un préfixe de prévisualisation Readdy. Sa page « Boîtier » affichait une charge, une batterie, des ventilateurs, un signal, une latence et une session fabriqués par le navigateur, sans aucun rapport avec la machine.
+- **Décision** :
+  1. **Miles Companion est la façade unique** : c'est l'interface à faire évoluer, servie par `app/interface/companion/server.py` sur `127.0.0.1:8787`, avec relais des routes de l'agent vers MILES (`127.0.0.1:8080`).
+  2. Son code est **versionné dans le dépôt** (`app/interface/companion/`) : plus aucun code d'interface hors Git. La vidéo d'initialisation est conservée et servie localement.
+  3. **Aucune ressource distante** : polices, icônes et images sont locales ; le filigrane et l'analytics tiers sont neutralisés ; les routes sont propres (plus de préfixe de prévisualisation).
+  4. **Aucune donnée inventée** sur la page Boîtier : les valeurs de démonstration sont remplacées par des mesures réelles (hôte, cœurs logiques, disque, pid, durée du processus, fournisseur, latence loopback **mesurée**) ou par un « non mesuré » explicite pour les capteurs qui n'existent pas (température, batterie, ventilateurs, signal radio). L'indicateur d'état ne s'allume que si MILES a réellement répondu.
+  5. Sur liste préalable et accord explicite de l'utilisateur : suppression des branches distantes **fusionnées** (21) et des worktrees **temporaires propres** (11). Les deux worktrees portant des modifications locales sont **conservés**.
+- **Conséquences** : plus aucune requête ne sort du poste ; l'interface ne peut plus affirmer une mesure qu'elle n'a pas ; le pilotage projet reste assuré par la page « Projet » adossée aux documents de coordination. `main` n'est pas réalignée (aucun push sans accord, DEC-004).

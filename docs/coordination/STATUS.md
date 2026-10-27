@@ -226,3 +226,13 @@ Aucun blocage à ce jour.
 - **Tests** : 31 tests dédiés (`tests/test_web_project_board.py`), suite complète **845/847** (les 2 échecs sont les tests `test_status_provider_diagnostics` faussés par le `.env` du poste, sans rapport avec le changement), 5 ignorés de plateforme.
 - **Design** : audit `competences/web-design/AUDIT.py` du Lab sur copie de travail (`Lab/workspaces/miles-cockpit/`) — **100/100** ; vérification navigateur réelle sur `127.0.0.1:8099` (session, CSRF, 46 tâches, un seul `h1`, colonne terminée repliée).
 - **Limites** : l'identité « Agent A / Agent B » est déclarée par l'utilisateur dans l'interface, pas authentifiée par le serveur (aucune correspondance compte ↔ agent n'existe) ; la réouverture d'une tâche `DONE` reste manuelle ; aucun test sous Debian 13.
+
+## Phase 8 — Façade unique « Miles Companion » et données réelles du boîtier (Agent A, 2026-10-27)
+
+- **Décision** : `DEC-014` (Miles Companion = façade unique, dépendances coupées, aucune donnée inventée).
+- **Branche** : `integration/miles-post-d1`, commit `b8cb2c8` (fusion `f53b03d`). **Aucun push.**
+- **Livré** : application Companion versionnée dans `app/interface/companion/`, servie sur `127.0.0.1:8787` (relais vers MILES sur `127.0.0.1:8080`) — polices, icônes, images et vidéo locales, filigrane et analytics tiers neutralisés, routes propres. Page « Projet » adossée aux documents de coordination (46 tâches, blocages, décisions, messages dépliables). Page « Boîtier » : mesures réelles (`GET /api/device`) — hôte, cœurs, disque, pid, durée du processus, fournisseur, latence loopback mesurée — et « non mesuré » explicite pour les capteurs absents ; l'indicateur ne s'allume que si MILES a répondu.
+- **Tests** : 56 OK (`test_web`, `test_web_project_board`, `test_web_device`). Écriture réelle vérifiée par l'interface (`TASK-DEV-007` `TODO → IN_PROGRESS`, une ligne, audit JSONL, puis restauration). Navigateur réel : aucun 404, aucune requête sortante, valeurs stables.
+- **Nettoyage Git** (sur accord explicite) : 11 worktrees temporaires propres supprimés, 21 branches distantes **fusionnées** supprimées ; 2 worktrees conservés (modifications locales : `miles-merge`, `miles-diag`).
+- **Audit du Lab** : `lab.ps1 exec "python3 /workspace/tools/AUDIT-TOUS.py"` -> **vert** (49 fichiers, seuil 85). Portée : espace du Lab, **pas le dépôt MILES**.
+- **En attente** : revue indépendante d'Agent B (`TASK-DEV-044`). Les autres audits en attente ne sont **pas** approuvés.

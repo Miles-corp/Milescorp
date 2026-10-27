@@ -51,3 +51,19 @@
 - Ne pas committer `.env`, `data/*.db`, ni les journaux d'audit.
 - `main` reste en retard tant que l'utilisateur n'a pas autorisé le réalignement.
 - Les audits Agent B en attente (TASK-DEV-019, 021, 024, 027, 030, 032, 034, 037, 039, 041) ne sont **pas** approuvés : ne pas les considérer comme validés.
+
+
+## 7. Session du 2026-10-27 (suite) — façade unique et télémétrie réelle
+
+**État** : `integration/miles-post-d1` = référence, commit `b8cb2c8` (fusion `f53b03d`). Serveurs relancés depuis le dépôt : MILES `127.0.0.1:8080`, Companion `127.0.0.1:8787` (le jeton d'accès s'affiche au démarrage de MILES).
+
+**Fait dans cette session**
+1. Miles Companion (React) copié dans le dépôt, détaché de Readdy : ressources locales, routes propres, filigrane et analytics neutralisés, vidéo d'initialisation conservée.
+2. Page « Boîtier » : plus aucune valeur fabriquée — `GET /api/device` (module `device_telemetry.py`, stdlib) renvoie des mesures réelles ou `available: false` + raison ; le pont remplace les tuiles de démonstration et n'allume l'indicateur que sur réponse réelle de MILES.
+3. Pièges rencontrés à retenir : (a) les libellés de l'app sont en minuscules dans le DOM (majuscules par CSS) ; (b) une session web MILES est liée au **User-Agent** — une session créée en ligne de commande est refusée dans le navigateur ; (c) remplacer le texte d'un élément animé sans marqueur relance la réparation d'`aria-label` et **bloque le fil principal** (boucle de micro-tâches) : toujours marquer l'élément (`data-mts-live`) et ne jamais ressusciter une valeur simulée.
+4. Nettoyage Git (sur accord) : 11 worktrees temporaires propres supprimés, 21 branches distantes fusionnées supprimées. Conservés : `miles-merge`, `miles-diag`.
+
+**Prochaine action**
+1. Attendre la revue d'Agent B (`TASK-DEV-044`).
+2. Ne rien pousser sans accord (DEC-004) ; `main` reste en retard sur l'intégration.
+3. Questions ouvertes posées à l'utilisateur : présentation des valeurs non mesurées, réalignement de `main`, sort des deux worktrees restants, périmètre du prochain lot.
