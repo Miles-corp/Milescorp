@@ -190,7 +190,7 @@ tests ; le catalogue et le rapport le précisent).
 | `tests/test_memory_persistence.py` | **nouveau** — 17 tests | +340 |
 | `docs/user_guide/MILES_PLAN_DE_TEST_PHASE_6.md` | catalogue (ligne 12) + section §4.11 | +30 |
 | `docs/reports/PHASE_6_4A_MEMORY_PERSISTENCE_AGENT_A.md` | **nouveau** — ce rapport | — |
-| `docs/coordination/*` | TASK-DEV-029, M-016, H-012 | — |
+| `docs/coordination/*` | TASK-DEV-040 (renommée depuis TASK-DEV-029 le 2026-10-27, DEC-013), M-016, H-012 | — |
 
 ---
 

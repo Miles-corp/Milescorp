@@ -113,3 +113,18 @@ Convention : chaque décision reçoit un ID `DEC-###` (ou `D-###`), une date, un
 - **Decision** : le budget est porte par la MISSION (`MissionBudget`), persiste en base, et n est jamais reinitialise (ni par une boucle, ni par une replanification, ni par une reponse, ni par une reprise). Il couvre : le temps d execution cumule (le temps d attente humaine n est pas consomme), le nombre d etapes, le nombre d appels d outils et le nombre d echanges avec l utilisateur. La detection de boucle devient globale. Chaque mission se termine avec un **motif d arret** explicite (`StopReason`), reporte dans le compte rendu et dans la charge utile web. Nouveaux reglages, coherents avec les valeurs existantes : `MILES_MISSION_MAX_TOOL_CALLS` (24 = 12 etapes x 2 tentatives) et `MILES_MISSION_MAX_INTERACTIONS` (5, valeur deja appliquee par le CLI, desormais appliquee par l orchestrateur donc aussi par le web).
 - **Consequences** : une mission ne peut plus depasser son budget, quel que soit le nombre de boucles ; le plafond d interactions s applique enfin au web ; le motif d arret rend l arret explicable sans analyser le rapport. La version 2 du schema de la base ajoute la colonne `budget_json` (migration additive). Les limites locales existantes (tentatives par etape) sont conservees.
 - **Statut** : ACCEPTEE
+
+## DEC-013 - Registre d'identifiants, tri du depot et cockpit web de controle du projet
+
+- **Date** : 2026-10-27
+- **Auteur** : Agent A
+- **Contexte** : trois identifiants de tache portaient deux taches differentes (`TASK-DEV-008`, `TASK-DEV-029`, `TASK-DEV-030`) ; la ligne Phase 3B du tableau `TASKS.md` avait perdu sa colonne Description ; l'identifiant `M-004` etait duplique et `M-010` n'a jamais existe ; `STATUS.md` decrivait encore l'etat du 2026-10-19 alors que le code allait jusqu'a la Phase 6.4. Par ailleurs `main` (b9b7e7d) est a 69 commits de la branche d'integration, seule verite du code.
+- **Decision** :
+  1. L'identifiant d'une tache est **immuable et unique** : un identifiant deja utilise n'est jamais reattribue. Un doublon est renumérote vers le prochain identifiant libre, avec la mention « renommee depuis TASK-... le 2026-10-27 » dans la ligne.
+  2. Renommages appliques : Phase 4 conserve `TASK-DEV-008` ; Phase 3B devient **TASK-DEV-042** (ex-`TASK-DEV-008`) ; memoire 6.4a devient **TASK-DEV-040** (ex-`TASK-DEV-029`) ; son audit devient **TASK-DEV-041** (ex-`TASK-DEV-030`) ; le `M-004` duplique devient **M-017**.
+  3. `integration/miles-post-d1` est la **reference du code**. `main` doit etre realisee dessus par une operation locale, sans push sans accord (DEC-004).
+  4. Un **cockpit web de controle du projet** est ajoute a l'interface existante (`TASK-DEV-043`) : lecture des documents de coordination, ecriture limitee aux statuts de `TASKS.md` avec garde-fous, HTML/CSS/JS sortis du f-string Python.
+  5. Aucune branche et aucun worktree n'est supprime sans liste prealable et accord explicite de l'utilisateur.
+- **Consequences** : la tracabilite redevient verifiable, `STATUS.md` reflete l'etat reel, et le pilotage devient visible sans ouvrir les `.md` a la main. La suppression des branches et worktrees reste une action separee, listee et soumise a accord.
+- **Statut** : ACCEPTEE
+

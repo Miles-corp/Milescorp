@@ -31,4 +31,5 @@ logs/*.log
 
 # Données utilisateur
 data/*.json
+data/*.jsonl
 data/*.db

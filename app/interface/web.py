@@ -17,6 +17,8 @@ import os
 import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import unquote
 from typing import Any, Iterable, Optional
 
 from app.ai_providers.base import AIProvider, AIProviderError
@@ -48,6 +50,7 @@ from app.interface.web_auth import (
     WebAuthenticator,
     WebSession,
 )
+from app.interface import project_board
 from app.utilities.redaction import REDACTED, sanitize_text
 
 logger = logging.getLogger("miles.web")
@@ -86,6 +89,22 @@ MAX_BODY_BYTES = 65536
 # Code de refus : la mission est encore en cours de traitement, l'action
 # demandée n'a pas été appliquée (le client peut réessayer).
 REASON_MISSION_BUSY = "mission_busy"
+
+#: Ressources statiques de l'interface (HTML, CSS, JS). Aucune donnee
+#: utilisateur : elles sont servies sans session, comme la coque de page.
+WEB_ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets" / "web"
+
+#: Types MIME des ressources publiques (liste blanche : aucun chemin ne
+#: provient de la requete, ce qui interdit toute traversee).
+PUBLIC_ASSETS = {
+    "app.css": "text/css; charset=utf-8",
+    "app.js": "text/javascript; charset=utf-8",
+}
+
+
+def _read_web_asset(name: str) -> str:
+    """Lire une ressource de ``assets/web`` (nom issu d'une liste blanche)."""
+    return (WEB_ASSETS_DIR / name).read_text(encoding="utf-8")
 
 
 class WebServerSecurityError(Exception):
@@ -157,6 +176,7 @@ class WebApp:
         session_id: Optional[str] = None,
         authenticator: Optional[WebAuthenticator] = None,
         allowed_origins: Optional[Iterable[str]] = None,
+        coordination_dir: Optional[str] = None,
     ) -> None:
         self.settings = settings
         self.provider = provider
@@ -183,6 +203,13 @@ class WebApp:
             raw = str(settings.get("web_allowed_origins", "") or "")
             origins = [o.strip() for o in raw.split(",") if o.strip()]
         self.origin_policy = OriginPolicy(origins)
+        # Repertoire des documents de coordination lus par le cockpit.
+        # Il est fixe ici : aucun chemin ne provient d'une requete HTTP.
+        self.coordination_dir = (
+            Path(coordination_dir).expanduser().resolve()
+            if coordination_dir
+            else None
+        )
         self._mission_threads: dict[str, threading.Thread] = {}
         self._mission_lock = threading.Lock()
 
@@ -707,6 +734,34 @@ class WebApp:
             return {"error": "Erreur interne du service."}
 
 
+    # --- Cockpit projet ---
+
+    def project_board(self) -> dict[str, Any]:
+        """Photographie du pilotage, completee par la sante du service.
+
+        La lecture est faite a chaque appel : le cockpit montre l'etat reel
+        des documents, jamais un cache. Les chemins viennent de
+        ``self.coordination_dir``, jamais du client.
+        """
+        board = project_board.build_board(self.coordination_dir)
+        board["health"] = {
+            "provider": self.provider_state(),
+            "memory": self.memory_state(),
+        }
+        return board
+
+    def update_task_status(
+        self, task_id: str, data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Deleguer l'ecriture controlee d'un statut (garde-fous du module)."""
+        return project_board.set_task_status(
+            task_id=task_id,
+            new_status=str(data.get("status", "")),
+            agent=str(data.get("agent", "")),
+            docs_dir=self.coordination_dir,
+        )
+
+
 class MilesHandler(BaseHTTPRequestHandler):
     """Gestionnaire des requêtes HTTP pour MILES."""
 
@@ -814,6 +869,14 @@ class MilesHandler(BaseHTTPRequestHandler):
             self._serve_index()
             return
 
+        # Ressources statiques : publiques (aucune donnee) et servies AVANT
+        # le controle de session, comme la coque de page. La cle est le nom
+        # du fichier, sans barre oblique.
+        asset_name = path.lstrip("/")
+        if asset_name in PUBLIC_ASSETS:
+            self._serve_asset(asset_name)
+            return
+
         session = self._require_session()
         if session is None:
             return
@@ -832,6 +895,10 @@ class MilesHandler(BaseHTTPRequestHandler):
             self._handle_list_missions(session)
         elif path.startswith("/mission/"):
             self._handle_mission_detail(path, session)
+        elif path == "/api/project":
+            self._handle_project_board()
+        elif path == "/api/tasks":
+            self._handle_project_tasks()
         else:
             self._send_json(404, {"error": "Not found", "path": path})
 
@@ -901,6 +968,8 @@ class MilesHandler(BaseHTTPRequestHandler):
             self._handle_mission_answer(path, data, session)
         elif re.match(r"^/mission/[^/]+/cancel$", path):
             self._handle_mission_cancel(path, session)
+        elif re.match(r"^/api/tasks/[^/]+/status$", path):
+            self._handle_task_status(path, data)
         else:
             self._send_json(404, {"error": "Not found", "path": path})
 
@@ -991,288 +1060,112 @@ class MilesHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _build_index_html(self) -> str:
-        provider_state = self.app.provider_state() if self.app else {}
-        memory_state = self.app.memory_state() if self.app else {}
+        """Charger la page d'accueil depuis ``assets/web/index.html``.
 
-        return f"""<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="utf-8">
-<title>MILES — Assistant personnel</title>
-<style>
-body {{ font-family: system-ui, -apple-system, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }}
-#chat {{ border: 1px solid #ccc; border-radius: 8px; padding: 1rem; height: 40vh; overflow-y: auto; background: #fafafa; margin-bottom: 1rem; }}
-.msg {{ margin: 0.5rem 0; padding: 0.5rem; border-radius: 6px; }}
-.user {{ background: #e3f2fd; }}
-.assistant {{ background: #e8f5e9; }}
-.error {{ background: #ffebee; color: #b71c1c; }}
-.system {{ background: #eeeeee; color: #666; font-size: 0.9rem; }}
-input[type="text"] {{ width: 70%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; }}
-button {{ padding: 0.5rem 1rem; border: none; background: #1976d2; color: white; border-radius: 4px; cursor: pointer; }}
-button:hover {{ background: #1565c0; }}
-button.secondary {{ background: #757575; }}
-button.secondary:hover {{ background: #616161; }}
-.status {{ margin: 1rem 0; padding: 0.5rem; background: #f5f5f5; border-radius: 4px; font-size: 0.9rem; }}
-.memories {{ margin: 1rem 0; }}
-.memories ul {{ list-style: none; padding: 0; }}
-.memories li {{ margin: 0.25rem 0; padding: 0.25rem; background: #f5f5f5; border-radius: 4px; }}
-.tools {{ margin: 1rem 0; }}
-.tools ul {{ list-style: none; padding: 0; }}
-.tools li {{ margin: 0.35rem 0; padding: 0.35rem; background: #f5f5f5; border-radius: 4px; font-size: 0.9rem; }}
-.tools code {{ background: #e0e0e0; padding: 0 0.25rem; border-radius: 3px; }}
-.tools input[type="text"] {{ width: auto; padding: 0.25rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem; }}
-.login {{ margin: 1rem 0; padding: 1rem; background: #fff8e1; border: 1px solid #ffe082; border-radius: 6px; }}
-.login input[type="password"] {{ width: 60%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; }}
-</style>
-</head>
-<body>
-<h1>MILES — Assistant personnel</h1>
+        Le HTML, le CSS et le JavaScript sont sortis du code Python : le
+        serveur ne fait plus que servir et router. Les donnees (statut,
+        memoire, pilotage) sont chargees par le client apres authentification.
+        """
+        return _read_web_asset("index.html")
 
-<div id="login" class="login">
-<strong>Connexion requise</strong>
-<p>L'interface web exige un jeton d'accès. Saisissez le jeton affiché au démarrage du serveur MILES.</p>
-<form id="loginForm" onsubmit="return login(event)">
-<input type="password" id="token" placeholder="Jeton d'accès" autocomplete="off">
-<button type="submit">Se connecter</button>
-</form>
-<div id="loginError" class="msg error" style="display:none"></div>
-</div>
+    def _serve_asset(self, name: str) -> None:
+        """Servir une ressource publique de ``assets/web``.
 
-<div id="app" style="display:none">
-<div class="status">
-<strong>Fournisseur :</strong> {self._html_escape(str(provider_state.get('name', '—')))}<br>
-<strong>Disponible :</strong> {'oui' if provider_state.get('available') else 'non'}<br>
-<strong>Mémoire :</strong> {'activée' if memory_state.get('available') else 'désactivée/indisponible'}
-</div>
+        ``name`` appartient toujours a ``PUBLIC_ASSETS`` : aucun chemin
+        construit a partir de la requete n'atteint le disque.
+        """
+        content_type = PUBLIC_ASSETS.get(name)
+        if content_type is None:
+            self._send_json(404, {"error": "Ressource inconnue", "path": name})
+            return
+        try:
+            payload = (WEB_ASSETS_DIR / name).read_bytes()
+        except OSError:
+            self._send_json(404, {"error": "Ressource introuvable", "path": name})
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(payload)
 
-<div id="chat">
-<div class="msg system">Bienvenue dans MILES. Tapez votre message ci-dessous.</div>
-</div>
+    def _handle_project_board(self) -> None:
+        """GET /api/project : pilotage complet (lecture seule)."""
+        if self.app is None:
+            self._send_json(500, {"error": "Application non initialisee"})
+            return
+        try:
+            board = self.app.project_board()
+        except Exception as exc:  # noqa: BLE001 - jamais de detail interne
+            logger.error(
+                "Lecture des documents de coordination impossible (%s) : %s",
+                type(exc).__name__,
+                sanitize_text(exc),
+            )
+            self._send_json(
+                500, {"error": "Documents de coordination illisibles."}
+            )
+            return
+        self._send_json(200, board)
 
-<form id="form" onsubmit="return sendMessage(event)">
-<input type="text" id="input" placeholder="Votre message..." autocomplete="off">
-<button type="submit">Envoyer</button>
-<button type="button" class="secondary" onclick="loadStatus()">Rafraîchir le statut</button>
-</form>
+    def _handle_project_tasks(self) -> None:
+        """GET /api/tasks : tableau des taches et synthese uniquement."""
+        if self.app is None:
+            self._send_json(500, {"error": "Application non initialisee"})
+            return
+        try:
+            board = self.app.project_board()
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "Lecture du tableau des taches impossible (%s) : %s",
+                type(exc).__name__,
+                sanitize_text(exc),
+            )
+            self._send_json(500, {"error": "Tableau des taches illisible."})
+            return
+        self._send_json(
+            200,
+            {
+                "generated_at": board["generated_at"],
+                "summary": board["summary"],
+                "tasks": board["tasks"],
+                "issues": board["issues"],
+            },
+        )
 
-<div class="memories" id="memories"></div>
+    def _handle_task_status(self, path: str, data: dict[str, Any]) -> None:
+        """POST /api/tasks/<id>/status : ecriture bornee du seul statut.
 
-<div class="tools" id="tools">
-<strong>Outils :</strong>
-<div id="toolsList"><p>Chargement…</p></div>
-</div>
-</div>
-
-<script>
-// Session authentifiée : le jeton de session et le jeton CSRF ne sont
-// conservés qu'en mémoire (jamais dans un cookie ni dans le stockage local).
-let sessionId = null;
-let csrfToken = null;
-
-function authHeaders() {{
-  const headers = {{ 'Content-Type': 'application/json' }};
-  if (sessionId) headers['X-MILES-Session'] = sessionId;
-  if (csrfToken) headers['X-MILES-CSRF'] = csrfToken;
-  return headers;
-}}
-
-function showLogin() {{
-  document.getElementById('login').style.display = 'block';
-  document.getElementById('app').style.display = 'none';
-}}
-
-function showApp() {{
-  document.getElementById('login').style.display = 'none';
-  document.getElementById('app').style.display = 'block';
-}}
-
-async function login(e) {{
-  e.preventDefault();
-  const token = document.getElementById('token').value.trim();
-  const errorBox = document.getElementById('loginError');
-  errorBox.style.display = 'none';
-  try {{
-    const res = await fetch('/session', {{
-      method: 'POST',
-      headers: {{ 'Content-Type': 'application/json' }},
-      body: JSON.stringify({{ token: token }})
-    }});
-    const data = await res.json();
-    if (!res.ok) {{
-      errorBox.textContent = data.error || 'Connexion refusee.';
-      errorBox.style.display = 'block';
-      return false;
-    }}
-    sessionId = data.session_id;
-    csrfToken = data.csrf_token;
-    document.getElementById('token').value = '';
-    showApp();
-    loadStatus();
-  }} catch (err) {{
-    errorBox.textContent = 'Erreur reseau : ' + err;
-    errorBox.style.display = 'block';
-  }}
-  return false;
-}}
-
-async function sendMessage(e) {{
-  e.preventDefault();
-  const input = document.getElementById('input');
-  const text = input.value.trim();
-  if (!text) return false;
-  appendMessage('user', text);
-  input.value = '';
-  try {{
-    const res = await fetch('/message', {{
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({{ message: text }})
-    }});
-    if (res.status === 401) {{ showLogin(); return false; }}
-    const data = await res.json();
-    if (data.response) appendMessage('assistant', data.response);
-    if (data.error) appendMessage('error', 'Erreur : ' + data.error);
-  }} catch (err) {{
-    appendMessage('error', 'Erreur réseau : ' + err);
-  }}
-  return false;
-}}
-
-async function loadStatus() {{
-  try {{
-    const res = await fetch('/status', {{ headers: authHeaders() }});
-    if (res.status === 401) {{ showLogin(); return; }}
-    const data = await res.json();
-    document.querySelector('.status').innerHTML =
-      '<strong>Fournisseur :</strong> ' + escapeHtml(data.name) + '<br>' +
-      '<strong>Disponible :</strong> ' + (data.available ? 'oui' : 'non') + '<br>' +
-      '<strong>Mémoire :</strong> ' + (data.memory_available ? 'activée' : 'désactivée/indisponible');
-    loadMemories();
-  }} catch (err) {{ console.error(err); }}
-}}
-
-async function loadMemories() {{
-  try {{
-    const res = await fetch('/memory', {{ headers: authHeaders() }});
-    const data = await res.json();
-    const container = document.getElementById('memories');
-    if (!Array.isArray(data) || data.length === 0) {{
-      container.innerHTML = '<p>Aucun souvenir enregistré.</p>';
-      return;
-    }}
-    container.innerHTML = '<strong>Souvenirs :</strong><ul>' +
-      data.map(m => '<li>[{0}] {1} (catégorie: {{m.category}}, importance: {{m.importance}})</li>'.replace('{{0}}', m.id).replace('{{1}}', escapeHtml(m.content))).join('') +
-      '</ul>';
-  }} catch (err) {{ console.error(err); }}
-}}
-
-async function loadTools() {{
-  const container = document.getElementById('toolsList');
-  try {{
-    const res = await fetch('/tools', {{ headers: authHeaders() }});
-    if (res.status === 401) {{ showLogin(); return; }}
-    const data = await res.json();
-    if (!Array.isArray(data.tools) || data.tools.length === 0) {{
-      container.innerHTML = '<p>Aucun outil disponible.</p>';
-      return;
-    }}
-    container.innerHTML = '<ul>' + data.tools.map(t => {{
-      const champs = (t.parameters || []).map(p =>
-        '<input type="text" data-tool="' + escapeHtml(t.id) + '" data-param="' + escapeHtml(p.name) +
-        '" data-type="' + escapeHtml(p.type) + '" placeholder="' + escapeHtml(p.name) + '" size="12">'
-      ).join(' ');
-      return '<li><code>' + escapeHtml(t.id) + '</code> [' + escapeHtml(t.risk_level) + '] ' +
-        escapeHtml(t.description) +
-        (t.requires_confirmation ? ' <em>(confirmation requise)</em>' : '') +
-        ' ' + champs +
-        ' <button type="button" class="secondary" onclick="runTool(\\'' + escapeHtml(t.id) + '\\')">Exécuter</button></li>';
-    }}).join('') + '</ul>';
-  }} catch (err) {{
-    container.innerHTML = '<p>Erreur de chargement des outils.</p>';
-    console.error(err);
-  }}
-}}
-
-function collectToolParams(toolId) {{
-  const params = {{}};
-  document.querySelectorAll('input[data-tool="' + toolId + '"]').forEach(input => {{
-    const valeur = input.value.trim();
-    if (!valeur) return;
-    const type = input.getAttribute('data-type');
-    if (type === 'int') {{
-      params[input.getAttribute('data-param')] = parseInt(valeur, 10);
-    }} else if (type === 'float') {{
-      params[input.getAttribute('data-param')] = parseFloat(valeur);
-    }} else if (type === 'bool') {{
-      params[input.getAttribute('data-param')] = (valeur === 'true' || valeur === '1');
-    }} else {{
-      params[input.getAttribute('data-param')] = valeur;
-    }}
-  }});
-  return params;
-}}
-
-async function postTool(toolId, params, userConfirmed, token) {{
-  const body = {{ tool: toolId, parameters: params }};
-  if (userConfirmed) {{
-    body.user_confirmed = true;
-    body.confirmation_token = token;
-  }}
-  const res = await fetch('/tool', {{
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify(body)
-  }});
-  return await res.json();
-}}
-
-async function runTool(toolId) {{
-  const params = collectToolParams(toolId);
-  let data = await postTool(toolId, params, false, null);
-  if (data.confirmation_required) {{
-    // Confirmation humaine explicite : l'utilisateur tranche dans le
-    // navigateur avant que le jeton ne soit renvoyé.
-    const ok = window.confirm("L'outil '" + toolId + "' requiert une confirmation humaine.\\nExécuter ?");
-    if (!ok) {{
-      appendMessage('system', 'Action annulée.');
-      return;
-    }}
-    data = await postTool(toolId, params, true, data.confirmation_token);
-  }}
-  if (data.success) {{
-    appendMessage('assistant', 'Résultat de ' + toolId + ' :\\n' + formatToolResult(data.result));
-  }} else {{
-    appendMessage('error', 'Outil ' + toolId + ' : ' + (data.error || 'échec'));
-  }}
-}}
-
-function formatToolResult(result) {{
-  if (result === null || result === undefined) return '(aucun résultat)';
-  if (typeof result === 'object') return JSON.stringify(result, null, 2);
-  return String(result);
-}}
-
-function appendMessage(role, text) {{
-  const chat = document.getElementById('chat');
-  const div = document.createElement('div');
-  div.className = 'msg ' + role;
-  div.textContent = text;
-  chat.appendChild(div);
-  chat.scrollTop = chat.scrollHeight;
-}}
-
-function escapeHtml(text) {{
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}}
-
-// L'interface démarre en mode connecté : les requêtes sont refusées
-// (401) tant qu'aucune session n'a été ouverte.
-showLogin();
-</script>
-</body>
-</html>"""
+        La session et le jeton CSRF ont deja ete verifies par ``do_POST``
+        (etape 5) : aucun effet de bord n'est possible avant ce controle.
+        Un refus du module de garde-fous est renvoye tel quel, avec son code
+        stable, sans jamais reveler le contenu du document.
+        """
+        if self.app is None:
+            self._send_json(500, {"error": "Application non initialisee"})
+            return
+        match = re.match(r"^/api/tasks/([^/]+)/status$", path)
+        if not match:
+            self._send_json(404, {"error": "Not found", "path": path})
+            return
+        task_id = unquote(match.group(1))
+        try:
+            result = self.app.update_task_status(task_id, data)
+        except project_board.TaskWriteError as exc:
+            self._send_json(
+                exc.http_status, {"error": exc.message, "code": exc.code}
+            )
+            return
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "Ecriture d'un statut impossible (%s) : %s",
+                type(exc).__name__,
+                sanitize_text(exc),
+            )
+            self._send_json(500, {"error": "Erreur interne du service."})
+            return
+        self._send_json(200, result)
 
     def _handle_status(self) -> None:
         if self.app is None:
