@@ -142,3 +142,17 @@ Convention : chaque décision reçoit un ID `DEC-###` (ou `D-###`), une date, un
   4. **Aucune donnée inventée** sur la page Boîtier : les valeurs de démonstration sont remplacées par des mesures réelles (hôte, cœurs logiques, disque, pid, durée du processus, fournisseur, latence loopback **mesurée**) ou par un « non mesuré » explicite pour les capteurs qui n'existent pas (température, batterie, ventilateurs, signal radio). L'indicateur d'état ne s'allume que si MILES a réellement répondu.
   5. Sur liste préalable et accord explicite de l'utilisateur : suppression des branches distantes **fusionnées** (21) et des worktrees **temporaires propres** (11). Les deux worktrees portant des modifications locales sont **conservés**.
 - **Conséquences** : plus aucune requête ne sort du poste ; l'interface ne peut plus affirmer une mesure qu'elle n'a pas ; le pilotage projet reste assuré par la page « Projet » adossée aux documents de coordination. `main` n'est pas réalignée (aucun push sans accord, DEC-004).
+
+## DEC-015 — `main` devient la référence, le cockpit n'a plus qu'une implémentation, le tri suit une règle de preuve
+
+- **Date** : 2026-10-27
+- **Auteur** : Agent A
+- **Statut** : ACCEPTEE (décision de l'utilisateur)
+- **Contexte** : `main` était restée 77 commits derrière la branche d'intégration ; deux interfaces remplissaient la même fonction (la page Projet du Companion et le cockpit `assets/web`) ; une bibliothèque d'icônes de 1,05 Mo était liée sans être utilisée ; deux worktrees sous `%TEMP%` portaient du travail absent de Git (un rapport de 71 lignes, 433 lignes de code).
+- **Décision** :
+  1. **`main` est la référence du code** : avance rapide locale depuis `integration/miles-post-d1`, sans `reset --hard` ni `push` (DEC-004). La branche d'intégration est conservée à l'identique comme repère.
+  2. **Une seule implémentation du cockpit** (`assets/web/`) ; le serveur Companion la sert sous `/cockpit/` et `/projet` y redirige. Aucune copie divergente n'est admise.
+  3. **Le tri ne supprime que ce qui est prouvé non référencé**, la preuve étant consignée dans `ORGANISATION.md` (§11). Les emplacements réservés sont conservés par leur marqueur `.gitkeep`.
+  4. **Aucun travail ne reste dans un dossier temporaire** : avant retrait d'un worktree, son contenu unique est commité sur sa branche ou récupéré dans la référence, puis le dossier est retiré — les branches, elles, sont conservées.
+  5. **`ORGANISATION.md`** (racine) fait autorité sur la carte du dépôt ; les rapports datés de `docs/reports/` décrivent leur date et ne sont jamais réécrits.
+- **Conséquences** : la référence est unique et lisible ; la surface HTTP servie par le Companion est bornée par une liste blanche ; plus aucun travail ne dépend de `%TEMP%` ; la revue indépendante porte sur `TASK-DEV-044` et `TASK-DEV-046`.

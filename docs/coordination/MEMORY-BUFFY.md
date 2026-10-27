@@ -67,3 +67,48 @@
 1. Attendre la revue d'Agent B (`TASK-DEV-044`).
 2. Ne rien pousser sans accord (DEC-004) ; `main` reste en retard sur l'intégration.
 3. Questions ouvertes posées à l'utilisateur : présentation des valeurs non mesurées, réalignement de `main`, sort des deux worktrees restants, périmètre du prochain lot.
+
+## 8. Session du 2026-10-27 (suite 2) — `main`, tri prouvé, cockpit unique
+
+**État** : référence **`main`**, alignée par avance rapide sur
+`integration/miles-post-d1` ; aucun `push`. Serveurs : MILES
+`127.0.0.1:8080` (processus démarré avant ce lot), Companion `127.0.0.1:8787`
+(relancé avec le code de ce lot).
+
+**Fait**
+
+1. **Tri** : FontAwesome (1,05 Mo, zéro référence) supprimé, 12 `.gitkeep`
+   redondants retirés, page Projet dupliquée retirée, `ORGANISATION.md` écrit
+   (carte du dépôt, preuves de suppression, où regarder pour chaque changement).
+2. **Cockpit unique** : `assets/web/` servi sous `/cockpit/` par le Companion,
+   `/projet` redirige, bandeau de santé visible **avant** connexion, icônes
+   locales, surface HTTP bornée par liste blanche (`/server.py` → 404).
+3. **Worktrees** : rapport unique récupéré (`PHASE_6_4B_DIAGNOSTICS_AGENT_A.md`),
+   433 lignes de travail multi-fournisseurs figées sur
+   `feature/miles-multi-provider`, puis les deux dossiers `%TEMP%` retirés.
+4. **Vérifié, pas supposé** : 876 tests (874 OK, 2 échecs reproduits dans une
+   copie de `HEAD` sans `.env` → antérieurs au lot) ; 18 tests nouveaux ;
+   navigateur sur 8787 (nav Projet, onglets, bandeau, 0 ressource en échec,
+   0 erreur console, 0 débordement à 390 px) ; `git worktree list` propre.
+
+**Prochaine action**
+
+1. Attendre les revues `TASK-DEV-044` et `TASK-DEV-046` ; mega prompt remis à
+   l'utilisateur pour Agent B (`H-014` + `M-019`).
+2. `push` de `main` **uniquement** sur accord explicite (DEC-004) : 77 commits
+   d'avance sur `origin/main`.
+3. Redémarrer `miles.py --web` pour servir l'icône du cockpit sur 8080 —
+   attention : un nouveau jeton d'accès est affiché et les sessions en cours
+   tombent.
+4. Sujets ouverts : cause exacte des 2 échecs de
+   `tests/test_status_provider_diagnostics.py` ; intégration (ou abandon) du
+   travail multi-fournisseurs ; branche `feature/miles-memoire-avancee`.
+
+**Pièges à retenir**
+
+- Ne jamais poser une valeur sans la marquer : le pont répare les textes depuis
+  `aria-label` et une valeur remplacée sans marqueur déclenche une boucle qui
+  **bloque le fil principal**.
+- Une session web MILES est liée à l'**agent utilisateur** du client.
+- Un fichier du dossier Companion n'est pas public par défaut : la liste
+  blanche est la seule autorisation.

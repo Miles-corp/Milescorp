@@ -222,3 +222,48 @@ Procédure à suivre par chaque agent à la fin de sa session de travail, afin q
 **Tests exécutés :** `tests/test_web.py` + `tests/test_web_project_board.py` + `tests/test_web_device.py` -> **56 OK**. Essai réel : `POST /api/tasks/TASK-DEV-007/status` (via l'interface) -> `TODO -> IN_PROGRESS`, une seule ligne modifiée, entrée horodatée dans `data/project_board_audit.jsonl`, puis restauration manuelle du document. Vérification navigateur réelle sur `127.0.0.1:8787` : toutes les ressources en 200, aucune requête sortante, mesures stables sur 7 s (aucun flottement entre valeur simulée et mesure). Audit du Lab : `AUDIT-TOUS.py` **vert** (49 fichiers) — portée : espace du Lab, **pas le dépôt MILES**.
 **Problèmes restants :** capteurs matériels de la Miles Box non exposés (déclarés indisponibles, jamais inventés) ; deux worktrees temporaires conservés car ils portent des modifications locales ; l'identité « Agent A / Agent B » reste déclarée par l'utilisateur, non authentifiée.
 **Prochaine action recommandée :** Agent B relit l'intégration et la télémétrie, et tranche sur la présentation des valeurs non mesurées (annotation explicite aujourd'hui).
+
+## H-014 — 2026-10-27 — Agent A → Agent B — lot « tri, `main`, cockpit unique » et revues en attente
+
+- **De** : Agent A (poste principal, utilisateur `DripMind`).
+- **Vers** : Agent B (poste secondaire) — revue indépendante.
+- **Référence** : branche **`main`**, avance rapide locale depuis
+  `integration/miles-post-d1`. Aucun `push` (DEC-004) : le dépôt distant n'a pas
+  reçu ces commits.
+- **Décision liée** : `DEC-015`. **Message lié** : `M-019`.
+
+### Travail réalisé (Agent A)
+
+1. **Tri prouvé** : FontAwesome (1,05 Mo) supprimé après vérification qu'aucune
+   classe `fa-*` n'existe dans le HTML, le CSS ou le JS ; 12 `.gitkeep`
+   redondants retirés ; page Projet dupliquée retirée ; `ORGANISATION.md` écrit.
+2. **Cockpit unique** : le serveur Companion sert `assets/web/` sous
+   `/cockpit/` ; `/projet` redirige ; bandeau de santé visible avant connexion ;
+   icônes locales ; surface HTTP bornée par liste blanche.
+3. **Worktrees** : rapport unique récupéré dans la référence, 433 lignes de
+   travail multi-fournisseurs commitées sur sa branche, puis les deux dossiers
+   `%TEMP%` retirés. Les branches sont conservées.
+4. **Tests** : 876 exécutés (874 OK, 2 échecs antérieurs au lot, 5 ignorés) ;
+   18 tests nouveaux pour le serveur Companion ; suite web complète 74 OK.
+
+### Ce que j'attends d'Agent B
+
+- `TASK-DEV-046` — revue du tri et du cockpit (points 1 à 7 de `M-019`).
+- `TASK-DEV-044` — revue du Companion et de la télémétrie réelle.
+- `TASK-DEV-019`, `021`, `024`, `027`, `030`, `032`, `034`, `037`, `039`,
+  `041` — les dix audits de la Phase 6.3, **toujours en attente** et **non
+  approuvés** faute de revue.
+
+### Résultat attendu
+
+Un rapport par revue (`docs/reports/`), l'état des tâches mis à jour dans
+`TASKS.md` (`DONE` uniquement si la revue est concluante, sinon `BLOCKED` avec
+la raison), et une réponse dans `MESSAGES.md` : ce qui est vérifié, ce qui ne
+l'est pas, les désaccords.
+
+### Interdits rappelés
+
+Aucun `push`, aucune fusion dans `main` par Agent B sans accord explicite de
+l'utilisateur ; aucune réécriture des rapports datés ; ne pas modifier les
+fichiers de production pendant une revue (lecture seule) ; ne pas toucher aux
+deux PC hors du dépôt.

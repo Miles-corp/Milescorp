@@ -1,13 +1,13 @@
 # docs/coordination/STATUS.md — État du projet MILES
 
-## État instantané (2026-10-27, Agent A)
+## État instantané (2026-10-27, Agent A — après le lot « tri, `main`, cockpit unique »)
 
-- **Référence du code** : `integration/miles-post-d1` (05b7b82) — 201 fichiers suivis, 60 fichiers de tests, **847 tests exécutés : 845 OK, 2 échecs environnementaux, 5 ignorés**. Les 2 échecs viennent du fichier `.env` local copié sur ce poste, qui écrase les valeurs par défaut attendues par `tests/test_status_provider_diagnostics.py` ; sans `.env`, les 14 tests du module passent. Aucune régression de code.
-- **`main` (b9b7e7d)** : encore à la Phase 4, **69 commits de retard** sur l'intégration, 146 tests OK. Ce n'est plus la vérité du code ; le réalignement est demandé (voir `docs/reports/REPO_TRIAGE_AGENT_A.md`).
-- **Branches** : 29 branches distantes hors `main` — **22 déjà fusionnées** dans l'intégration, **7 non fusionnées** (correctifs et rapports d'audit à préserver) ; **2 branches locales n'existent sur aucun remote** (`feature/miles-memoire-avancee`, `feature/miles-multi-provider`) et portent du travail unique. **Aucune suppression sans liste préalable et accord explicite.**
-- **Worktrees** : **16 enregistrés, dont 14 sous `%TEMP%`** (travaux D1, D2, D3, audits) ; deux sont sales (`miles-diag` : un rapport non suivi ; `miles-merge` : travail multi-fournisseurs non commité). Inventaire complet dans le rapport de tri.
-- **Coordination remise à la vérité (DEC-013)** : identifiants de tâche désormais uniques (`TASK-DEV-040`, `041`, `042` issus de doublons), `M-004` dupliqué renuméroté `M-017` (`M-010` n'a jamais existé), ligne Phase 3B réparée (colonne Description manquante).
-- **Tâches** : **30 DONE · 15 TODO · 1 IN_PROGRESS** (détail dans `TASKS.md`).
+- **Référence du code** : **`main`** — alignée sur `integration/miles-post-d1` par **avance rapide locale**, sans `push` (DEC-004) : **77 commits d'avance sur `origin/main`**. 250 fichiers suivis, 58 fichiers de tests.
+- **Tests** : **876 exécutés — 874 OK, 2 échecs, 5 ignorés**. Les 2 échecs (`tests/test_status_provider_diagnostics.py`) sont **reproduits à l'identique dans une copie de `HEAD` sans `.env`** : ils ne viennent pas de ce lot. Le rapport précédent les attribuait au `.env` du poste ; cette vérification ne le confirme pas, la cause exacte reste à déterminer (hors de ce lot).
+- **Interfaces** : **une seule implémentation du cockpit** (`assets/web/`), servie depuis deux origines — racine sur `127.0.0.1:8080`, `/cockpit/` sur `127.0.0.1:8787`. `/projet` redirige vers `/cockpit/`. Le bandeau de santé est **visible avant connexion** et n'affirme que ce qui est observable ; les icônes sont locales ; la surface servie par le Companion est **bornée par une liste blanche** (`GET /server.py` → 404, vérifié en direct).
+- **Tri** : FontAwesome (1,05 Mo, zéro référence) supprimé ; 12 `.gitkeep` redondants retirés (les 18 marqueurs des emplacements réservés restent) ; page Projet dupliquée retirée. Carte du dépôt : `ORGANISATION.md`.
+- **Worktrees** : **2 restants** — ce poste de travail (`main`) et le clone principal `C:\Users\StanC\Desktop\Milescorp`. Les deux dossiers `%TEMP%` sont retirés **après sauvegarde** : rapport récupéré dans la référence, 433 lignes de travail multi-fournisseurs commitées sur `feature/miles-multi-provider` (**non intégré, non vérifié**). Plus aucun travail hors de Git.
+- **Tâches** : **29 DONE · 2 DONE (analyse rendue, puis implementation TASK-DEV-026) · 1 DONE (tests) · 17 TODO** — détail dans `TASKS.md`.
 
 ## Prochain objectif
 
@@ -236,3 +236,15 @@ Aucun blocage à ce jour.
 - **Nettoyage Git** (sur accord explicite) : 11 worktrees temporaires propres supprimés, 21 branches distantes **fusionnées** supprimées ; 2 worktrees conservés (modifications locales : `miles-merge`, `miles-diag`).
 - **Audit du Lab** : `lab.ps1 exec "python3 /workspace/tools/AUDIT-TOUS.py"` -> **vert** (49 fichiers, seuil 85). Portée : espace du Lab, **pas le dépôt MILES**.
 - **En attente** : revue indépendante d'Agent B (`TASK-DEV-044`). Les autres audits en attente ne sont **pas** approuvés.
+
+## Lot du 2026-10-27 (suite 2) — `main`, tri prouvé et cockpit unique (Agent A)
+
+- **Décision** : `DEC-015`. **Tâches** : `TASK-DEV-045` (DONE), `TASK-DEV-046` (revue à faire).
+- **`main`** : avance rapide locale depuis l'intégration ; aucun `push`.
+- **Cockpit** : `app/interface/companion/server.py` sert `assets/web/` sous `/cockpit/` (liste blanche : `index.html`, `app.css`, `app.js`, `miles.svg`) ; `/cockpit` et `/projet` répondent **302** vers `/cockpit/`. Le bandeau de santé sort de la zone connectée : sans session il affiche l'état réellement observable (`Service : joignable` = MILES a répondu, **401 compris**) au lieu d'un tiret muet. Sonde côté client : `probeService` (`assets/web/app.js`) ; style : `.is-off` (`assets/web/app.css`).
+- **Icônes** : `assets/web/miles.svg` (également servie par MILES via `PUBLIC_ASSETS`) et `app/interface/companion/assets/miles.svg` — plus de 404 (`/vite.svg` retiré, favicon du cockpit fourni) ; la page du Companion passe en `lang="fr"`.
+- **Écoute bornée** : seuls `index.html`, `miles-bridge.js` et `assets/**` sont servis par le Companion.
+- **Tests** : `tests/test_companion_server.py` — **18 tests** (redirections, liste blanche, relais des routes et du **corps des POST**, MILES injoignable → 502 explicite, refus d'écoute hors boucle locale) ; `tests/test_web_project_board.py` couvre l'icône publique. Suite web complète : **74 OK**.
+- **Vérification navigateur (8787)** : lien `Projet → /cockpit/` ajouté dans les deux navigations du Companion ; `/cockpit/` rend les onglets Projet / Conversation / Mémoire / Outils, `lang="fr"`, lien d'évitement, bandeau « joignable / session requise / fermée » ; **13 requêtes, aucune en échec**, aucune erreur console ; à 390 px de large, **aucun débordement horizontal**.
+- **Réserve** : `GET /miles.svg` sur le serveur MILES **en cours** répond encore 401 (processus démarré avant ce lot) ; un redémarrage de `miles.py --web` le corrige et affiche un **nouveau jeton d'accès**.
+- **En attente** : revues indépendantes `TASK-DEV-044` et `TASK-DEV-046`, ainsi que les dix audits de la Phase 6.3 (liste dans `HANDOFF.md`, `H-014`).
