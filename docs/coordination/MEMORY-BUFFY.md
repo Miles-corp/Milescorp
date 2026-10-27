@@ -89,7 +89,9 @@
 4. **Vérifié, pas supposé** : 876 tests (874 OK, 2 échecs reproduits dans une
    copie de `HEAD` sans `.env` → antérieurs au lot) ; 18 tests nouveaux ;
    navigateur sur 8787 (nav Projet, onglets, bandeau, 0 ressource en échec,
-   0 erreur console, 0 débordement à 390 px) ; `git worktree list` propre.
+   0 erreur console, 0 débordement à 390 px) ; `git worktree list` propre ;
+   audit design du Lab **100/100** sur la copie de travail rafraîchie ;
+   audit de fin de tâche `AUDIT-TOUS.py` **vert** (portée : l'espace du Lab).
 
 **Prochaine action**
 
