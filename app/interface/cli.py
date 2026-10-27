@@ -15,6 +15,7 @@ from app.ai_providers.public_errors import public_provider_error, technical_deta
 from app.core.conversation import Conversation
 from app.memory.persistent import PersistentMemory, PersistentMemoryError
 from app.orchestration.runner import MissionAuthorizationError, MissionRunner
+from app.routing import classifier, journaliser, rendre_compte, router_actif
 from app.security.validator import ActionValidator, ActionResult
 from app.tools.grants import default_session_id
 from app.tools.service import ToolService
@@ -134,7 +135,10 @@ class CLI:
             raise
 
     def _process_input(self, text: str) -> None:
-        if text.startswith("/"):
+        # Les options de routeur /fast et /deep ne sont PAS des commandes
+        # (Q1) : elles retombent vers la classification ci-dessous.
+        premiere = text.lower().split(" ")[0] if text.split() else ""
+        if text.startswith("/") and premiere not in ("/fast", "/deep"):
             self._handle_command(text)
             return
 
@@ -143,6 +147,16 @@ class CLI:
             print("Erreur : aucun fournisseur IA configuré.")
             print("Définissez MILES_PROVIDER=remote ou local et les paramètres associés.")
             return
+
+        # Routeur de demandes (Q1) : désactivé par défaut (MILES_ROUTER=1).
+        # Le choix est TOUJOURS affiché (règle DEC-005 : aucun basculement
+        # silencieux). Le texte nettoyé (option /fast ou /deep retirée) est
+        # celui envoyé au fournisseur.
+        if router_actif():
+            decision = classifier(text)
+            journaliser(decision)
+            print(rendre_compte(decision, self.provider.name, self.settings))
+            text = decision["clean"] or text
 
         self.conversation.add_user_message(text)
         context = self.conversation.get_context()
