@@ -250,11 +250,18 @@ def cle_pour(provider: str, env_path: str | None = None) -> str | None:
             or valeurs.get(_key_name(provider))) or None
 
 
-def fournisseur_actif(env_path: str | None = None) -> str:
-    """Fournisseur distant actif (environnement puis .env, defaut 'groq')."""
+def fournisseur_actif(env_path: str | None = None,
+                      defaut: str | None = "groq") -> str | None:
+    """Fournisseur distant actif (environnement puis .env).
+
+    Args:
+        defaut: valeur retournée si rien n'est defini — None pour le
+            routage (miles.py) qui doit alors suivre la voie
+            retrocompatible historique, "groq" pour l'affichage.
+    """
     valeurs = _lire_env(env_path)
     return (os.environ.get("MILES_REMOTE_PROVIDER")
-            or valeurs.get("MILES_REMOTE_PROVIDER", "groq")).lower()
+            or valeurs.get("MILES_REMOTE_PROVIDER") or defaut)
 
 
 def modele_actif(env_path: str | None = None) -> str | None:
