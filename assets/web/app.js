@@ -202,9 +202,46 @@ async function logout() {
 /* Santé du service                                                   */
 /* ------------------------------------------------------------------ */
 
+/* État observable SANS session : le bandeau doit être honnête avant même
+   la connexion. « joignable » signifie que MILES a répondu — un refus (401)
+   est une réponse. Aucune mesure n'est inventée pour autant. */
+async function probeService() {
+  let status = null;
+  try {
+    const response = await fetch('/status', {
+      headers: { Accept: 'application/json' },
+    });
+    status = response.status;
+  } catch (error) {
+    status = null;
+  }
+
+  const joignable = status !== null && (status === 401 || status < 400);
+  const service = byId('health-service');
+  service.textContent = joignable ? 'joignable' : 'injoignable';
+  service.classList.toggle('is-off', !joignable);
+  byId('health-service-note').textContent = joignable
+    ? `${location.host} · jeton requis pour le détail`
+    : 'lancez miles.py --web (127.0.0.1:8080)';
+
+  if (!state.session) {
+    byId('health-provider').textContent = joignable ? 'session requise' : 'inconnu';
+    byId('health-memory').textContent = joignable ? 'session requise' : 'inconnue';
+    byId('health-docs').textContent = joignable ? 'session requise' : 'inconnus';
+    byId('health-session').textContent = 'fermée';
+    ['health-provider', 'health-memory', 'health-docs', 'health-session'].forEach(
+      (id) => byId(id).classList.toggle('is-off', true)
+    );
+  }
+}
+
 function renderHealth(board) {
   const provider = (board.health && board.health.provider) || {};
   const memory = (board.health && board.health.memory) || {};
+
+  byId('health-provider').classList.remove('is-off');
+  byId('health-docs').classList.remove('is-off');
+  byId('health-session').classList.remove('is-off');
 
   byId('health-provider').textContent = provider.name || 'non configuré';
   const providerNote = [
@@ -840,6 +877,7 @@ function init() {
     toast(`Vous agissez en tant que ${state.agent}.`);
   });
   showLogin();
+  probeService();
 }
 
 document.addEventListener('DOMContentLoaded', init);

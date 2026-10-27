@@ -423,10 +423,14 @@ class TestProjectBoardHttp(CoordinationFixture):
         with WebTestServer(self.build()) as server:
             css = server.raw_request("GET", "/app.css", authenticate=False)
             js = server.raw_request("GET", "/app.js", authenticate=False)
+            icon = server.raw_request("GET", "/miles.svg", authenticate=False)
         self.assertEqual(css["status"], 200)
         self.assertIn("--accent", css["body"])
         self.assertEqual(js["status"], 200)
         self.assertIn("loadBoard", js["body"])
+        # Icone locale : aucune ressource distante, aucun 404 dans la console.
+        self.assertEqual(icon["status"], 200)
+        self.assertIn("svg", icon["body"])
 
     def test_unknown_asset_is_not_served(self) -> None:
         # Sans session, une route inconnue répond 401 : l'existence des

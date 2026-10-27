@@ -8,6 +8,7 @@
 <meta property="og:title" content="MILES — cockpit projet">
 <meta property="og:description" content="Pilotage du projet MILES : tâches, blocages, décisions, messages.">
 <meta property="og:type" content="website">
+<link rel="icon" type="image/svg+xml" href="miles.svg">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -41,6 +42,37 @@
 </header>
 
 <main id="contenu">
+  <!-- Santé du service : lisible AVANT connexion. Un service joignable qui
+       refuse la requête (401) n'est pas un service en panne : le bandeau dit
+       ce qui est réellement observable, sans session. -->
+  <section class="health" aria-label="Santé du service" aria-live="polite">
+    <article class="health-item">
+      <p class="health-label">Service</p>
+      <p class="health-value" id="health-service">—</p>
+      <p class="health-note" id="health-service-note">Vérification…</p>
+    </article>
+    <article class="health-item">
+      <p class="health-label">Fournisseur</p>
+      <p class="health-value" id="health-provider">—</p>
+      <p class="health-note" id="health-provider-note"></p>
+    </article>
+    <article class="health-item">
+      <p class="health-label">Mémoire</p>
+      <p class="health-value" id="health-memory">—</p>
+      <p class="health-note">Souvenirs explicites, base locale</p>
+    </article>
+    <article class="health-item">
+      <p class="health-label">Documents</p>
+      <p class="health-value" id="health-docs">—</p>
+      <p class="health-note" id="health-docs-note"></p>
+    </article>
+    <article class="health-item">
+      <p class="health-label">Session</p>
+      <p class="health-value" id="health-session">—</p>
+      <p class="health-note">Jeton en mémoire vive uniquement</p>
+    </article>
+  </section>
+
   <section class="login" id="login" aria-labelledby="login-title">
     <p class="eyebrow">Session locale</p>
     <h2 id="login-title">Ouvrir le cockpit</h2>
@@ -56,29 +88,6 @@
   </section>
 
   <div id="app" hidden>
-    <section class="health" aria-label="Santé du service">
-      <article class="health-item">
-        <p class="health-label">Fournisseur</p>
-        <p class="health-value" id="health-provider">—</p>
-        <p class="health-note" id="health-provider-note"></p>
-      </article>
-      <article class="health-item">
-        <p class="health-label">Mémoire</p>
-        <p class="health-value" id="health-memory">—</p>
-        <p class="health-note">Souvenirs explicites, base locale</p>
-      </article>
-      <article class="health-item">
-        <p class="health-label">Documents</p>
-        <p class="health-value" id="health-docs">—</p>
-        <p class="health-note" id="health-docs-note"></p>
-      </article>
-      <article class="health-item">
-        <p class="health-label">Session</p>
-        <p class="health-value" id="health-session">—</p>
-        <p class="health-note">Jeton en mémoire vive uniquement</p>
-      </article>
-    </section>
-
     <section class="view" id="vue-projet" role="tabpanel" aria-labelledby="tab-projet">
       <div class="view-head">
         <div>

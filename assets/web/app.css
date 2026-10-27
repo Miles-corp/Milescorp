@@ -241,6 +241,9 @@ main { padding: clamp(1rem, 3vw, 2rem); max-width: 1440px; margin: 0 auto; }
   color: var(--muted);
 }
 .health-value { font-size: 1.02rem; font-weight: 600; margin-top: 0.15rem; overflow-wrap: anywhere; }
+/* Valeur lisible mais indisponible, ou pas encore lisible (session fermée) :
+   atténuée, jamais décorée comme une panne. */
+.health-value.is-off { color: var(--muted); font-weight: 500; }
 .health-note { font-size: 0.76rem; color: var(--muted); margin-top: 0.15rem; }
 
 .view { display: block; }

@@ -99,6 +99,7 @@ WEB_ASSETS_DIR = Path(__file__).resolve().parents[2] / "assets" / "web"
 PUBLIC_ASSETS = {
     "app.css": "text/css; charset=utf-8",
     "app.js": "text/javascript; charset=utf-8",
+    "miles.svg": "image/svg+xml",
 }
 
 

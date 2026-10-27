@@ -28,6 +28,25 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 MILES_DEFAULT = "http://127.0.0.1:8080"
 PORT_DEFAULT = 8787
 
+# Racine du depot : trois niveaux au-dessus de app/interface/companion.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(ROOT)))
+
+# Cockpit projet du depot (`assets/web`) : c'est l'implementation unique des
+# vues Projet / Conversation / Memoire / Outils. Elle est servie ici sous
+# ``/cockpit/`` pour qu'une seule source de verite existe, au lieu de deux
+# pages qui derivent l'une de l'autre. Liste blanche : aucun nom de fichier
+# venu de la requete n'atteint le disque (meme discipline que ``web.py``).
+COCKPIT_DIR = os.path.join(REPO_ROOT, "assets", "web")
+COCKPIT_PREFIX = "/cockpit/"
+COCKPIT_FILES = frozenset({"index.html", "app.css", "app.js", "miles.svg"})
+
+# Fichiers publics de l'application : seuls ceux-la sont servis depuis le
+# dossier du serveur. Sans cette liste, tout fichier du dossier (le code du
+# serveur lui-meme) serait telechargeable ; ce n'est pas un secret, mais ce
+# n'est pas non plus une ressource publique.
+PUBLIC_FILES = frozenset({"index.html", "miles-bridge.js"})
+PUBLIC_PREFIXES = ("assets/",)
+
 # En-tetes retires avant de relayer vers MILES : ils decrivent la connexion
 # cliente et non la requete elle-meme.
 STRIP = {
@@ -84,6 +103,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if candidate == ROOT or candidate.startswith(ROOT + os.sep):
             return candidate
         return None
+
+    def _redirect(self, location: str) -> None:
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
+    def _serve_cockpit(self, path: str) -> None:
+        """Servir le cockpit du depot sous ``/cockpit/`` (liste blanche)."""
+        name = path[len(COCKPIT_PREFIX):] or "index.html"
+        if name not in COCKPIT_FILES:
+            return self._send_bytes(b"Not found", 404, "text/plain; charset=utf-8")
+        full = os.path.join(COCKPIT_DIR, name)
+        if not os.path.isfile(full):
+            return self._send_bytes(
+                b"Cockpit absent du depot", 404, "text/plain; charset=utf-8"
+            )
+        self._send_file(full)
 
     def _send_bytes(self, payload: bytes, status: int, ctype: str) -> None:
         self.send_response(status)
@@ -202,17 +240,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
         } or path.startswith("/mission/"):
             return self._proxied(self.command)
 
-        # Page projet : fichier dedie, comme les anciennes pages statiques.
-        if path in ("/projet", "/projet/"):
-            full = self._resolve("projet.html")
-            if full and os.path.isfile(full):
-                return self._send_file(full)
-            return self._send_bytes(b"Page absente", 404, "text/plain; charset=utf-8")
+        # Cockpit projet : servi depuis le depot, jamais recopie.
+        if path in ("/cockpit", "/projet", "/projet/"):
+            # Redirection : les references relatives du cockpit (app.css,
+            # app.js) n'ont de sens que sous la barre oblique finale.
+            return self._redirect(COCKPIT_PREFIX)
+        if path.startswith(COCKPIT_PREFIX):
+            return self._serve_cockpit(path)
 
         relative = path.lstrip("/")
-        full = self._resolve(relative) if relative else None
-        if full and os.path.isfile(full):
-            return self._send_file(full)
+        if relative and (
+            relative in PUBLIC_FILES or relative.startswith(PUBLIC_PREFIXES)
+        ):
+            full = self._resolve(relative)
+            if full and os.path.isfile(full):
+                return self._send_file(full)
 
         # Route SPA (sans extension) : rend l'application.
         if not os.path.splitext(relative)[1]:

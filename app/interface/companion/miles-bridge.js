@@ -491,10 +491,10 @@
     }
   }, true);
 
-  /* --- Page Projet : ajout d'un lien dans la navigation existante ---------
-     L'app React ne connait pas cette page ; on ajoute un lien vers la page
-     servie par serve.py (/projet). Aucun contenu n'est injecte dans le DOM
-     React : la page est autonome et partage la session MILES de l'onglet. */
+  /* --- Cockpit projet : lien dans la navigation existante -----------------
+     L'app React ne connait pas le cockpit ; on ajoute un lien vers les vues
+     Projet / Conversation / Memoire / Outils servies par le meme serveur sous
+     /cockpit/ (implementation unique du depot, aucun contenu recopie). */
   var BASE = "";
 
   function _addProjectLink() {
@@ -504,7 +504,7 @@
         if (!modele) return;
         var a = modele.cloneNode(true);
         a.setAttribute("data-miles-projet", "1");
-        a.setAttribute("href", BASE + "/projet");
+        a.setAttribute("href", BASE + "/cockpit/");
         // Le modele clone est un Link React : sans ce garde, React Router
         // intercepte le clic et affiche son propre 404. On force la navigation
         // complete, en capture, avant que le routeur ne voie l'evenement.
