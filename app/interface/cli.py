@@ -14,6 +14,7 @@ from app.ai_providers.base import AIProvider, AIProviderError
 from app.ai_providers.public_errors import public_provider_error, technical_detail
 from app.core.conversation import Conversation
 from app.memory.persistent import PersistentMemory, PersistentMemoryError
+from app.orchestration.progress import message_attente
 from app.orchestration.runner import MissionAuthorizationError, MissionRunner
 from app.routing import classifier, journaliser, rendre_compte, router_actif
 from app.security.validator import ActionValidator, ActionResult
@@ -558,6 +559,10 @@ class CLI:
                 objective, owner_session_id=self.session_id
             )
         mission = self.mission_runner.run(mission.mission_id)
+        # Q2 : parler honnêtement de l'état RÉEL avant de conduire la suite.
+        _attente = message_attente(mission, variante=0)
+        if _attente:
+            print(_attente)
         self._drive_mission(mission)
 
     def _mission_interaction_limit(self) -> int:
@@ -585,6 +590,7 @@ class CLI:
         """
         interactions = 0
         max_interactions = self._mission_interaction_limit()
+        variante = 1
         while (
             mission is not None
             and mission.pending is not None
@@ -593,6 +599,12 @@ class CLI:
             interactions += 1
             pending = mission.pending
             print()
+            # Q2 : phrase d'attente fondée sur l'état réel (variété tournée,
+            # aucun secret, jamais de succès sur un état d'échec).
+            _attente = message_attente(mission, variante=variante)
+            variante += 1
+            if _attente:
+                print(_attente)
             print(pending.question)
             try:
                 answer = input("> ").strip()
