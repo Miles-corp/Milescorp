@@ -227,3 +227,38 @@ def environnement_prioritaire(provider: str) -> list[str]:
                         "MILES_REMOTE_PROVIDER", "MILES_REMOTE_API_KEY")
         if os.environ.get(cle)
     ]
+
+
+def modele_fournisseur(provider: str, env_path: str | None = None) -> str | None:
+    """Modele enregistre pour ce fournisseur (env puis .env), ou None."""
+    provider = _valider_provider(provider)
+    valeurs = _lire_env(env_path)
+    return (os.environ.get(_model_name(provider))
+            or valeurs.get(_model_name(provider))) or None
+
+
+def cle_pour(provider: str, env_path: str | None = None) -> str | None:
+    """Cle interne au processus pour construire un adaptateur.
+
+    USAGE INTERNE UNIQUE : ce retour n'est jamais affiche, journalise ni
+    transmis — seuls les appelsants qui construisent un adaptateur
+    l'utilisent (la couche interface n'imprime jamais cette valeur).
+    """
+    provider = _valider_provider(provider)
+    valeurs = _lire_env(env_path)
+    return (os.environ.get(_key_name(provider))
+            or valeurs.get(_key_name(provider))) or None
+
+
+def fournisseur_actif(env_path: str | None = None) -> str:
+    """Fournisseur distant actif (environnement puis .env, defaut 'groq')."""
+    valeurs = _lire_env(env_path)
+    return (os.environ.get("MILES_REMOTE_PROVIDER")
+            or valeurs.get("MILES_REMOTE_PROVIDER", "groq")).lower()
+
+
+def modele_actif(env_path: str | None = None) -> str | None:
+    """Modele distant actif (environnement puis .env), ou None si absent."""
+    valeurs = _lire_env(env_path)
+    return (os.environ.get("MILES_REMOTE_MODEL")
+            or valeurs.get("MILES_REMOTE_MODEL")) or None
