@@ -36,7 +36,7 @@ class PersistentMemory:
         max_content_length: longueur max du contenu d'un souvenir.
     """
 
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
 
     def __init__(
         self,
@@ -111,6 +111,27 @@ class PersistentMemory:
                 "ALTER TABLE memories ADD COLUMN owner_user_id "
                 "TEXT NOT NULL DEFAULT ''"
             )
+        # Migration v3 (spécification MEMOIRE_AVANCEE) : type de savoir et
+        # liens entre souvenirs. Ajouts NON destructifs ; le défaut
+        # 'inconnu' conserve le comportement historique (rien n'est prouvé).
+        if "kind" not in columns:
+            cursor.execute(
+                "ALTER TABLE memories ADD COLUMN kind "
+                "TEXT NOT NULL DEFAULT 'inconnu'"
+            )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS memory_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_id INTEGER NOT NULL,
+                target_id INTEGER NOT NULL,
+                relation TEXT NOT NULL,
+                confidence TEXT NOT NULL DEFAULT 'signale',
+                created_at TEXT NOT NULL,
+                UNIQUE(source_id, target_id, relation)
+            )
+            """
+        )
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS preferences (
@@ -171,12 +192,16 @@ class PersistentMemory:
 
     # --- Mémoires explicites ---
 
+    #: Valeurs autorisées pour le type de savoir (spéc. MEMOIRE_AVANCEE).
+    KINDS = ("inconnu", "fait", "hypothese")
+
     def add_memory(
         self,
         content: str,
         category: str = "general",
         importance: int = 1,
         owner_user_id: str = "",
+        kind: str = "inconnu",
     ) -> int:
         """Enregistrer un souvenir explicite.
 
@@ -187,13 +212,16 @@ class PersistentMemory:
             owner_user_id: propriétaire du souvenir. La chaîne vide
                 désigne un souvenir **partagé** (console locale) : il est
                 visible par tous mais n'est attribué à personne.
+            kind: type de savoir — 'inconnu' (défaut honnête, rien n'est
+                prouvé), 'fait' (uniquement promotion humaine via /fait),
+                'hypothese' (proposition explicite).
 
         Returns:
             l'identifiant du souvenir créé.
 
         Raises:
             PersistentMemoryError: si la mémoire est désactivée/indisponible,
-                                   ou si le contenu contient un secret.
+                                   le contenu contient un secret, ou kind invalide.
         """
         if not self.is_available:
             raise PersistentMemoryError(
@@ -206,6 +234,11 @@ class PersistentMemory:
         if len(content) > self.max_content_length:
             raise PersistentMemoryError(
                 f"Le souvenir dépasse {self.max_content_length} caractères."
+            )
+
+        if kind not in self.KINDS:
+            raise PersistentMemoryError(
+                f"Type de savoir invalide : {kind!r} (valeurs : {', '.join(self.KINDS)})."
             )
 
         if self._contains_secret(content):
@@ -221,22 +254,222 @@ class PersistentMemory:
             cursor.execute(
                 """
                 INSERT INTO memories (
-                    content, category, importance, owner_user_id,
+                    content, category, importance, owner_user_id, kind,
                     created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     content.strip(),
                     category,
                     int(importance),
                     str(owner_user_id or ""),
+                    kind,
                     now,
                     now,
                 ),
             )
+            mem_id = int(cursor.lastrowid)
+            # Règles strictes de détection (spéc. §4) : jamais d'affirmation,
+            # uniquement des liens marqués 'signale'.
+            self._detecter_liens(cursor, mem_id, content.strip(),
+                                 str(owner_user_id or ""), now)
             self._conn.commit()
-            return int(cursor.lastrowid)
+            return mem_id
+
+    @staticmethod
+    def _normaliser(texte: str) -> str:
+        """Forme canonique (minuscules, sans accents, espaces simples)."""
+        import unicodedata
+        brut = str(texte).lower().strip().rstrip(".")
+        sans_accents = "".join(
+            c for c in unicodedata.normalize("NFKD", brut)
+            if not unicodedata.combining(c)
+        )
+        return " ".join(sans_accents.split())
+
+    @classmethod
+    def _sans_negation(cls, texte: str) -> str:
+        """Retirer les marqueurs de négation (règle STRICTE de la spec).
+
+        Deux phrases identiques après ce traitement, mais différentes à
+        l'origine, sont signalées comme potentiellement contradictoires —
+        JAMAIS comme un fait confirmé.
+        """
+        t = cls._normaliser(texte)
+        for marqueur in ("ne ", "n'", "pas ", "jamais ", "plus "):
+            t = t.replace(marqueur, " ")
+        return " ".join(t.split())
+
+    def _detecter_liens(self, cursor: Any, mem_id: int, contenu: str,
+                        owner: str, now: str) -> None:
+        """Détecter duplique/contradit avec les souvenirs VISIBLES (lecture stricte).
+
+        Visibilité : mêmes règles que list_memories (même propriétaire ou partagé).
+        Les liens sont toujours créés avec confidence='signale' : la machine
+        propose, un humain confirme (commande /confirmer).
+        """
+        if owner:
+            candidats = cursor.execute(
+                "SELECT id, content FROM memories "
+                "WHERE id != ? AND (owner_user_id = ? OR owner_user_id = '')",
+                (mem_id, owner),
+            ).fetchall()
+        else:
+            candidats = cursor.execute(
+                "SELECT id, content FROM memories WHERE id != ?",
+                (mem_id,),
+            ).fetchall()
+        norm = self._normaliser(contenu)
+        norm_sans_neg = self._sans_negation(contenu)
+        for autre_id, autre in candidats:
+            autre_norm = self._normaliser(autre)
+            relation = None
+            if autre_norm == norm:
+                relation = "duplique"
+            elif (autre_norm != norm
+                    and self._sans_negation(autre) == norm_sans_neg):
+                relation = "contradit"
+            if relation:
+                cursor.execute(
+                    "INSERT OR IGNORE INTO memory_links "
+                    "(source_id, target_id, relation, confidence, created_at) "
+                    "VALUES (?, ?, ?, 'signale', ?)",
+                    (min(mem_id, autre_id), max(mem_id, autre_id),
+                     relation, now),
+                )
+
+    def list_links(
+        self,
+        relation: str | None = None,
+        owner_user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Lister les liens (contradictions/dupliqués) visibles.
+
+        Visibilité : les DEUX extrémités doivent être visibles pour
+        l'appelant (souvenirs de l'utilisateur ou partagés). Les liens
+        entre souvenirs d'un autre utilisateur ne sont jamais exposés.
+        """
+        if not self.is_available:
+            raise PersistentMemoryError(
+                "Mémoire persistante indisponible ou désactivée."
+            )
+        conditions = []
+        valeurs: list[Any] = []
+        if relation is not None:
+            conditions.append("l.relation = ?")
+            valeurs.append(relation)
+        if owner_user_id is not None:
+            conditions.append(
+                "(s.owner_user_id = ? OR s.owner_user_id = '') "
+                "AND (t.owner_user_id = ? OR t.owner_user_id = '')"
+            )
+            valeurs.extend([str(owner_user_id), str(owner_user_id)])
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        with self._lock:
+            assert self._conn is not None
+            rows = self._conn.execute(
+                f"""
+                SELECT l.id, l.source_id, l.target_id, l.relation,
+                       l.confidence, l.created_at,
+                       s.content AS source_content,
+                       t.content AS target_content
+                FROM memory_links l
+                JOIN memories s ON s.id = l.source_id
+                JOIN memories t ON t.id = l.target_id
+                {where}
+                ORDER BY l.created_at DESC
+                """,
+                tuple(valeurs),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def confirm_link(self, link_id: int, owner_user_id: str | None = None) -> bool:
+        """Confirmer humainement un lien (confidence 'signale' -> 'confirme').
+
+        Refuse si l'appelant ne voit pas les deux extrémités (isolation).
+        """
+        if not self.is_available:
+            raise PersistentMemoryError(
+                "Mémoire persistante indisponible ou désactivée."
+            )
+        with self._lock:
+            assert self._conn is not None
+            row = self._conn.execute(
+                """
+                SELECT l.id FROM memory_links l
+                JOIN memories s ON s.id = l.source_id
+                JOIN memories t ON t.id = l.target_id
+                WHERE l.id = ?
+                  AND (? IS NULL OR (s.owner_user_id = ? OR s.owner_user_id = ''))
+                  AND (? IS NULL OR (t.owner_user_id = ? OR t.owner_user_id = ''))
+                """,
+                (link_id, owner_user_id, owner_user_id,
+                 owner_user_id, owner_user_id),
+            ).fetchone()
+            if row is None:
+                return False
+            cursor = self._conn.execute(
+                "UPDATE memory_links SET confidence = 'confirme' WHERE id = ?",
+                (link_id,),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
+
+    def set_kind(
+        self, memory_id: int, kind: str, owner_user_id: str | None = None
+    ) -> bool:
+        """Changer le type de savoir d'un souvenir ('fait' ou 'hypothese').
+
+        Promotion en 'fait' : UNIQUEMENT par appel humain explicite (spec §3).
+        Refusé si l'appelant ne voit pas le souvenir.
+        """
+        if not self.is_available:
+            raise PersistentMemoryError(
+                "Mémoire persistante indisponible ou désactivée."
+            )
+        if kind not in ("fait", "hypothese"):
+            raise PersistentMemoryError(
+                f"Type non autorisé ici : {kind!r} (fait ou hypothese)."
+            )
+        with self._lock:
+            assert self._conn is not None
+            cursor = self._conn.execute(
+                """
+                UPDATE memories SET kind = ?, updated_at = ?
+                WHERE id = ?
+                  AND (? IS NULL OR owner_user_id = ? OR owner_user_id = '')
+                """,
+                (kind, self._now_iso(), memory_id,
+                 owner_user_id, owner_user_id),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def resume_memoire(memoires: list[dict[str, Any]],
+                       max_car: int = 2000) -> str:
+        """Rappel compact TOUT COURT (spéc §5) — fonction pure, aucun réseau.
+
+        Ordre : faits d'abord, puis hypothèses, puis inconnus (partagés
+        compris), chaque souvenir marqué [fait]/[hypothèse]/[?], contenu
+        tronqué à max_car (le appelant applique aussi ses propres bornes).
+        """
+        ordre = {"fait": 0, "hypothese": 1, "inconnu": 2}
+        tri = sorted(
+            memoires, key=lambda m: (ordre.get(str(m.get("kind", "inconnu")), 3), -int(m.get("importance", 1) or 1))
+        )
+        morceaux: list[str] = []
+        total = 0
+        for m in tri:
+            kind = str(m.get("kind", "inconnu"))
+            marque = {"fait": "[fait] ", "hypothese": "[hypothèse] "}.get(kind, "")
+            morceau = f"{marque}{m.get('content', '')}"
+            if total + len(morceau) > max_car:
+                break
+            morceaux.append(morceau)
+            total += len(morceau)
+        return "\n".join(morceaux)
 
     def list_memories(
         self,
@@ -279,7 +512,7 @@ class PersistentMemory:
             rows = cursor.execute(
                 f"""
                 SELECT id, content, category, importance, owner_user_id,
-                       created_at, updated_at
+                       kind, created_at, updated_at
                 FROM memories
                 {where}
                 ORDER BY importance DESC, created_at DESC

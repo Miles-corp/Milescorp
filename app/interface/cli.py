@@ -39,6 +39,10 @@ HELP_TEXT = """\nCommandes disponibles :
   /memory-search Rechercher un terme dans les souvenirs (usage: /memory-search <terme>)
   /export      Exporter la conversation vers data/notes (usage: /export [nom.md])
   /forget      Supprimer un souvenir (usage: /forget <id>)
+  /fait <id>   Marquer un souvenir comme [fait] (confirmation humaine)
+  /hypothese <texte>  Enregistrer une hypothèse (jamais un fait)
+  /contradictions     Lister les contradictions/dupliqués signalés
+  /confirmer <id>     Confirmer un lien de contradiction
   /conversations Lister les conversations enregistrées
   /new         Démarrer une nouvelle conversation
   /tools       Lister les outils disponibles
@@ -335,6 +339,69 @@ class CLI:
                 print(f"Souvenir {memory_id} supprimé.")
             else:
                 print(f"Aucun souvenir avec l'id {memory_id}.")
+        elif cmd == "/fait":
+            # Promotion en 'fait' : uniquement humaine (spéc MEMOIRE_AVANCEE §3).
+            if self.memory is None or not self.memory.is_available:
+                print("Mémoire persistante indisponible ou désactivée.")
+                return
+            if not args:
+                print("Usage : /fait <id>")
+                return
+            try:
+                memory_id = int(args[0])
+            except ValueError:
+                print("L'identifiant doit être un nombre.")
+                return
+            if self.memory.set_kind(memory_id, "fait", owner_user_id=self.session_id):
+                print(f"Souvenir {memory_id} marqué comme [fait].")
+            else:
+                print(f"Souvenir {memory_id} introuvable ou non visible.")
+        elif cmd == "/hypothese":
+            if self.memory is None or not self.memory.is_available:
+                print("Mémoire persistante indisponible ou désactivée.")
+                return
+            if not args:
+                print("Usage : /hypothese <texte>")
+                return
+            try:
+                mem_id = self.memory.add_memory(
+                    " ".join(args), kind="hypothese",
+                    owner_user_id=self.session_id,
+                )
+                print(f"Hypothèse enregistrée (id {mem_id}).")
+            except PersistentMemoryError as exc:
+                print(f"Erreur : {exc}")
+        elif cmd == "/contradictions":
+            if self.memory is None or not self.memory.is_available:
+                print("Mémoire persistante indisponible ou désactivée.")
+                return
+            liens = self.memory.list_links(owner_user_id=self.session_id)
+            if not liens:
+                print("Aucun lien signalé (contradiction ou doublon).")
+                return
+            print(f"Liens signalés ({len(liens)}) :")
+            for lien in liens:
+                statut = lien["confidence"]
+                src = str(lien.get("source_content", ""))[:40]
+                tgt = str(lien.get("target_content", ""))[:40]
+                print(f"  #{lien['id']} [{lien['relation']}/{statut}] {src} <-> {tgt}")
+            print("Confirmer : /confirmer <id> — aucune affirmation automatique.")
+        elif cmd == "/confirmer":
+            if self.memory is None or not self.memory.is_available:
+                print("Mémoire persistante indisponible ou désactivée.")
+                return
+            if not args:
+                print("Usage : /confirmer <id du lien>")
+                return
+            try:
+                link_id = int(args[0])
+            except ValueError:
+                print("L'identifiant doit être un nombre.")
+                return
+            if self.memory.confirm_link(link_id, owner_user_id=self.session_id):
+                print(f"Lien {link_id} confirmé (confidence : confirme).")
+            else:
+                print(f"Lien {link_id} introuvable ou non visible.")
         else:
             print(f"Commande inconnue : {cmd}. Tapez /help pour l'aide.")
 
