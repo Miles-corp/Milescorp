@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MILES — cockpit projet</title>
+<meta name="description" content="Cockpit local de contrôle du projet MILES : tâches, blocages, décisions et messages lus depuis les documents de coordination.">
+<meta property="og:title" content="MILES — cockpit projet">
+<meta property="og:description" content="Pilotage du projet MILES : tâches, blocages, décisions, messages.">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<a class="skip-link" href="#contenu">Aller au contenu</a>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">M</span>
+    <span class="brand-text">
+      <h1 class="brand-name">MILES</h1>
+      <span class="brand-sub">cockpit projet</span>
+    </span>
+  </div>
+
+  <nav class="tabs" aria-label="Vues principales">
+    <button class="tab" id="tab-projet" type="button" role="tab" aria-selected="true" aria-controls="vue-projet" data-view="projet">Projet</button>
+    <button class="tab" id="tab-chat" type="button" role="tab" aria-selected="false" aria-controls="vue-chat" data-view="chat" tabindex="-1">Conversation</button>
+    <button class="tab" id="tab-memoire" type="button" role="tab" aria-selected="false" aria-controls="vue-memoire" data-view="memoire" tabindex="-1">Mémoire</button>
+    <button class="tab" id="tab-outils" type="button" role="tab" aria-selected="false" aria-controls="vue-outils" data-view="outils" tabindex="-1">Outils</button>
+  </nav>
+
+  <div class="topbar-right" id="topbar-session" hidden>
+    <label class="agent-field" for="agent">Je suis
+      <select id="agent">
+        <option value="Agent A">Agent A</option>
+        <option value="Agent B">Agent B</option>
+      </select>
+    </label>
+    <button class="btn btn-ghost" id="logout" type="button">Quitter</button>
+  </div>
+</header>
+
+<main id="contenu">
+  <section class="login" id="login" aria-labelledby="login-title">
+    <p class="eyebrow">Session locale</p>
+    <h2 id="login-title">Ouvrir le cockpit</h2>
+    <p class="muted">L'interface écoute uniquement sur <code>127.0.0.1</code> et exige le jeton d'accès affiché au démarrage de <code>miles.py --web</code>.</p>
+    <form id="login-form" novalidate>
+      <label for="token">Jeton d'accès</label>
+      <div class="login-row">
+        <input id="token" name="token" type="password" autocomplete="off" required>
+        <button class="btn btn-primary" type="submit">Se connecter</button>
+      </div>
+      <p class="form-error" id="login-error" role="alert" hidden></p>
+    </form>
+  </section>
+
+  <div id="app" hidden>
+    <section class="health" aria-label="Santé du service">
+      <article class="health-item">
+        <p class="health-label">Fournisseur</p>
+        <p class="health-value" id="health-provider">—</p>
+        <p class="health-note" id="health-provider-note"></p>
+      </article>
+      <article class="health-item">
+        <p class="health-label">Mémoire</p>
+        <p class="health-value" id="health-memory">—</p>
+        <p class="health-note">Souvenirs explicites, base locale</p>
+      </article>
+      <article class="health-item">
+        <p class="health-label">Documents</p>
+        <p class="health-value" id="health-docs">—</p>
+        <p class="health-note" id="health-docs-note"></p>
+      </article>
+      <article class="health-item">
+        <p class="health-label">Session</p>
+        <p class="health-value" id="health-session">—</p>
+        <p class="health-note">Jeton en mémoire vive uniquement</p>
+      </article>
+    </section>
+
+    <section class="view" id="vue-projet" role="tabpanel" aria-labelledby="tab-projet">
+      <div class="view-head">
+        <div>
+          <p class="eyebrow">Pilotage</p>
+          <h2>État du projet</h2>
+          <p class="muted" id="board-meta">Chargement des documents de coordination…</p>
+        </div>
+        <div class="view-actions">
+          <button class="btn" id="refresh-board" type="button">Rafraîchir</button>
+        </div>
+      </div>
+
+      <p class="form-error" id="board-error" role="alert" hidden></p>
+
+      <div class="summary" id="summary" aria-live="polite"></div>
+
+      <h2 class="board-title">Tableau des tâches</h2>
+      <div class="grid">
+        <div class="board" id="board" aria-live="polite"></div>
+        <aside class="side">
+          <section class="panel">
+            <h2>Blocages</h2>
+            <ul class="plain" id="blockages"></ul>
+          </section>
+          <section class="panel">
+            <h2>Décisions récentes</h2>
+            <ol class="decisions" id="decisions"></ol>
+          </section>
+          <section class="panel">
+            <h2>Messages en attente</h2>
+            <ul class="plain" id="messages"></ul>
+          </section>
+          <section class="panel">
+            <h2>Anomalies détectées</h2>
+            <ul class="plain" id="issues"></ul>
+          </section>
+        </aside>
+      </div>
+    </section>
+
+    <section class="view" id="vue-chat" role="tabpanel" aria-labelledby="tab-chat" hidden>
+      <div class="view-head">
+        <div>
+          <p class="eyebrow">Conversation</p>
+          <h2>Parler à MILES</h2>
+          <p class="muted">Le contexte de session est conservé côté serveur ; les souvenirs persistants sont explicites.</p>
+        </div>
+      </div>
+      <div class="chat" id="chat" aria-live="polite">
+        <div class="msg system">Bienvenue. Écrivez votre message ci-dessous.</div>
+      </div>
+      <form class="chat-form" id="chat-form">
+        <label class="sr-only" for="message">Votre message</label>
+        <input id="message" name="message" type="text" autocomplete="off" placeholder="Votre message…">
+        <button class="btn btn-primary" type="submit">Envoyer</button>
+      </form>
+    </section>
+
+    <section class="view" id="vue-memoire" role="tabpanel" aria-labelledby="tab-memoire" hidden>
+      <div class="view-head">
+        <div>
+          <p class="eyebrow">Mémoire</p>
+          <h2>Souvenirs enregistrés</h2>
+          <p class="muted">Ajout et suppression uniquement sur demande explicite. Les secrets sont refusés par le serveur.</p>
+        </div>
+      </div>
+      <form class="inline-form" id="memory-form">
+        <label class="sr-only" for="memory-content">Nouveau souvenir</label>
+        <input id="memory-content" name="content" type="text" autocomplete="off" placeholder="Ex. : je préfère les réponses courtes">
+        <button class="btn btn-primary" type="submit">Mémoriser</button>
+      </form>
+      <ul class="memories" id="memories"></ul>
+    </section>
+
+    <section class="view" id="vue-outils" role="tabpanel" aria-labelledby="tab-outils" hidden>
+      <div class="view-head">
+        <div>
+          <p class="eyebrow">Outils</p>
+          <h2>Catalogue des outils</h2>
+          <p class="muted">Les actions sensibles demandent une confirmation humaine explicite.</p>
+        </div>
+      </div>
+      <div class="tools" id="tools"></div>
+    </section>
+  </div>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>
