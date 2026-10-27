@@ -41,6 +41,7 @@
         sessionStorage.setItem(SK, r.json.session_id);
         sessionStorage.setItem(CK, r.json.csrf_token || "");
         toast("Connecte a MILES (" + (r.json.user_id || "local") + ").", true);
+        setTimeout(loadTelemetry, 0);
         return true;
       }
       toast("Connexion refusee : " + (r.json && r.json.error ? r.json.error : "HTTP " + r.status), false);
@@ -124,7 +125,7 @@
   }
   _killWatermark();
   if (window.MutationObserver && document.documentElement) {
-    new MutationObserver(function () { _killWatermark(); _repairTexts(); _truth(); })
+    new MutationObserver(function () { _killWatermark(); _repairTexts(); _truth(); _liveTiles(); })
       .observe(document.documentElement, { childList: true, subtree: true });
   }
   document.addEventListener("click", function (e) {
@@ -183,6 +184,192 @@
     } catch (e) { clearInterval(_skipTimer); }
   }, 500);
 
+  /* --- Telemetrie reelle (GET /api/device) --------------------------------
+     L'interface de demonstration affiche des valeurs fabriquees (Math.random).
+     On les remplace par des mesures effectives du poste qui heberge MILES, et
+     par un « indisponible » explicite pour les capteurs qui n'existent pas.
+     Aucune valeur n'est inventee, aucun secret n'est affiche. */
+  var TELEM = null;
+  var LATENCE_MS = null;   // aller-retour mesure vers MILES (loopback)
+
+  function _fmtDuree(sec) {
+    sec = Math.max(0, sec | 0);
+    var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+    if (h) return h + " h " + m + " min";
+    if (m) return m + " min";
+    return sec + " s";
+  }
+
+  function _ms() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
+
+  function loadTelemetry() {
+    if (!sessionStorage.getItem(SK)) return Promise.resolve(null);
+    var t0 = _ms();
+    return api("GET", "/api/device").then(function (r) {
+      var t1 = _ms();
+      if (r.status === 200 && r.json && r.json.host) {
+        LATENCE_MS = Math.max(1, Math.round(t1 - t0));
+        TELEM = r.json;
+        try { _truth(); _paintTelemetry(); _liveTiles(); } catch (e) {}
+      }
+      return TELEM;
+    }).catch(function () { return TELEM; });
+  }
+
+  /* --- Tuiles de demonstration -> mesures reelles ------------------------
+     L'application de demonstration fabrique la charge, la batterie, les
+     ventilateurs, le signal, la latence et la session. Aucune de ces mesures
+     n'existe cote MILES : on affiche la mesure reelle quand elle existe, et un
+     « non mesure » explicite sinon — jamais un chiffre plausible a la place
+     d'un capteur absent. */
+  var TUILE = {
+    "charge": function () { return "non mesur\u00e9e"; },
+    "batterie": function () { return "non suivie"; },
+    "ventilateurs": function () { return "non expos\u00e9s"; },
+    "signal": function () { return "non mesur\u00e9"; },
+    "bande passante": function () { return "non mesur\u00e9e"; },
+    "latence": function () {
+      return LATENCE_MS === null ? "non mesur\u00e9e" : LATENCE_MS + " ms (locale)";
+    },
+    "session": function () {
+      var p = (TELEM && TELEM.process) || null;
+      return p && p.uptime_seconds !== undefined ? _fmtDuree(p.uptime_seconds) : "non mesur\u00e9e";
+    }
+  };
+  var VALEUR = /^\d{1,4}(?:[.,]\d{1,2})?\s*(?:%|rpm|ms|Mbps|Mbit\/s|h|min|s|\u00b0C)$/i;
+  var DUREE = /^\d{1,3}\s*h\s*\d{1,2}\s*min$/i;
+
+  function _dansUnControle(el) {
+    var n = el;
+    for (var i = 0; i < 4 && n; i++, n = n.parentElement) {
+      if (n.querySelector && n.querySelector("input[type=range],[role=slider]")) return true;
+    }
+    return false;
+  }
+
+  function _valeurDe(labelEl) {
+    /* Candidats volontairement limites aux VOISINS IMMEDIATS du libelle et de
+       son conteneur : remonter plus haut faisait ecrire la latence dans la
+       tuile voisine (la tuile suivante contient elle aussi un nombre). */
+    var candidats = [];
+    var branche = labelEl.parentElement;
+    if (labelEl.nextElementSibling) candidats.push(labelEl.nextElementSibling);
+    if (branche) {
+      if (branche.nextElementSibling) candidats.push(branche.nextElementSibling);
+      if (branche.previousElementSibling) candidats.push(branche.previousElementSibling);
+    }
+    for (var j = 0; j < candidats.length; j++) {
+      var n = candidats[j];
+      if (n === labelEl || n.contains(labelEl)) continue;
+      var t = (n.textContent || "").trim().replace(/[\s\u00a0]+/g, " ");
+      if (n.children.length === 0 && (VALEUR.test(t) || DUREE.test(t))) return n;
+      if (n.children.length <= 2) {
+        for (var k = 0; k < n.children.length; k++) {
+          var c = n.children[k];
+          if (c === labelEl || (c.contains && c.contains(labelEl))) continue;
+          var ct = (c.textContent || "").trim().replace(/[\s\u00a0]+/g, " ");
+          if (c.children.length === 0 && (VALEUR.test(ct) || DUREE.test(ct))) return c;
+        }
+      }
+    }
+    return null;
+  }
+
+  function _liveTiles() {
+    if (!document.body || !TELEM) return;
+    if (_liveTilesEnCours) return;      // jamais reentrant (observer + intervalle)
+    _liveTilesEnCours = true;
+    try { _liveTilesPasse(); } finally { _liveTilesEnCours = false; }
+  }
+
+  var _liveTilesEnCours = false;
+
+  function _liveTilesPasse() {
+    var cles = Object.keys(TUILE);
+    document.querySelectorAll("p,span,dt,strong").forEach(function (el) {
+      if (el.children.length) return;                       // libelle feuille
+      var cle = (el.textContent || "").trim().toLowerCase().replace(/[\s\u00a0]+/g, " ");
+      if (cles.indexOf(cle) === -1) return;
+      if (_dansUnControle(el)) return;                      // jamais un reglage
+      var cible = _valeurDe(el);
+      if (!cible) return;
+      var texte = TUILE[cle]();
+      if ((cible.textContent || "").trim() === texte) return;   // rien a faire : aucune mutation
+      cible.setAttribute("data-mts-live", cle);                  // marque AVANT d'ecrire
+      cible.textContent = texte;
+    });
+  }
+
+  function _telemetryRows() {
+    if (!TELEM) return null;
+    var host = TELEM.host || {}, disk = TELEM.disk || {};
+    var proc = TELEM.process || {}, prov = TELEM.provider || {};
+    var rows = [
+      ["Hote", host.name + " · " + host.system + " " + host.release],
+      ["Processeur", host.cpu_count + " cœurs logiques"],
+      ["Disque", disk.available ? disk.used_percent + " % utilise · " +
+        Math.round(disk.free_bytes / 1073741824) + " Gio libres" : "indisponible"],
+      ["Processus", "pid " + proc.pid + " · en service " + _fmtDuree(proc.uptime_seconds)],
+      ["Fournisseur", prov.name],
+      ["Modele", prov.model],
+      ["Memoire", (TELEM.memory && TELEM.memory.label) || "—"]
+    ];
+    return rows;
+  }
+
+  function _paintTelemetry() {
+    if (!document.body) return;
+    var surBoitier = /\/(device|boitier)\/?$/.test(location.pathname);
+    var box = document.getElementById("miles-telemetry");
+    if (!surBoitier || !TELEM) { if (box) box.remove(); return; }
+    if (!box) {
+      box = document.createElement("section");
+      box.id = "miles-telemetry";
+      box.setAttribute("aria-label", "Telemetrie reelle MILES");
+      box.style.cssText = "position:fixed;left:16px;bottom:84px;z-index:99997;width:300px;max-width:calc(100vw - 32px);" +
+        "background:#12161d;border:1px solid #232936;border-radius:12px;padding:12px 14px;" +
+        "font:12px/1.5 system-ui,sans-serif;color:#e6e8ee;box-shadow:0 12px 32px rgba(0,0,0,.5)";
+      var head = document.createElement("div");
+      head.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px";
+      var titre = document.createElement("strong");
+      titre.textContent = "Donnees reelles · MILES local";
+      titre.style.fontSize = "11px";
+      var fermer = document.createElement("button");
+      fermer.type = "button"; fermer.textContent = "×";
+      fermer.setAttribute("aria-label", "Masquer la telemetrie");
+      fermer.style.cssText = "background:none;border:0;color:#9aa1b3;font-size:16px;cursor:pointer;line-height:1";
+      fermer.onclick = function () { box.remove(); };
+      head.appendChild(titre); head.appendChild(fermer);
+      var dl = document.createElement("dl");
+      dl.id = "miles-telemetry-body";
+      dl.style.cssText = "margin:0;display:grid;grid-template-columns:88px 1fr;gap:4px 8px";
+      box.appendChild(head); box.appendChild(dl);
+      document.body.appendChild(box);
+    }
+    var dl = document.getElementById("miles-telemetry-body");
+    var rows = _telemetryRows();
+    if (!dl || !rows) return;
+    var signature = JSON.stringify(rows);
+    if (dl.dataset.signature === signature) return;  // aucune mutation inutile
+    dl.dataset.signature = signature;
+    dl.textContent = "";
+    rows.forEach(function (pair) {
+      var dt = document.createElement("dt");
+      dt.textContent = pair[0];
+      dt.style.cssText = "color:#9aa1b3;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em";
+      var dd = document.createElement("dd");
+      dd.textContent = pair[1];
+      dd.style.cssText = "margin:0;overflow-wrap:anywhere";
+      dl.appendChild(dt); dl.appendChild(dd);
+    });
+    var capteurs = document.createElement("p");
+    capteurs.style.cssText = "margin:10px 0 0;color:#9aa1b3;font-size:10.5px";
+    capteurs.textContent = "Capteurs boitier : " + ((TELEM.sensors || []).map(function (s) {
+      return s.label + " indisponible";
+    }).join(" · ") || "—");
+    dl.appendChild(capteurs);
+  }
+
   function _repairTexts() {
     document.querySelectorAll("[aria-label]").forEach(function (el) {
       if (el.dataset.mts) return;
@@ -195,6 +382,12 @@
       if (aria.indexOf("\u00b0C") !== -1 || aria === "Miles est en ligne" || aria === "Miles LOCAL" || aria === "LOCAL" ||
           aria === "Hors ligne" || aria === "Aucune adresse" || aria.indexOf("miles-local") !== -1 ||
           aria.indexOf("d\u00e9mo") !== -1 || aria.indexOf("\u00c9veill") === 0) return; // libelle faux : ne pas ressusciter
+      // Valeur de demonstration gravee dans l'aria-label (charge, batterie,
+      // ventilateurs, signal, latence, session) : la restaurer annulerait la
+      // mesure reelle et declencherait une boucle de micro-taches avec
+      // _liveTiles (chaque mutation en rappelle une autre).
+      if (VALEUR.test(aria) || DUREE.test(aria)) return;
+      if (el.querySelector("[data-mts-live]")) return;   // deja remplace : intouchable
       var vis = (el.textContent || "").trim().replace(/[\s\u00a0]+/g, " ");
       if (vis && vis !== aria) el.textContent = aria;   // texte degrade par l'animation
     });
@@ -203,25 +396,30 @@
   function _truth() {
     if (!document.body) return;
     var actif = !!sessionStorage.getItem(SK);
+    var te = TELEM;
+    var reel = !!(te && te.host);
     var reTemp = /\d{1,3}\s*\u00b0C/;
     document.querySelectorAll("div,span,p,li,b,strong,em,i,small,code").forEach(function (el) {
       var t = (el.textContent || "").trim().replace(/[\s\u00a0]+/g, " ");
       if (!t || t.length > 75) return;
       var remplace = null;
       if (reTemp.test(t) && t.length <= 50 && !/^Erreur|^Capteurs/.test(t)) {
-        remplace = "\u26a0 pas de capteurs";        // valeur materielle inexistante -> ERREUR
+        // La temperature n'existe pas, mais le reste de la machine est
+        // mesurable : on affiche une donnee reelle a la place du chiffre faux.
+        remplace = reel ? "CPU " + te.host.cpu_count + " cœurs · disque " + te.disk.used_percent + " %"
+                        : "\u26a0 pas de capteurs";
       } else if (t.indexOf("Miles est en ligne") === 0) {
-        remplace = "\u26a0 hors ligne";        // fausse affirmation -> ERREUR
+        remplace = reel ? "Miles repond (MILES local)" : "\u26a0 hors ligne";
       } else if (t === "\u00c9veill\u00e9" || t.indexOf("\u00c9veill\u00e9") === 0) {
-        remplace = "\u26a0 hors ligne";
+        remplace = reel ? "en service " + _fmtDuree((te.process || {}).uptime_seconds) : "\u26a0 hors ligne";
       } else if (t === "Miles LOCAL" || t === "LOCAL") {
-        remplace = "\u26a0 source absente";
+        remplace = reel ? String((te.provider || {}).mode || "local") : "\u26a0 source absente";
       } else if (t === "miles-local-7b") {
-        remplace = "\u26a0 id introuvable";
+        remplace = reel ? String((te.provider || {}).model || "—") : "\u26a0 id introuvable";
       } else if (t === "Aucune adresse") {
-        remplace = actif ? "MILES 127.0.0.1" : "\u26a0 aucune source";
+        remplace = reel ? "127.0.0.1:8080" : (actif ? "MILES 127.0.0.1" : "\u26a0 aucune source");
       } else if (t === "Hors ligne") {
-        remplace = "\u26a0 Bo\u00eetier non connect\u00e9";
+        remplace = reel ? "connecte · 127.0.0.1:8080" : "\u26a0 Bo\u00eetier non connecte";
       } else {
         return;
       }
@@ -236,10 +434,11 @@
       if (actuel === remplace) return;
       el.textContent = remplace;
     });
-    _badge(actif);
+    _badge();
   }
 
-  function _badge(actif) {
+  function _badge() {
+    var actif = !!TELEM;   // allume seulement si MILES a REELLEMENT repondu
     var b = document.getElementById("miles-badge");
     if (!b) {
       if (!document.body) return;
@@ -248,7 +447,7 @@
       b.style.cssText = "position:fixed;top:12px;right:12px;z-index:99998;font:600 12px system-ui;padding:6px 12px;border-radius:99px;pointer-events:none";
       document.body.appendChild(b);
     }
-    var label = actif ? "MILES ● actif (127.0.0.1)" : "MILES ○ non connecté";
+    var label = actif ? "MILES ● actif (127.0.0.1)" : "MILES ○ aucune mesure";
     if (b.textContent !== label) b.textContent = label;   // garde : AUCUNE mutation si inchange (sinon boucle observer)
     var etat = actif ? "1" : "0";
     if (b.dataset.on !== etat) {
@@ -258,7 +457,7 @@
       b.style.border = "1px solid " + (actif ? "#34d399" : "#5a6173");
     }
   }
-  _badge(false);
+  _badge();
 
   /* Connecteurs reels supplementaires (pages du cockpit -> routes MILES) */
   ACTIONS.push(
@@ -296,7 +495,7 @@
      L'app React ne connait pas cette page ; on ajoute un lien vers la page
      servie par serve.py (/projet). Aucun contenu n'est injecte dans le DOM
      React : la page est autonome et partage la session MILES de l'onglet. */
-  var BASE = (location.pathname.match(/^\/preview\/[^\/]+\/[^\/]+/) || [""])[0];
+  var BASE = "";
 
   function _addProjectLink() {
     document.querySelectorAll('nav[aria-label="Navigation principale"]').forEach(function (nav) {
@@ -306,6 +505,14 @@
         var a = modele.cloneNode(true);
         a.setAttribute("data-miles-projet", "1");
         a.setAttribute("href", BASE + "/projet");
+        // Le modele clone est un Link React : sans ce garde, React Router
+        // intercepte le clic et affiche son propre 404. On force la navigation
+        // complete, en capture, avant que le routeur ne voie l'evenement.
+        a.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          window.location.assign(a.getAttribute("href"));
+        }, true);
         a.removeAttribute("aria-current");
         a.classList.remove("is-active", "active");
         a.style.background = "";
@@ -321,7 +528,7 @@
   }
   _addProjectLink();
   setInterval(function () { try { _addProjectLink(); } catch (e) {} }, 1500);
-  setInterval(function () { try { _repairTexts(); _truth(); } catch (e) {} }, 3000);
+  setInterval(function () { try { _repairTexts(); _truth(); _liveTiles(); } catch (e) {} }, 1500);
 
   function _openSettingsPanel() {
     var old = document.getElementById("miles-settings");
@@ -388,6 +595,19 @@
     };
   }
 
-  window.MILES_BRIDGE = { api: api, toast: toast, ensureSession: ensureSession, version: "1.0" };
-  setTimeout(function () { toast("Pont MILES actif — boutons Statut / Firmware / Furtif et chat reli\u00e9s a 127.0.0.1:8080.", true); }, 1500);
+  window.MILES_BRIDGE = { api: api, toast: toast, ensureSession: ensureSession, version: "1.1" };
+
+  /* Telemetrie : chargee des qu'une session existe, rafraichie doucement
+     (une requete locale toutes les 15 s, pas de boucle serree). */
+  if (sessionStorage.getItem(SK)) { setTimeout(loadTelemetry, 600); }
+  setInterval(function () {
+    if (sessionStorage.getItem(SK)) loadTelemetry();
+  }, 15000);
+
+  setTimeout(function () {
+    toast(sessionStorage.getItem(SK)
+      ? "Pont MILES actif — donnees reelles via 127.0.0.1:8080."
+      : "Session MILES non ouverte : la telemetrie reelle s'affichera apres connexion.",
+      !!sessionStorage.getItem(SK));
+  }, 1500);
 })();

@@ -50,7 +50,7 @@ from app.interface.web_auth import (
     WebAuthenticator,
     WebSession,
 )
-from app.interface import project_board
+from app.interface import device_telemetry, project_board
 from app.utilities.redaction import REDACTED, sanitize_text
 
 logger = logging.getLogger("miles.web")
@@ -895,6 +895,8 @@ class MilesHandler(BaseHTTPRequestHandler):
             self._handle_list_missions(session)
         elif path.startswith("/mission/"):
             self._handle_mission_detail(path, session)
+        elif path == "/api/device":
+            self._handle_device()
         elif path == "/api/project":
             self._handle_project_board()
         elif path == "/api/tasks":
@@ -1089,6 +1091,33 @@ class MilesHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(payload)
+
+    def _handle_device(self) -> None:
+        """Repondre GET /api/device : telemetrie reelle du poste.
+
+        Aucune valeur n'est inventee : les capteurs absents sont declares
+        indisponibles avec leur raison. La route passe par la session comme
+        toutes les lectures sensibles.
+        """
+        if self.app is None:
+            self._send_json(500, {"error": "Application non initialisee"})
+            return
+        try:
+            payload = device_telemetry.build_telemetry(
+                provider=self.app.provider_state(),
+                memory_available=self.app.memory.is_available
+                if self.app.memory
+                else False,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "Telemetrie impossible (%s) : %s",
+                type(exc).__name__,
+                sanitize_text(exc),
+            )
+            self._send_json(500, {"error": "Telemetrie indisponible."})
+            return
+        self._send_json(200, payload)
 
     def _handle_project_board(self) -> None:
         """GET /api/project : pilotage complet (lecture seule)."""

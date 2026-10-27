@@ -113,6 +113,9 @@
   .panel li { font-size: 12px; color: var(--muted); border-left: 2px solid var(--border); padding-left: 8px; }
   .panel li.empty { border-color: transparent; padding-left: 0; }
   .panel li strong { display: block; color: var(--text); font-size: 12px; }
+  .panel li .msg summary { cursor: pointer; color: var(--muted); }
+  .panel li .msg summary:hover { color: var(--text); }
+  .panel li .msg p { margin: 6px 0 0; font-size: 11.5px; line-height: 1.5; }
   .panel code { color: var(--accent); font-size: 11px; }
   .toast {
     position: fixed; right: 16px; bottom: 16px; z-index: 99; max-width: 460px;
@@ -209,6 +212,7 @@
   var LABELS = { TODO: "À faire", IN_PROGRESS: "En cours", BLOCKED: "Bloqué", DONE: "Terminé", CANCELLED: "Annulé" };
   var COLUMNS = ["TODO", "IN_PROGRESS", "BLOCKED", "DONE"];
   var COLLAPSED = { DONE: 6 };
+  var SEUIL_MESSAGE = 220;
   var byId = function (id) { return document.getElementById(id); };
 
   function headers(extra) {
@@ -380,9 +384,14 @@
     var owner = document.createElement("span"); owner.className = "owner"; owner.textContent = t.owner || "non assignée";
     head.appendChild(id); head.appendChild(owner);
     var h = document.createElement("h4"); h.textContent = t.title || "(sans titre)";
-    var meta = document.createElement("p"); meta.className = "meta";
-    meta.textContent = t.updated ? "Mis à jour le " + t.updated : "Jamais mis à jour";
-    el.appendChild(head); el.appendChild(h); el.appendChild(meta);
+    el.appendChild(head); el.appendChild(h);
+    // Pas de date connue : on n'affiche rien plutot qu'une ligne vide.
+    // Le parseur renvoie parfois un tiret quand la cellule est vide.
+    if (t.updated && /\d/.test(t.updated)) {
+      var meta = document.createElement("p"); meta.className = "meta";
+      meta.textContent = "Mis à jour le " + t.updated;
+      el.appendChild(meta);
+    }
 
     if (t.description) {
       var d = document.createElement("details");
@@ -464,9 +473,25 @@
   function renderMessages(messages) {
     list("messages", (messages && messages.pending) || [], "Aucun message en attente.", function (m) {
       var li = document.createElement("li");
-      var strong = document.createElement("strong"); strong.textContent = m.id + " · " + m.route;
-      var body = document.createElement("span"); body.textContent = m.subject;
-      li.appendChild(strong); li.appendChild(body); return li;
+      var strong = document.createElement("strong");
+      strong.textContent = m.id + " · " + m.route + (m.date ? " · " + m.date : "");
+      li.appendChild(strong);
+      var texte = m.subject || "";
+      // Les messages de coordination sont longs : on montre l'essentiel et le
+      // reste se deplie, sinon le panneau devient un mur de texte illisible.
+      if (texte.length > SEUIL_MESSAGE) {
+        var d = document.createElement("details");
+        d.className = "msg";
+        var s = document.createElement("summary");
+        s.textContent = texte.slice(0, SEUIL_MESSAGE).replace(/\s+\S*$/, "") + "…";
+        var complet = document.createElement("p"); complet.textContent = texte;
+        d.appendChild(s); d.appendChild(complet);
+        li.appendChild(d);
+      } else {
+        var body = document.createElement("span"); body.textContent = texte;
+        li.appendChild(body);
+      }
+      return li;
     });
   }
 
