@@ -278,7 +278,7 @@ deux PC hors du dépôt.
 
 **Commits :** `209e39f` sur `feat/miles-box-packages`, puis **fusion `--no-ff` dans `main`** = `dcc3130`, poussée sur `origin/main` (exécutée par l'utilisateur sur son poste, l'agent n'ayant plus de shell). Branche conservée.
 
-**Tests exécutés :** contrôles ciblés **25 OK** (`test_boxtelemetry` 11, `test_web_lan` 10, `test_build_release` 6) ; suite complète **936 tests, 0 échec, 5 ignorés** sur la fusion ; `bash -n hardware/packages/pc-miles/install.sh` sans sortie. **Non exécuté :** installation sur Debian 13, flash du firmware sur le boîtier.
+**Tests exécutés :** contrôles ciblés **25 OK** (`test_boxtelemetry` **9**, `test_web_lan` **10**, `test_build_release` **6**) ; suite complète **936 tests, 0 échec, 5 ignorés** sur la fusion ; `bash -n hardware/packages/pc-miles/install.sh` sans sortie. **Non exécuté :** installation sur Debian 13, flash du firmware sur le boîtier.
 
 **Problèmes restants :** le firmware est compilé (`[SUCCESS]`, 1 103 072 octets) mais **jamais flashé** ; aucune installation n'a tourné sur le M75q ; la clé Gemini du multi-fournisseurs transite en paramètre d'URL (comportement de l'API, non journalisé) et reste à trancher par audit B.
 
