@@ -13,8 +13,8 @@ Usage : python3 scripts/build_release.py
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
-import os
 import tarfile
 from datetime import date
 from pathlib import Path
@@ -23,24 +23,38 @@ RACINE = Path(__file__).resolve().parent.parent
 PAQUETIER = RACINE / "hardware" / "packages"
 RELEASES = RACINE / "releases"
 
-#: Fichiers JAMAIS inclus dans les archives (secrets).
-EXCLUS = (
-    ".env",
+#: Segments de chemin jamais archivés : secrets locaux et artefacts de build.
+#: Comparaison sur les SEGMENTS, jamais sur le chemin complet : un motif
+#: « .pio/ » ne correspondrait ni à une entrée de dossier « .pio » ni à un
+#: séparateur Windows « \\ » (défaut corrigé : les archives partaient avec
+#: les artefacts de compilation et les caches Python).
+SEGMENTS_EXCLUS = frozenset({".env", ".pio", "__pycache__", ".git", ".pytest_cache"})
+
+#: Motifs de NOM de fichier jamais archivés.
+MOTIFS_EXCLUS = (
     "auth.json",
-    "*.pem", "*.key",
     "box_state.json",
-    ".pio/", "__pycache__/",
+    "*.pem",
+    "*.key",
+    "*.ini.local",   # identifiants WiFi/backend : seule la version vierge part
 )
 
 
 def exclure(nom: str) -> bool:
-    for motif in EXCLUS:
-        if nom.endswith(motif) or ("/" + motif) in "/" + nom:
-            return True
-    # Identifiants WiFi dans les .ini : on n'archive que la version vierge.
-    if nom.endswith(".ini.local"):
+    """Indiquer si un chemin relatif doit rester hors de l'archive.
+
+    Indépendant du séparateur : ``a/.pio/x`` et ``a\\.pio\\x`` sont traités
+    de la même façon. ``.env.example`` reste archivé (c'est un modèle, pas un
+    secret) ; ``.env`` jamais.
+    """
+    segments = [s for s in nom.replace("\\", "/").split("/") if s]
+    if any(segment in SEGMENTS_EXCLUS for segment in segments):
         return True
-    return False
+    return any(
+        fnmatch.fnmatch(segment, motif)
+        for segment in segments
+        for motif in MOTIFS_EXCLUS
+    )
 
 
 def construire_archive(nom_paquet: str, dossier: Path) -> Path:

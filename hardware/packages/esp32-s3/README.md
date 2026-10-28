@@ -43,7 +43,37 @@ pio device monitor   # journal série
 ```
 La LED passe au **vert** quand le backend box répond, **rouge** sinon.
 
+## Sécurité et honnêteté des mesures
+
+- **Aucune valeur inventée** : si aucun capteur de température n'est lu, le
+  champ n'est pas envoyé du tout (le backend enregistre le relevé sans
+  température). Il n'existe plus de `-1` ni de `-99` envoyé comme une mesure.
+- **Configuration incomplète = arrêt net** : si un marqueur `REPLACE_ME`
+  subsiste, le firmware affiche la raison et n'ouvre aucune connexion.
+- **URL de bouclage refusée** : `http://127.0.0.1:8095` (ou `localhost`,
+  `0.0.0.0`) désignerait l'ESP32 lui-même ; le firmware refuse de démarrer.
+- **Aucun port ouvert** : client uniquement, aucun serveur embarqué.
+
 ## État de la vérification
-- **Code source livré** (README, platformio.ini, main.cpp) ;
-- **Compilation et flash NON VÉRIFIÉS ici** (pas d'outil ESP32 dans le périmètre actuel) ;
-- **Tests backend** : `tests/test_boxtelemetry.py` (7/7 OK, Windows).
+
+- **Compilation réelle effectuée le 2026-10-28** (Windows, chaîne installée
+  pour l'occasion) :
+
+  | Élément | Valeur |
+  |---|---|
+  | Plateforme | `espressif32@8.0.0` |
+  | Toolchain | `toolchain-xtensa-esp-elf@14.2.0+20260121` |
+  | Framework | `framework-arduinoespressif32@4.30312.261024` |
+  | Résultat | `[SUCCESS] Took 1227.56 seconds` |
+  | Image | `firmware.bin`, 1 103 072 octets |
+  | RAM / Flash | 14,2 % (46 576 / 327 680 o) · 32,5 % (1 087 133 / 3 342 336 o) |
+
+  Commande exacte : `pio run -d hardware/packages/esp32-s3`.
+
+- **Flash et comportement sur matériel : NON VÉRIFIÉS** — aucun ESP32-S3
+  branché pendant cette vérification. La LED, le bouton et la liaison WiFi
+  réelle restent à confirmer sur le boîtier.
+- **Tests backend** : `tests/test_boxtelemetry.py`.
+- **Génération des archives** : `python3 scripts/build_release.py` (le dossier
+  `.pio/` de compilation n'entre jamais dans l'archive, vérifié par
+  `tests/test_build_release.py`).

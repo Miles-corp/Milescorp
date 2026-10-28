@@ -41,7 +41,7 @@
         sessionStorage.setItem(SK, r.json.session_id);
         sessionStorage.setItem(CK, r.json.csrf_token || "");
         toast("Connecte a MILES (" + (r.json.user_id || "local") + ").", true);
-        setTimeout(loadTelemetry, 0);
+        setTimeout(function () { loadTelemetry(); loadBoxTelemetry(); }, 0);
         return true;
       }
       toast("Connexion refusee : " + (r.json && r.json.error ? r.json.error : "HTTP " + r.status), false);
@@ -216,6 +216,118 @@
     }).catch(function () { return TELEM; });
   }
 
+  /* --- Boitier (backend boxtelemetry) ------------------------------------
+     Source : GET /api/box, relai en meme origine par le serveur Companion
+     vers le backend local (127.0.0.1:8095). Le navigateur n'apprend donc pas
+     l'existence de ce port et aucune requete inter-origine n'est necessaire.
+
+     Regle DEC-014 / DEC-016 §4 : une valeur du boitier ne s'affiche QUE si
+     le backend a repondu, et TOUJOURS avec l'age de la mesure. Backend
+     muet = aucune valeur, jamais un chiffre plausible a la place. */
+  var BOX = null;
+  var BOX_REJET = null;      // raison de l'absence, affichee telle quelle
+  var BOX_RECU = 0;          // horodatage local de la derniere reponse
+
+  function loadBoxTelemetry() {
+    if (!sessionStorage.getItem(SK)) return Promise.resolve(null);
+    return api("GET", "/api/box").then(function (r) {
+      if (r.status === 200 && r.json && r.json.source === "boxtelemetry") {
+        BOX = r.json;
+        BOX_REJET = null;
+        BOX_RECU = Date.now();
+      } else {
+        BOX = null;
+        BOX_REJET = "boitier injoignable";
+      }
+      try { _paintTelemetry(); _liveTiles(); } catch (e) {}
+      return BOX;
+    }).catch(function () {
+      BOX = null;
+      BOX_REJET = "boitier injoignable";
+      try { _paintTelemetry(); _liveTiles(); } catch (e) {}
+      return null;
+    });
+  }
+
+  function _ageTexte(sec) {
+    if (sec === undefined || sec === null || isNaN(sec)) return "age inconnu";
+    var s = Math.max(0, Math.round(sec));
+    if (s < 2) return "a l'instant";
+    if (s < 90) return "il y a " + s + " s";
+    return "il y a " + Math.round(s / 60) + " min";
+  }
+
+  /* Age des capteurs de l'hote : temps ecoule depuis la reponse du backend. */
+  function _boxAgeHote() {
+    return BOX_RECU ? (Date.now() - BOX_RECU) / 1000 : null;
+  }
+
+  function _nombre(valeur) {
+    return String(valeur).replace(".", ",");
+  }
+
+  function _boxTemperature() {
+    if (!BOX || !BOX.temperatures) return null;
+    for (var i = 0; i < BOX.temperatures.length; i++) {
+      var t = BOX.temperatures[i];
+      if (t && typeof t.celsius === "number") {
+        return { valeur: _nombre(t.celsius) + " \u00b0C", age: _boxAgeHote() };
+      }
+    }
+    return null;
+  }
+
+  function _boxVentilos() {
+    if (!BOX || !BOX.ventilos) return null;
+    for (var i = 0; i < BOX.ventilos.length; i++) {
+      var v = BOX.ventilos[i];
+      if (v && typeof v["tr/min"] === "number") {
+        return { valeur: v["tr/min"] + " tr/min", age: _boxAgeHote() };
+      }
+    }
+    return null;
+  }
+
+  function _boxCharge() {
+    if (!BOX || !BOX.cpu || !BOX.cpu.charge || !BOX.cpu.charge.length) return null;
+    return { valeur: _nombre(BOX.cpu.charge[0]), age: _boxAgeHote() };
+  }
+
+  function _boxInjection() {
+    var inj = BOX && BOX.injection_esp32;
+    return inj && inj.etat ? inj : null;
+  }
+
+  /* Phrase de la telemetrie : dit ce qui est mesure, et depuis quand. */
+  function _boxLigne() {
+    if (BOX_REJET) {
+      return "Capteurs boitier : " + BOX_REJET + " \u2014 aucune valeur affichee";
+    }
+    if (!BOX) return "Capteurs boitier : non interroge";
+    var morceaux = [];
+    var t = _boxTemperature();
+    if (t) morceaux.push("temperature " + t.valeur + " (" + _ageTexte(t.age) + ")");
+    var v = _boxVentilos();
+    if (v) morceaux.push("ventilateur " + v.valeur + " (" + _ageTexte(v.age) + ")");
+    var inj = _boxInjection();
+    if (inj && inj.etat === "recu") {
+      var mesures = [];
+      if (inj.temperature !== undefined && inj.temperature !== null) {
+        mesures.push(_nombre(inj.temperature) + " \u00b0C");
+      }
+      if (inj.humidite !== undefined && inj.humidite !== null) {
+        mesures.push(_nombre(inj.humidite) + " %");
+      }
+      morceaux.push("boitier " + (mesures.join(" / ") || "sans mesure de temperature") +
+        " (" + _ageTexte(inj.age_s) + ")");
+    } else if (inj && inj.etat === "recu mais perime") {
+      morceaux.push("boitier perime (" + _ageTexte(inj.age_s) + ")");
+    } else {
+      morceaux.push("aucun releve du boitier");
+    }
+    return "Capteurs boitier : " + morceaux.join(" \u00b7 ");
+  }
+
   /* --- Tuiles de demonstration -> mesures reelles ------------------------
      L'application de demonstration fabrique la charge, la batterie, les
      ventilateurs, le signal, la latence et la session. Aucune de ces mesures
@@ -223,9 +335,15 @@
      « non mesure » explicite sinon — jamais un chiffre plausible a la place
      d'un capteur absent. */
   var TUILE = {
-    "charge": function () { return "non mesur\u00e9e"; },
+    "charge": function () {
+      var c = _boxCharge();
+      return c ? c.valeur + " (" + _ageTexte(c.age) + ")" : "non mesur\u00e9e";
+    },
     "batterie": function () { return "non suivie"; },
-    "ventilateurs": function () { return "non expos\u00e9s"; },
+    "ventilateurs": function () {
+      var v = _boxVentilos();
+      return v ? v.valeur + " (" + _ageTexte(v.age) + ")" : "non expos\u00e9s";
+    },
     "signal": function () { return "non mesur\u00e9"; },
     "bande passante": function () { return "non mesur\u00e9e"; },
     "latence": function () {
@@ -364,9 +482,9 @@
     });
     var capteurs = document.createElement("p");
     capteurs.style.cssText = "margin:10px 0 0;color:#9aa1b3;font-size:10.5px";
-    capteurs.textContent = "Capteurs boitier : " + ((TELEM.sensors || []).map(function (s) {
-      return s.label + " indisponible";
-    }).join(" · ") || "—");
+    // Source : backend boxtelemetry, via /api/box. Une valeur n'apparait que
+    // si le backend a repondu, toujours accompagnee de l'age de la mesure.
+    capteurs.textContent = _boxLigne();
     dl.appendChild(capteurs);
   }
 
@@ -599,9 +717,11 @@
 
   /* Telemetrie : chargee des qu'une session existe, rafraichie doucement
      (une requete locale toutes les 15 s, pas de boucle serree). */
-  if (sessionStorage.getItem(SK)) { setTimeout(loadTelemetry, 600); }
+  if (sessionStorage.getItem(SK)) {
+    setTimeout(function () { loadTelemetry(); loadBoxTelemetry(); }, 600);
+  }
   setInterval(function () {
-    if (sessionStorage.getItem(SK)) loadTelemetry();
+    if (sessionStorage.getItem(SK)) { loadTelemetry(); loadBoxTelemetry(); }
   }, 15000);
 
   setTimeout(function () {

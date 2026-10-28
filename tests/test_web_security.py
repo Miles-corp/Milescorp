@@ -343,7 +343,18 @@ class TestWebSanitizeHelper(unittest.TestCase):
 
 
 class TestWebServerLocalOnly(unittest.TestCase):
-    """S-002 : le serveur web MILES doit écouter uniquement sur 127.0.0.1."""
+    """S-002 + DEC-016 : le serveur écoute en local, sauf opt-in explicite.
+
+    Le contrat est asymétrique et testé des deux côtés :
+
+    - par défaut, seule ``127.0.0.1`` est acceptée ;
+    - sur opt-in explicite (``allow_lan=True``), une adresse **privée** est
+      acceptée, mais ``0.0.0.0``, ``::``, une adresse publique ou un nom
+      d'hôte restent refusés.
+
+    Le refus sans jeton vivant dans ``miles.py``, il est prouvé dans
+    ``tests/test_web_lan.py``.
+    """
 
     def _app(self) -> WebApp:
         return build_app(settings=Settings())
@@ -356,14 +367,20 @@ class TestWebServerLocalOnly(unittest.TestCase):
         self.assertEqual(server.host, "127.0.0.1")
 
     def test_refus_adresse_toutes_interfaces(self) -> None:
-        """0.0.0.0 expose le service sur toutes les interfaces : refusé."""
+        """0.0.0.0 expose le service sur toutes les interfaces : refusé.
+
+        Refusé **aussi** en mode LAN : l'ouverture réseau n'autorise jamais
+        l'écoute sur toutes les interfaces.
+        """
         from app.interface.web import MilesWebServer, WebServerSecurityError
 
         with self.assertRaises(WebServerSecurityError):
             MilesWebServer(app=self._app(), host="0.0.0.0")
+        with self.assertRaises(WebServerSecurityError):
+            MilesWebServer(app=self._app(), host="0.0.0.0", allow_lan=True)
 
-    def test_refus_adresse_lan(self) -> None:
-        """Une adresse du réseau local est refusée."""
+    def test_refus_adresse_lan_sans_opt_in(self) -> None:
+        """Une adresse du réseau local est refusée par défaut (DEC-016)."""
         from app.interface.web import MilesWebServer, WebServerSecurityError
 
         for lan_address in ("192.168.1.10", "10.0.0.5", "172.16.0.1"):
@@ -371,12 +388,56 @@ class TestWebServerLocalOnly(unittest.TestCase):
                 with self.assertRaises(WebServerSecurityError):
                     MilesWebServer(app=self._app(), host=lan_address)
 
+    def test_adresse_privee_acceptee_sur_opt_in(self) -> None:
+        """Avec un opt-in explicite, une adresse privée précise est acceptée."""
+        from app.interface.web import MilesWebServer
+
+        for lan_address in ("192.168.1.42", "10.0.0.5", "172.16.0.1"):
+            with self.subTest(host=lan_address):
+                server = MilesWebServer(
+                    app=self._app(), host=lan_address, allow_lan=True
+                )
+                self.assertEqual(server.host, lan_address)
+                self.assertTrue(server.allow_lan)
+
+    def test_adresse_publique_refusee_meme_sur_opt_in(self) -> None:
+        """Le mode LAN ne sert qu'un réseau privé, jamais une adresse publique."""
+        from app.interface.web import MilesWebServer, WebServerSecurityError
+
+        for publique in ("8.8.8.8", "1.1.1.1"):
+            with self.subTest(host=publique):
+                with self.assertRaises(WebServerSecurityError):
+                    MilesWebServer(app=self._app(), host=publique, allow_lan=True)
+
+    def test_nom_d_hote_refuse_meme_sur_opt_in(self) -> None:
+        """Un nom d'hôte se résoudrait ailleurs : seule une IP privée est admise."""
+        from app.interface.web import MilesWebServer, WebServerSecurityError
+
+        for nom in ("miles.local", "box.lan", "localhost"):
+            with self.subTest(host=nom):
+                with self.assertRaises(WebServerSecurityError):
+                    MilesWebServer(app=self._app(), host=nom, allow_lan=True)
+
+    def test_allow_lan_ne_peut_pas_etre_active_apres_coup(self) -> None:
+        """Le mode d'écoute est fixé à la construction, jamais après."""
+        from app.interface.web import MilesWebServer, WebServerSecurityError
+
+        server = MilesWebServer(app=self._app())
+        self.assertFalse(server.allow_lan)
+        with self.assertRaises(AttributeError):
+            server.allow_lan = True  # type: ignore[misc]
+        with self.assertRaises(WebServerSecurityError):
+            server.host = "192.168.1.42"
+        self.assertEqual(server.host, "127.0.0.1")
+
     def test_refus_adresse_ipv6_any(self) -> None:
-        """'::' écoute sur toutes les interfaces IPv6 : refusé."""
+        """'::' écoute sur toutes les interfaces IPv6 : refusé, même en LAN."""
         from app.interface.web import MilesWebServer, WebServerSecurityError
 
         with self.assertRaises(WebServerSecurityError):
             MilesWebServer(app=self._app(), host="::")
+        with self.assertRaises(WebServerSecurityError):
+            MilesWebServer(app=self._app(), host="::", allow_lan=True)
 
     def test_refus_adresse_ipv6_loopback(self) -> None:
         """Même la boucle IPv6 est refusée : seule 127.0.0.1 est admise."""

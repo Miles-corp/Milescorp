@@ -1,5 +1,24 @@
 # docs/coordination/STATUS.md — État du projet MILES
 
+## État instantané (2026-10-28, Agent A — écarts DEC-016 fermés, TASK-DEV-050)
+
+- **Branche** : `feat/miles-box-packages`, issue de `main` (`492ecb3`), **non fusionnée**.
+- **Tests** : **934 exécutés — 934 OK, 0 échec, 5 ignorés** (Windows 11, Python 3.12).
+- **Contrat d'écoute réseau** (`DEC-019`) : `assert_local_host` inchangée ; `assert_listen_host(host, allow_lan=False)` porte le contrat complet. Sans opt-in, seule `127.0.0.1` passe. Avec, une adresse **privée** passe et `0.0.0.0`, `::`, une adresse publique ou un nom d'hôte restent refusés. `allow_lan` n'a pas de setter. `--web-lan` exige un jeton **persistant** + `MILES_WEB_LAN_HOST`, sinon **code de sortie 1 sans serveur** (vérifié en réel, pas seulement en test).
+- **Tests du contrat** : les 10 tests de `TestWebServerLocalOnly` sont conservés et **renforcés** (refus de `0.0.0.0` et `::` aussi en mode LAN), 5 ajoutés ; `tests/test_web_lan.py` en apporte 11. Aucune assertion supprimée ni affaiblie.
+- **Paquet PC** : `install.sh` exécute le préflight avec `bash` (il le soumettait à `python3`), est idempotent et crée l'utilisateur du service ; `cockpit-launcher.sh` lance le serveur Companion du dépôt au lieu d'un dossier `./cockpit` inexistant ; `miles.service` ne rend plus `.env` inscriptible et interdit explicitement l'ajout de `--web-lan`.
+- **Firmware ESP32-S3** : `BACKEND_URL` n'a plus de valeur par défaut (une URL de bouclage est refusée), un marqueur `REPLACE_ME` arrête le démarrage sans tenter de connexion, et **aucune valeur n'est inventée** (un capteur absent n'est pas envoyé). **Compilation réelle : `[SUCCESS]` en 1227,56 s**, image `firmware.bin` de 1 103 072 octets, RAM 14,2 %, Flash 32,5 % (`espressif32@8.0.0`, `toolchain-xtensa-esp-elf@14.2.0`, `framework-arduinoespressif32@4.30312.261024`).
+- **Télémétrie du boîtier** : route `/api/box` sur le serveur Companion (même origine, cible figée), consommée par `miles-bridge.js`. Une valeur ne s'affiche que si le backend a répondu, **toujours avec l'âge de la mesure** ; backend muet = 503 et « aucune valeur affichée ».
+- **Archives** : `scripts/build_release.py` laissait entrer `.pio/` et `__pycache__/` (comparaison de motifs avec des `/` sur des chemins Windows). Corrigé, mesuré : 3 archives + `SHA256SUMS`, aucune entrée technique. `tests/test_build_release.py` archive un faux paquet piégé et vérifie qu'aucun secret ne sort.
+- **Tâches** : `TASK-DEV-049` et `TASK-DEV-050` **DONE**.
+
+## Prochain objectif
+
+1. **Audit B** (`M-023`) sur trois surfaces : contrat réseau, relai `/api/box`, exclusions d'archives. **Rien ne fusionne avant.**
+2. **Validation Debian 13** : la chaîne post-D1 n'a jamais tourné dessus. C'est la seule preuve manquante pour « installable sur le mini-PC ».
+3. **Flash du firmware** sur le boîtier réel : compilation prouvée, matériel non testé.
+4. Reste ensuite : multi-fournisseurs (branche à rebaser) et les 10 audits Phase 6.3.
+
 ## État instantané (2026-10-28, Agent A — port du lot boîtier, TASK-DEV-049)
 
 - **Référence du code** : `main` (`492ecb3`) + branche `feat/miles-box-packages`, issue de `main`, **non fusionnée** (`DEC-018`).

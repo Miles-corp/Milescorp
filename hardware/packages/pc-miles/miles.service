@@ -1,18 +1,32 @@
 [Unit]
 Description=MILES — assistant personnel (écoute locale uniquement)
+Documentation=file:/opt/Milescorp/docs/installation/BOX_DEBIAN_SETUP.md
 After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/miles
-ExecStart=/opt/miles/.venv/bin/python3 miles.py --web --web-port 8080
-Restart=on-failure
+# L'utilisateur doit exister AVANT l'activation : install.sh le crée.
 User=miles
-# Durcissement : le service ne peut écrire que data/ et .env
+Group=miles
+WorkingDirectory=/opt/Milescorp
+ExecStart=/opt/Milescorp/.venv/bin/python3 miles.py --web --web-port 8080
+Restart=on-failure
+RestartSec=5
+
+# Durcissement : lecture seule partout, sauf data/ (bases locales).
+# `.env` n'a pas besoin d'être inscriptible : seul `miles.py --setup` l'écrit,
+# à la main, hors service.
 ProtectSystem=strict
-ReadWritePaths=/opt/miles/data /opt/miles/.env
+ReadWritePaths=/opt/Milescorp/data
+ProtectHome=true
 NoNewPrivileges=true
 PrivateTmp=true
+# Fichiers créés par le service : lisibles par lui seul.
+UMask=0077
+
+# Écoute réseau : volontairement ABSENTE ici.
+# Le mode LAN exige `--web-lan` ET un jeton porteur persistant (DEC-016 §2),
+# et ne s'active qu'après audit. Ne pas ajouter l'option dans ExecStart.
 
 [Install]
 WantedBy=multi-user.target
