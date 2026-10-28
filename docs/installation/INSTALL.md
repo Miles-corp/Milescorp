@@ -186,6 +186,14 @@ priorité est la suivante (de la plus forte à la plus faible) :
 3. **Fichier JSON** (`--config <chemin>`, sinon `MILES_CONFIG`, sinon `config/config.json`)
 4. **Valeurs par défaut** intégrées au code
 
+**Une valeur vide est ignorée.** Une variable définie sans valeur (par exemple
+`MILES_REMOTE_MODEL=`) n'est pas une configuration : elle est traitée comme
+absente et la source suivante prend le relais, jusqu'aux valeurs par défaut.
+Sans cette règle, un `MILES_REMOTE_MODEL=` vide remplaçait le modèle par une
+chaîne vide (erreurs fournisseur incompréhensibles) et un
+`MILES_HISTORY_LIMIT=` vide empêchait le démarrage. Une valeur composée
+d'espaces seulement est traitée de la même façon.
+
 ### Variables reconnues
 
 Seules les variables `MILES_*` listées ci-dessous sont lues depuis le fichier `.env` :
