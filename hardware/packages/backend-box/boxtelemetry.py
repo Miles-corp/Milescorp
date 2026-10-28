@@ -15,6 +15,7 @@ Usage : python3 boxtelemetry.py
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import threading
@@ -109,7 +110,16 @@ def _etat_injection() -> dict[str, Any]:
 
 
 def _verifier_cle(en_tetes: Any, body: bytes) -> bool:
-    """Clé locale exigée pour POST /box/ingest (jamais journalisée)."""
+    """Clé locale exigée pour POST /box/ingest (jamais journalisée).
+
+    La comparaison est à **temps constant** (`hmac.compare_digest`) : une
+    comparaison naïve laisse fuir, par le temps de réponse, la longueur du
+    préfixe correct — sur un réseau local c'est lent mais mesurable.
+
+    Les **octets** sont comparés, pas les chaînes : `compare_digest` refuse
+    les `str` non ASCII. Un corps qui n'est pas un objet JSON, ou une clé qui
+    n'est pas une chaîne, est refusé sans lever d'exception.
+    """
     attendue = os.environ.get("MILES_BOX_KEY", "")
     if not attendue:
         return False
@@ -117,7 +127,12 @@ def _verifier_cle(en_tetes: Any, body: bytes) -> bool:
         charge = json.loads(body.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
         return False
-    return charge.get("cle") == attendue
+    if not isinstance(charge, dict):
+        return False
+    fournie = charge.get("cle")
+    if not isinstance(fournie, str):
+        return False
+    return hmac.compare_digest(fournie.encode("utf-8"), attendue.encode("utf-8"))
 
 
 class _Handler(BaseHTTPRequestHandler):

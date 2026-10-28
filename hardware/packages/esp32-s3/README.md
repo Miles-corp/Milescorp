@@ -36,6 +36,12 @@ build_flags =
 Les identifiants sont dans le `.env` du backend box (`MILES_BOX_KEY`).
 **Ne jamais commiter les identifiants WiFi** — ils sont injectés à la compilation.
 
+**Convention de nom obligatoire** : le fichier personnel doit s'appeler
+`platformio.local.ini`. Le suffixe `.local` est exclu des archives par
+`scripts/build_release.py` ; un fichier `.ini` ordinaire, lui, partirait dans
+le livrable avec ses secrets. Le `platformio.ini` versionné ne contient que
+des marqueurs.
+
 ## Build et flash (à faire par toi, hors de cette mission)
 ```bash
 pio run -t upload    # via USB
