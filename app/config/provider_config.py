@@ -87,7 +87,17 @@ def _valider_provider(provider: str) -> str:
 
 def _valider_cle(api_key: str) -> str:
     key = str(api_key or "")
-    if not key or len(key) > 512 or any(c in key for c in _CARACTERES_INTERDITS):
+    if (
+        not key
+        or len(key) > 512
+        or any(c in key for c in _CARACTERES_INTERDITS)
+        # Caracteres de controle (NUL, tabulation, retour arriere) : acceptes
+        # jusqu'ici, ils etaient ecrits tels quels dans le `.env` et le
+        # corrompaient pour tout consommateur autre que ce module. Un jeton
+        # machine n'en contient jamais ; une cle avec espace est une erreur
+        # de copier-coller, on la refuse plutot que de la stocker telle quelle.
+        or any(c.isspace() or not c.isprintable() for c in key)
+    ):
         raise ValueError("Cle API invalide (vide ou caracteres interdits).")
     return key
 

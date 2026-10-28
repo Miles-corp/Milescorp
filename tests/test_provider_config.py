@@ -65,10 +65,29 @@ class TestCles(_Base):
         self.assertIn("MILES_API_KEY_GEMINI=AIza-fake-cle-999", contenu)
 
     def test_cle_invalide(self) -> None:
-        for mauvaise in ("", 'avec"guillemet', "avec\nsaut", "x" * 600):
+        for mauvaise in (
+            "",
+            'avec"guillemet',
+            "avec\nsaut",
+            "x" * 600,
+            # Controle : ecrits tels quels dans le `.env`, ils le corrompent
+            # pour tout autre consommateur. Regressions mesurees le 2026-10-28.
+            "a\x00b",
+            "a\x08b",
+            "a\tb",
+            "a\x7fb",
+            "cle avec espace",
+        ):
             with self.subTest(cle=repr(mauvaise)[:20]):
                 with self.assertRaises(ValueError):
                     pc.set_key("anthropic", mauvaise, self.env)
+
+    def test_cle_unicode_printable_acceptee(self) -> None:
+        """Les accents restent valides ; seuls les caracteres de controle sortent."""
+        cle = "clé-éàü+/=="
+        pc.set_key("gemini", cle, self.env)
+        self.assertIn(f"MILES_API_KEY_GEMINI={cle}", self._lire())
+        self.assertEqual(pc._lire_env(self.env).get("MILES_API_KEY_GEMINI"), cle)
 
     def test_fournisseur_inconnu(self) -> None:
         with self.assertRaises(ValueError):
