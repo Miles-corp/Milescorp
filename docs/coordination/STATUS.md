@@ -51,6 +51,15 @@
 - **Limites** : aucune validation Debian 13 (environnement indisponible) ; les tests ignores sont des limites de plateforme Windows.
 - **En attente** : audit independant par Agent B (TASK-DEV-019) avant toute fusion.
 
+## TASK-DEV-048 — Lot clé USB « de A à Z » (Agent A, 2026-10-28)
+
+- **Fabrique** : `hardware/packages/usb-installer/` (preseed auto Debian 13 + provision 1er boot + `build-iso.sh` + README + checklist VirtualBox) ; `scripts/restore-usb.ps1` (retour clé normale).
+- **ISO livrée et vérifiée** : `releases/miles-debian13-autoinstall-20261028.iso` (769 Mo, SHA256 `07b8d971…`, preuves : contenu, 20 append `auto=true` BIOS, grub UEFI `timeout=0` + `auto=true priority=critical`, El Torito BIOS+UEFI, hashes `$6$`).
+- **Code** : `miles.py` fail-closed `--web-lan` corrigé (bug `os`/`@property`) + tests DEC-016 ; `.env.example` racine 30 vars + anti-dérive paquet.
+- **Tests** : 566 OK / 4 ignorés (Windows).
+- **Prochain point** : test VirtualBox chez l'ami (checklist) → verdict VERT → Rufus → HP ProDesk (F9, Ethernet, `--setup`). **Aucun push fait.** ISO de TEST : `miles` / `Miles-Test-2026`.
+- **Rappel** : la sortie réseau LAN reste interdite sans audit B (DEC-016 §2) ; firmware ESP32 non compilé (DEC-016 §3, hors périmètre).
+
 ## Blocages
 
 Aucun blocage à ce jour.

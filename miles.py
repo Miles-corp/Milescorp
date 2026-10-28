@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """MILES — Assistant personnel intelligent. Point d'entrée du programme."""
 
+import os
 import sys
 import argparse
 
@@ -182,6 +183,35 @@ def main(argv: list[str] | None = None) -> int:
     if args.provider is not None:
         settings.provider = args.provider
 
+    # --- Opt-in réseau (DEC-016 / M-020) : fail-closed au plus tôt -----
+    # `--web-lan` est REFUSE avant toute construction (aucun accès disque,
+    # aucun objet cree) sauf si :
+    #   1. un jeton porteur est CONFIGURE (persistant : MILES_WEB_AUTH_TOKEN
+    #      de l'environnement ou du .env — un jeton genere a la volee ne
+    #      compte pas, il n'est jamais ecrit et l'utilisateur ne le voit
+    #      qu'en console) ;
+    #   2. une IP privee explicite est fournie (MILES_WEB_LAN_HOST).
+    if args.web and args.web_lan:
+        jeton_configure = (
+            os.environ.get("MILES_WEB_AUTH_TOKEN", "").strip()
+            or str(settings.get("web_auth_token") or "").strip()
+        )
+        if not jeton_configure:
+            print(
+                "ERREUR : --web-lan refuse sans jeton porteur configuré "
+                "(MILES_WEB_AUTH_TOKEN ou --setup).",
+                file=sys.stderr,
+            )
+            return 1
+        lan_host = os.environ.get("MILES_WEB_LAN_HOST", "").strip()
+        if not lan_host:
+            print(
+                "ERREUR : --web-lan exige MILES_WEB_LAN_HOST=192.168.x.x "
+                "(IP privée explicite). 0.0.0.0 et :: sont refusés.",
+                file=sys.stderr,
+            )
+            return 1
+
     transcript = None if args.no_persist else _build_transcript(settings)
 
     if args.list_conversations:
@@ -289,23 +319,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         server_host = None
         if args.web_lan:
-            # Fail-closed : pas de token porteur, pas de LAN.
-            if not authenticator.is_configured() and not os.environ.get("MILES_WEB_AUTH_TOKEN", ""):
-                print(
-                    "ERREUR : --web-lan refuse sans jeton porteur configuré "
-                    "(MILES_WEB_AUTH_TOKEN ou --setup).",
-                    file=sys.stderr,
-                )
-                return 1
-            # Fail-closed : sans IP privée explicite, pas de LAN.
-            server_host = os.environ.get("MILES_WEB_LAN_HOST", "")
-            if not server_host:
-                print(
-                    "ERREUR : --web-lan exige MILES_WEB_LAN_HOST=192.168.x.x "
-                    "(IP privée explicite). 0.0.0.0 et :: sont refusés.",
-                    file=sys.stderr,
-                )
-                return 1
+            # Fail-closed deja verifie en tete de main() (jeton configure +
+            # IP privee explicite) ; ici on ne fait qu'acter les valeurs.
+            server_host = os.environ.get("MILES_WEB_LAN_HOST", "").strip()
             os.environ["MILES_WEB_LAN"] = "1"
         if server_host:
             server = MilesWebServer(

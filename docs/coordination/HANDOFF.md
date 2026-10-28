@@ -65,6 +65,33 @@ Procédure à suivre par chaque agent à la fin de sa session de travail, afin q
 
 **Prochaine action recommandée :** B audite `6b736d7` (TASK-DEV-019) puis, dans l'ordre, `1ef4878` (D1-bis) et `8b9ab15` (contournement P1-6-06) ; ensuite seulement TASK-DEV-023 (intégration ordonnée).
 
+### H-015 — 2026-10-28 — Agent A → Agent B
+
+**Tâche :** TASK-DEV-048 — ISO Debian 13 auto-install + provision MILES (clé USB de A à Z).
+
+**Travail réalisé :**
+- Fabrique complète `hardware/packages/usb-installer/` : `preseed.cfg` (installation 100 % automatique, français/Paris, GPT/UEFI, disque cible auto-détecté hors clé cf. Debian #847166, hashes `@@MILES_*@@` injectés à la construction), `miles-provision.sh` + `miles-provision.service` (1er boot : payload → `/opt/Milescorp`, venv, suite de tests, `box_preflight`, `miles.service` durci 127.0.0.1/`ProtectSystem=strict`, marqueur anti-réexécution), `build-iso.sh` (ISO officielle vérifiée SHA256, mode non-interactif `MILES_USER_HASH`/`MILES_ROOT_HASH` + interactif, payload liste-de-fichiers anti-auto-inclusion < 40 Mo, injection initrd, menus BIOS+UEFI coupés, xorriso journal COMPLET), `README.md`, `CHECKLIST_TEST_VM.md` (15 points pour le test VirtualBox).
+- `scripts/restore-usb.ps1` : retour de la clé en clé normale (disque amovible 4-256 Go uniquement, confirmation OUI, syntaxe vérifiée).
+- Corrections : `pc-miles/install.sh` (`python3 box_preflight.sh` → `bash`), `.env.example` racine étendu aux 30 variables + paquet dérivé (`tests/test_env_example_alignment.py`, 4 tests anti-dérive), `.gitignore` (`releases/`, `.usb-iso-build/`).
+- **Bug critique corrigé** : `miles.py` n'importait pas `os` et appelait `is_configured()` (un `@property`) → le refus `--web-lan` aurait planter ; contrôle fail-closed replacé en tête de `main()` (jeton PERSISTANT exigé + IP privée, refus avant tout accès disque). `tests/test_web_lan.py` : **13/13**, dont les tests exigés par DEC-016 §2 prouvant le refus sans jeton.
+
+**Fichiers modifiés :** `miles.py`, `.gitignore`, `.env.example`, `hardware/packages/usb-installer/**` (6 fichiers), `hardware/packages/pc-miles/{install.sh,.env.example}`, `scripts/restore-usb.ps1`, `tests/{test_web_lan,test_env_example_alignment}.py`, `docs/coordination/{TASKS,HANDOFF}.md`.
+
+**Commits :** commit local unique (détail dans `git log`), **pas de push**.
+
+**Tests exécutés :** suite complète **566 tests OK / 4 ignorés** (Windows, Python 3.14) ; ISO vérifiée par script indépendant (contenu, 20 append `auto=true`, grub timeout=0, El Torito BIOS+UEFI, hashes `$6$`, zéro jeton résiduel).
+
+**ISO livrée :** `releases/miles-debian13-autoinstall-20261028.iso` — 805 634 048 o, SHA256 `07b8d9718099dc8c959243b864ed58b3f1cfb3924067ee9b2ac2763938b55259` (+ `SHA256-ISO-SUMS`). Mots de passe de **TEST** embarqués (hashés) : `miles` / `Miles-Test-2026`, root de secours `Root-Test-2026`. Pour le HP réel : soit on garde et on change après (`passwd`), soit rebuild interactif avec les vrais.
+
+**Problèmes restants / limites :**
+1. **Test VirtualBox NON exécuté** (délégué à l'ami, checklist fournie) — condition avant de graver la clé.
+2. **Firmware ESP32 toujours non compilé** (DEC-016 §3) — hors périmètre de cette tâche.
+3. Compilation/flash réels et test HP ProDesk : après le retour VM.
+4. **`BOX_DEBIAN_SETUP.md` n'existe que sur cette branche** (absent de `main`) — à faire remonter à l'intégration.
+5. Ligne `MAP_ISOLINUX` : les 20 `append` sont modifiés depuis TOUS `/isolinux/*.cfg` (isolinux.cfg seul n'en contenait pas).
+
+**Prochaine action recommandée :** transférer ISO + `SHA256-ISO-SUMS` + `CHECKLIST_TEST_VM.md` à l'ami ; verdict VERT → gravure Rufus → test HP (F9, Ethernet) → `--setup` ; puis push sur accord, audit B de l'ouverture réseau reste requis avant tout LAN.
+
 ## 3. Transmission de la main
 
 - Prévenir l'autre agent (par le canal convenu hors dépôt, ex. message) qu'une mise à jour est disponible sur GitHub ou dans le clone partagé.

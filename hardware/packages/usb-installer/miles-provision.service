@@ -1,0 +1,17 @@
+[Unit]
+Description=MILES - provisionnement initial (1er boot apres installation)
+# S'execute UNE SEULE fois, apres reseau, puis se desactive tout seul.
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=!/var/lib/miles-provision.done
+ConditionPathExists=/opt/miles-install/miles-source.tar.gz
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/miles-provision
+StandardOutput=journal+console
+StandardError=journal+console
+TimeoutStartSec=3600
+
+[Install]
+WantedBy=multi-user.target

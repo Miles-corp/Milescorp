@@ -5,9 +5,9 @@ set -euo pipefail
 
 echo "=== MILES — installation du paquet PC ==="
 
-# 1. Préflight (lecture seule)
+# 1. Préflight (lecture seule — script bash, pas python)
 if command -v python3 >/dev/null 2>&1; then
-    python3 box_preflight.sh || echo "ATTENTION : préflight a signalé des anomalies."
+    bash box_preflight.sh || echo "ATTENTION : préflight a signalé des anomalies."
 else
     echo "ERREUR : python3 absent. sudo apt install python3 python3-venv"
     exit 1

@@ -35,3 +35,6 @@ data/*.db
 
 # Archives de téléchargement générées (jamais commitées)
 releases/
+
+# Construction ISO usb-installer (contient l'ISO Debian de 792 Mo)
+.usb-iso-build/
