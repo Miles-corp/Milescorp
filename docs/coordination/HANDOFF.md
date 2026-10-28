@@ -267,3 +267,20 @@ Aucun `push`, aucune fusion dans `main` par Agent B sans accord explicite de
 l'utilisateur ; aucune réécriture des rapports datés ; ne pas modifier les
 fichiers de production pendant une revue (lecture seule) ; ne pas toucher aux
 deux PC hors du dépôt.
+
+## H-015 — 2026-10-28 — Agent A → Agent B — lot boîtier fusionné dans `main`
+
+**Tâche :** `TASK-DEV-047` (fermeture), `TASK-DEV-050`, `TASK-DEV-051` — DONE. Audits `M-024` (Agent B) et `M-025` (Agent A) clos.
+
+**Travail réalisé :** fermeture des deux réserves P3 de l'audit B et d'un défaut adjacent trouvé en les corrigeant : la comparaison de la clé partagée du backend boîtier passe à temps constant (`hmac.compare_digest` sur des **octets** — sur des `str`, la fonction refuse les caractères non ASCII) ; un corps JSON qui n'est pas un objet (`[]`, `null`, `"chaine"`) levait `AttributeError` et produisait une **500 au lieu d'un 401** ; il est désormais refusé sans exception. La convention « tout fichier personnel porte le suffixe `.local` » remplace l'heuristique sur le contenu, écrite à trois endroits où elle sert (en-tête de `scripts/build_release.py`, doc du firmware, test). Comptes de tests revérifiés par comptage des `def test_` : `TestWebServerLocalOnly` = **14** (et non 5 ajoutés), `tests/test_web_lan.py` = **10** (ni les 8 du rapport d'audit, ni les 11 de nos documents).
+
+**Fichiers modifiés :** `hardware/packages/backend-box/boxtelemetry.py`, `tests/test_boxtelemetry.py`, `scripts/build_release.py`, `hardware/packages/esp32-s3/README.md`, `docs/coordination/{TASKS,STATUS,MESSAGES,DECISIONS}.md`.
+
+**Commits :** `209e39f` sur `feat/miles-box-packages`, puis **fusion `--no-ff` dans `main`** = `dcc3130`, poussée sur `origin/main` (exécutée par l'utilisateur sur son poste, l'agent n'ayant plus de shell). Branche conservée.
+
+**Tests exécutés :** contrôles ciblés **25 OK** (`test_boxtelemetry` 11, `test_web_lan` 10, `test_build_release` 6) ; suite complète **936 tests, 0 échec, 5 ignorés** sur la fusion ; `bash -n hardware/packages/pc-miles/install.sh` sans sortie. **Non exécuté :** installation sur Debian 13, flash du firmware sur le boîtier.
+
+**Problèmes restants :** le firmware est compilé (`[SUCCESS]`, 1 103 072 octets) mais **jamais flashé** ; aucune installation n'a tourné sur le M75q ; la clé Gemini du multi-fournisseurs transite en paramètre d'URL (comportement de l'API, non journalisé) et reste à trancher par audit B.
+
+**Prochaine action recommandée :** rebaser `feature/miles-multi-provider` (`b0ba016`) sur `main` et la repasser aux tests, puis exécuter la procédure Debian 13 sur le mini-PC — c'est la dernière preuve manquante pour « installable ».
+

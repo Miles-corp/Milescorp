@@ -1,5 +1,22 @@
 # docs/coordination/STATUS.md — État du projet MILES
 
+## État instantané (2026-10-28, Agent A — lot boîtier fusionné dans `main`)
+
+- **Référence du code** : **`main`**, `dcc3130` = `492ecb3` + fusion `--no-ff` de `feat/miles-box-packages` (`209e39f`). Poussée sur `origin/main`. La branche est conservée, non supprimée.
+- **Tests** : **936 exécutés — 936 OK, 0 échec, 5 ignorés** sur la fusion elle-même (Windows 11, Python 3.14.7), 276 s. Contrôles ciblés avant fusion : `test_boxtelemetry` + `test_web_lan` + `test_build_release` = **25 OK** ; `bash -n hardware/packages/pc-miles/install.sh` : **aucune sortie** (la réserve du lot précédent est levée).
+- **Audit B** (`M-024`) : **VALIDÉ** sur les trois surfaces — contrat d'écoute (aucun chemin n'active `allow_lan` sans décision humaine ; `0.0.0.0`, `::`, link-local, multicast, noms d'hôte et adresses publiques refusés ; `--web-lan` sans jeton persistant sort en 1 **sans construire de serveur**), relai `/api/box` (cible figée, chemin constant, pas de SSRF, 503 sans valeur), archives (exclusions par segments, `.env.example` conservé).
+- **Réserves P3 fermées** (`M-025`) : comparaison de clé à **temps constant** (`hmac.compare_digest` sur octets), convention `.local` documentée et testée ; et un défaut adjacent corrigé — un corps JSON non-objet (`[]`, `null`, `"chaine"`) levait `AttributeError` donc une **500 au lieu d'un 401**.
+- **Comptes de tests corrigés** : `TestWebServerLocalOnly` = **14** tests, `tests/test_web_lan.py` = **10**. Le rapport d'audit annonçait 8, ce document 11 : les deux étaient faux.
+- **Tâches** : `TASK-DEV-047` **DONE** (fermeture), `TASK-DEV-049`, `TASK-DEV-050`, `TASK-DEV-051` DONE.
+- **Reste hors du code** : installation Debian 13 jamais exécutée (procédure prête), firmware jamais flashé.
+
+## Prochain objectif (après la fusion du lot boîtier)
+
+1. **Multi-fournisseurs** : `feature/miles-multi-provider` (`b0ba016`) auditée **sans blocage** (`M-008`), mais non rebasée sur `main` ; les 2 échecs de tests qu'elle présentait sont corrigés sur `main` depuis `DEC-017`.
+2. **Validation Debian 13** : [`docs/installation/VALIDATION_DEBIAN_13.md`](../installation/VALIDATION_DEBIAN_13.md) — écrite, **non exécutée**.
+3. **Flash du firmware** sur le boîtier réel.
+4. Les 10 audits de la Phase 6.3 restent en attente côté Agent B.
+
 ## État instantané (2026-10-28, Agent A — écarts DEC-016 fermés, TASK-DEV-050)
 
 - **Branche** : `feat/miles-box-packages`, issue de `main` (`492ecb3`), **non fusionnée**.
