@@ -33,3 +33,6 @@ logs/*.log
 data/*.json
 data/*.jsonl
 data/*.db
+
+# Archives de téléchargement générées (jamais commitées)
+releases/

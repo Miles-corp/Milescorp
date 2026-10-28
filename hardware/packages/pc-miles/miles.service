@@ -1,0 +1,18 @@
+[Unit]
+Description=MILES — assistant personnel (écoute locale uniquement)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/miles
+ExecStart=/opt/miles/.venv/bin/python3 miles.py --web --web-port 8080
+Restart=on-failure
+User=miles
+# Durcissement : le service ne peut écrire que data/ et .env
+ProtectSystem=strict
+ReadWritePaths=/opt/miles/data /opt/miles/.env
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

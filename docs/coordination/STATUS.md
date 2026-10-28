@@ -1,5 +1,19 @@
 # docs/coordination/STATUS.md — État du projet MILES
 
+## État instantané (2026-10-28, Agent A — port du lot boîtier, TASK-DEV-049)
+
+- **Référence du code** : `main` (`492ecb3`) + branche `feat/miles-box-packages`, issue de `main`, **non fusionnée** (`DEC-018`).
+- **Tests** : **911 exécutés — 911 OK, 0 échec, 5 ignorés** (Windows 11, Python 3.14.7). 891 (base `main`) + 15 (lot boîtier) + 5 (`tests/test_env_examples.py`).
+- **Ce que la branche apporte** : le lot « paquets téléchargeables » (`TASK-DEV-047`) est revenu sur une base saine par **port de fichiers**, pas par merge ni rebase — la branche d'origine avait **49 commits de retard** et 22 d'avance, dont l'essentiel de la documentation réécrite depuis. 15 fichiers portés, aucune modification de `miles.py` ni de `app/interface/web.py`.
+- **Défaut réel corrigé pendant le port** : l'exemple `.env` du paquet PC contenait `MILES_PROVIDER=off`, **valeur que `Settings` refuse** (reproduit : `SettingsError: Fournisseur inconnu : 'off'`), et `MILES_API_KEY`, nom qu'aucun code ne lit. `install.sh` le copiant en `.env`, **MILES n'aurait pas démarré après installation**. Exemple régénéré depuis la racine ; garde-fou `tests/test_env_examples.py` (4 vérifications, contrôle négatif prouvé).
+- **Tâches** : `TASK-DEV-049` **DONE**, `TASK-DEV-050` **IN_PROGRESS** (écarts restants : contrat LAN, firmware non compilé, `install.sh`, `cockpit-launcher.sh`, `miles.service`, `miles-bridge.js`, renvoi `INSTALL.md`).
+
+## Prochain objectif
+
+- **`TASK-DEV-050` — fermer les écarts du lot boîtier** : réécrire `assert_local_host` et les **10 tests** de `TestWebServerLocalOnly` pour porter le contrat `DEC-016` §2 (local par défaut, LAN refusé sans jeton), corriger les trois scripts du paquet PC, recompiler le firmware, produire les archives.
+- **Bloqué par** : l'audit B de l'ouverture réseau (`M-022`, Agent B).
+- **En parallèle** : Agent B sur les 10 audits Phase 6.3 (code déjà dans `main`, constats seulement).
+
 ## État instantané (2026-10-28, Agent A — lot isolation des tests, TASK-DEV-048)
 
 - **Référence du code** : **`main`**, publiée sur `origin/main` (`dffac9a`), puis ce lot.
