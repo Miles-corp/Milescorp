@@ -298,3 +298,39 @@ n'est pas établie.
 
 **Aucun push, aucune fusion.** Le détail du lot est dans `HANDOFF.md` (`H-014`)
 et `STATUS.md`.
+
+### M-020 — 2026-10-28 — Agent A → Agent A (2e instance, lot paquets) et Agent B — [À APPLIQUER]
+
+Revue du plan « paquets téléchargeables MILES (Mode C/WiFi) » contre le dépôt.
+Six points tranchés par l'utilisateur, consignés en **DEC-016**. Résumé exécutable :
+
+1. **Un seul exécutant.** Le second agent fait tout le lot, y compris `web.py`, `miles.py`
+   et `miles-bridge.js`. Cette instance n'y touche pas ; elle relit.
+2. **LAN** : opt-in `MILES_WEB_LAN` refusé au démarrage sans `MILES_WEB_AUTH_TOKEN`.
+   Conséquence à assumer : `assert_local_host` et les neuf tests de `TestWebServerLocalOnly`
+   (`tests/test_web_security.py`) portent aujourd'hui l'invariant inverse — ils doivent être
+   réécrits, pas contournés. Un test doit prouver le refus sans jeton.
+3. **Firmware ESP32** : compiler réellement avant de livrer, sortie de compilation au rapport.
+4. **Capteurs** : valeur affichée seulement si le backend a répondu, **avec l'âge de la mesure**
+   (DEC-014 : le reste demeure « non mesuré »).
+5. **Paquet PC autonome** ; `INSTALL.md` renvoie vers son README au lieu de le dupliquer.
+6. **Document de conformité** : `BOX_DEBIAN_SETUP.md` n'existe ni dans le dépôt ni dans le Lab ;
+   la règle d'exposition réseau doit être versionnée avant l'étape d'ouverture.
+
+**Écarts factuels vérifiés le 2026-10-28 (commandes et sorties) :**
+
+- `code_search "box_preflight|BOX_DEBIAN|Mode C"` → **0 correspondance** ; `glob "**/*BOX*"` → **0 fichier**.
+- `find Lab -iname "*BOX*"` → trois homonymes sans rapport (`devbox.Dockerfile`, `rebuild-devbox.ps1`, `sandbox.py`).
+- `ls hardware` → `diagrams/` et `prototypes/`, chacun réduit à `.gitkeep` ; `ls scripts` → `.gitkeep` seul.
+  Donc `scripts/box_preflight.py` **n'existe pas** et `hardware/packages/` serait créé de zéro.
+- `grep -oE "MILES_[A-Z_]+" app/config/settings.py | sort -u | wc -l` → **30** variables (le plan en annonce 19).
+- `cat requirements.txt` → uniquement des commentaires : MILES est bien zéro-dépendance.
+- `.env.example` existe déjà à la racine ; `INSTALL.md` documente déjà venv, clone et variables reconnues.
+
+**Ce que cette instance ne fait pas** : aucune ligne du lot, aucun test lancé dans ce tour.
+
+**Blocage à signaler** : `git push origin main` a **échoué** depuis ce shell —
+`GitCredentialManager` ne démarre pas (`FileLoadException`, mémoire de pagination insuffisante)
+puis `could not read Username for 'https://github.com'`. `origin/main...main` reste à
+**0 derrière / 80 devant** : rien n'est publié. Le push doit être lancé depuis un terminal
+où les identifiants Git fonctionnent.

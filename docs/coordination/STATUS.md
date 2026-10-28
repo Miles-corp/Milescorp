@@ -250,3 +250,20 @@ Aucun blocage à ce jour.
 - **Audit de fin de tâche du Lab** (`AUDIT-TOUS.py`) : **vert** — 49 fichiers au-dessus du seuil de 85. Portée réelle : **l'espace du Lab**, pas ce dépôt (limite déjà signalée en `M-018`).
 - **Réserve** : `GET /miles.svg` sur le serveur MILES **en cours** répond encore 401 (processus démarré avant ce lot) ; un redémarrage de `miles.py --web` le corrige et affiche un **nouveau jeton d'accès**.
 - **En attente** : revues indépendantes `TASK-DEV-044` et `TASK-DEV-046`, ainsi que les dix audits de la Phase 6.3 (liste dans `HANDOFF.md`, `H-014`).
+
+## Phase 9 — Lot paquets téléchargeables : arbitrages et périmètre exclusif (Agent A, 2026-10-28)
+
+- **Décidé** (DEC-016, questions tranchées par l'utilisateur) : un seul agent exécute le lot ;
+  ouverture réseau par `MILES_WEB_LAN` refusée sans jeton ; firmware compilé avant livraison ;
+  valeur de capteur seulement si le backend a répondu, avec l'âge de la mesure ; paquet PC
+  autonome et `INSTALL.md` qui renvoie vers lui ; règle d'exposition réseau versionnée.
+- **Écarts factuels corrigés dans le plan** : `scripts/box_preflight.py` absent ; `hardware/`
+  vide ; 30 variables `MILES_*` (pas 19) ; `requirements.txt` sans dépendance ;
+  `BOX_DEBIAN_SETUP.md` introuvable (dépôt et Lab).
+- **Périmètre de cette instance** : aucune ligne de code du lot — revue, arbitrages,
+  documentation. `web.py`, `miles.py` et `miles-bridge.js` sont réservés à l'exécutant.
+- **Contrôles exécutés** : `git status --porcelain` (arbre propre) ; `git rev-list --left-right
+  --count origin/main...main` → **0 / 80** ; `git push origin main` → **ÉCHEC** (gestionnaire
+  d'identifiants inopérant, aucun terminal interactif) : rien n'est publié.
+- **Reste à faire** : push de `main` depuis un terminal authentifié ; exécution du lot par le
+  second agent ; revue indépendante d'Agent B une fois les commits accessibles.

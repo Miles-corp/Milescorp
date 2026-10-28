@@ -114,3 +114,11 @@
 - Une session web MILES est liée à l'**agent utilisateur** du client.
 - Un fichier du dossier Companion n'est pas public par défaut : la liste
   blanche est la seule autorisation.
+
+## Lane 2026-10-28 — lot paquets (revue seule)
+
+- Le lot « paquets téléchargeables (Mode C/WiFi) » appartient à un **second agent**
+  (DEC-016). Cette instance ne code pas ce lot : elle relit, arbitre et documente.
+- Les six arbitrages sont en DEC-016 ; le message d'application est **M-020**.
+- `git push` est **impossible depuis ce shell** (gestionnaire d'identifiants en échec) :
+  ne pas promettre une publication ; demander à l'utilisateur de pousser lui-même.

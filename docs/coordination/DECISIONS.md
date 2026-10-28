@@ -156,3 +156,20 @@ Convention : chaque décision reçoit un ID `DEC-###` (ou `D-###`), une date, un
   4. **Aucun travail ne reste dans un dossier temporaire** : avant retrait d'un worktree, son contenu unique est commité sur sa branche ou récupéré dans la référence, puis le dossier est retiré — les branches, elles, sont conservées.
   5. **`ORGANISATION.md`** (racine) fait autorité sur la carte du dépôt ; les rapports datés de `docs/reports/` décrivent leur date et ne sont jamais réécrits.
 - **Conséquences** : la référence est unique et lisible ; la surface HTTP servie par le Companion est bornée par une liste blanche ; plus aucun travail ne dépend de `%TEMP%` ; la revue indépendante porte sur `TASK-DEV-044` et `TASK-DEV-046`.
+
+## DEC-016 — Lot « paquets téléchargeables MILES » (Mode C/WiFi) : arbitrages et corrections factuelles
+
+- **Contexte** : un second agent exécute en parallèle un plan de paquets téléchargeables (backend boîtier, paquet PC Debian, firmware ESP32-S3, opt-in d'écoute réseau `MILES_WEB_LAN`, intégration cockpit ↔ boîtier). La revue de ce plan contre le dépôt a relevé cinq écarts factuels et un conflit de fichiers, tranchés par l'utilisateur le 2026-10-28.
+- **Décision** :
+  1. **Un seul agent exécute le lot** : celui qui en est l'auteur. L'autre instance n'en écrit aucune ligne et n'ouvre aucun chantier concurrent sur les mêmes sujets ; son apport est la revue, les arbitrages et la documentation. `app/interface/web.py`, `miles.py` et `app/interface/companion/miles-bridge.js` appartiennent exclusivement à l'exécutant pendant ce lot.
+  2. **Ouverture réseau** : elle passe par un opt-in explicite `MILES_WEB_LAN`, **refusé au démarrage** si `MILES_WEB_AUTH_TOKEN` n'est pas configuré. La garde `assert_local_host` (`app/interface/web.py`) et la classe `TestWebServerLocalOnly` (`tests/test_web_security.py`, neuf tests) doivent être réécrites pour porter ce contrat, dont un test qui prouve le refus sans jeton. Le défaut reste `127.0.0.1`.
+  3. **Firmware ESP32** : la chaîne de compilation est installée et le firmware **réellement compilé** avant livraison ; la sortie de compilation est conservée dans le rapport. Une archive non compilée ne part pas.
+  4. **Capteurs** : une valeur du boîtier (température, ventilateurs, charge) n'est affichée que si le backend a répondu, **avec l'âge de la mesure** ; tout le reste demeure « non mesuré ». DEC-014 reste en vigueur : aucune valeur inventée.
+  5. **Paquet PC autonome** : il porte sa propre documentation d'installation et `docs/installation/INSTALL.md` renvoie vers elle au lieu de la dupliquer.
+  6. **Document de conformité** : la règle qui encadre l'exposition réseau ne peut pas rester dans un document absent du dépôt. `BOX_DEBIAN_SETUP.md` est introuvable ici et dans le Lab ; il doit être créé dans le dépôt ou sa référence corrigée avant l'étape d'ouverture.
+- **Corrections factuelles à appliquer au plan** :
+  - `scripts/box_preflight.py` n'existe pas (`scripts/` ne contient que `.gitkeep`) : le `box_preflight.sh` prévu n'a rien à appeler.
+  - `hardware/` ne contient que deux dossiers vides (`diagrams/`, `prototypes/`) : `hardware/packages/` est créé de zéro.
+  - `app/config/settings.py` reconnaît **30** variables `MILES_*` distinctes, pas 19 ; le `.env.example` d'un paquet doit être **produit** à partir de celui de la racine, sous peine de dérive silencieuse.
+  - `requirements.txt` est entièrement commenté : MILES est réellement zéro-dépendance, l'environnement virtuel ne sert qu'à l'isolation.
+- **Conséquences** : le lot avance sans collision de fichiers ; la garde réseau ne peut plus être levée par inadvertance ; aucune archive ne part avec du code non compilé ; DEC-014 n'est pas contredit.
