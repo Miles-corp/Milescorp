@@ -10,7 +10,9 @@
 - **Firmware ESP32-S3** : `BACKEND_URL` n'a plus de valeur par défaut (une URL de bouclage est refusée), un marqueur `REPLACE_ME` arrête le démarrage sans tenter de connexion, et **aucune valeur n'est inventée** (un capteur absent n'est pas envoyé). **Compilation réelle : `[SUCCESS]` en 1227,56 s**, image `firmware.bin` de 1 103 072 octets, RAM 14,2 %, Flash 32,5 % (`espressif32@8.0.0`, `toolchain-xtensa-esp-elf@14.2.0`, `framework-arduinoespressif32@4.30312.261024`).
 - **Télémétrie du boîtier** : route `/api/box` sur le serveur Companion (même origine, cible figée), consommée par `miles-bridge.js`. Une valeur ne s'affiche que si le backend a répondu, **toujours avec l'âge de la mesure** ; backend muet = 503 et « aucune valeur affichée ».
 - **Archives** : `scripts/build_release.py` laissait entrer `.pio/` et `__pycache__/` (comparaison de motifs avec des `/` sur des chemins Windows). Corrigé, mesuré : 3 archives + `SHA256SUMS`, aucune entrée technique. `tests/test_build_release.py` archive un faux paquet piégé et vérifie qu'aucun secret ne sort.
-- **Tâches** : `TASK-DEV-049` et `TASK-DEV-050` **DONE**.
+- **Procédure de validation** : [`docs/installation/VALIDATION_DEBIAN_13.md`](../installation/VALIDATION_DEBIAN_13.md) — 12 phases, 15 contrôles, **écrite et non exécutée** (`TASK-DEV-051`).
+- **Réserve de vérification à assumer** : `hardware/packages/pc-miles/install.sh` a été corrigé **après** la dernière exécution de la suite (cible `/opt/Milescorp` avec `INSTALL_SERVICE=1`, tests lancés sous l'utilisateur du service, installation de l'unité par `tee`). Ces corrections sont **relues, pas exécutées** : le shell de l'agent était indisponible. À confirmer par `bash -n install.sh`, puis par les phases 2 à 8 de la procédure.
+- **Tâches** : `TASK-DEV-049`, `TASK-DEV-050` et `TASK-DEV-051` **DONE**.
 
 ## Prochain objectif
 
