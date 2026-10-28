@@ -259,3 +259,23 @@ Convention : chaque décision reçoit un ID `DEC-###` (ou `D-###`), une date, un
   - suite complète : **942 tests, OK, 5 ignorés**.
 - **Leçon de méthode** : `DEC-021` a été écrite, relue et fusionnée **sans exécution**. La relecture n'a pas vu que la règle d'exclusion et le test qu'elle prétendait satisfaire ne parlaient pas du même nom de fichier. Un test écrit et jamais lancé n'est pas une preuve, c'est une intention.
 - **Statut** : ACCEPTEE
+
+## DEC-023 — Quatre fournisseurs derrière une fabrique unique, une clé jamais divulguée
+
+- **Date** : 2026-10-28
+- **Auteur** : Agent A
+- **Contexte** : branche `feature/miles-multi-provider` (`263da9e`, `ed6d6c5`, `b0ba016`) auditée par Agent B (`M-008`) **sans blocage**, mais jamais fusionnée ; `main` avait 23 commits d'avance, dont l'isolation `.env` par session (`DEC-017`) que la branche ne possédait pas.
+- **Décision** :
+  1. **Quatre fournisseurs** : `remote` (compatible OpenAI), `local` (Ollama), `anthropic` (`/v1/messages`, en-tête `x-api-key`), `gemini` (`generateContent`). **Bibliothèque standard uniquement** (`urllib`) — aucune dépendance tierce ajoutée.
+  2. **Une seule fabrique** : `build_provider(nom, …)`, avec `est_soutenu()` et `fournisseurs_soutenus()`. Un nom inconnu échoue explicitement ; aucun repli silencieux vers un fournisseur par défaut.
+  3. **Les clés ne vivent que dans `.env`** : `MILES_API_KEY_<FOURNISSEUR>` et `MILES_MODEL_<FOURNISSEUR>`. Écriture atomique qui préserve les autres lignes ; `statut()` ne renvoie qu'une forme masquée (`configuree (n=N)`) ; `cle_pour()` est réservé à l'usage interne. Aucune clé dans un message d'erreur, un journal ou une sortie CLI.
+  4. **Priorité environnement réel > `.env`**, signalée par `environnement_prioritaire()`.
+  5. **Gemini impose la clé en paramètre d'URL** (`key=`) : l'URL n'est jamais journalisée ni renvoyée dans une erreur.
+  6. **Validation de clé durcie** : les caractères de contrôle (`NUL`, tabulation, retour arrière, `DEL`) et les espaces sont refusés. Mesuré qu'ils étaient **acceptés** et écrits tels quels dans le `.env`, le corrompant pour tout autre consommateur.
+- **Preuves d'exécution** (2026-10-28, Windows 11, Python 3.14.7) :
+  - fusion **sans conflit** (`git merge-tree` sur `main` 47a2442) ;
+  - `test_provider_*` + `test_status_provider_diagnostics` : **49 OK** ; les 2 échecs signalés par Agent B sur la branche seule **disparaissent** — `main` les avait corrigés (`DEC-017`), la fusion les apporte donc résolus ;
+  - suite complète : **978 tests, OK, 5 ignorés** ;
+  - aller-retour réel sur un `.env` : espaces, `#`, `=`, `+`, `/` et unicode **identiques** après relecture, variables voisines conservées, `statut()` sans la clé ; refus de `"`, `'`, antislash, saut de ligne, `NUL`, tabulation, espace.
+- **Limites assumées** : aucun **appel réseau réel** n'a été effectué (tests à mocks) ; la clé Gemini transite dans l'URL par construction de l'API ; la modification **concurrente** du `.env` n'est pas testée.
+- **Statut** : ACCEPTEE

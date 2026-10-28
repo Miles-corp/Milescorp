@@ -32,7 +32,10 @@ HELP_TEXT = """\nCommandes disponibles :
   /help        Afficher l'aide
   /quit ou /q  Quitter le programme
   /clear       Effacer l'historique de la conversation
-  /provider    Afficher le fournisseur IA courant
+  /providers   Liste des fournisseurs pris en charge et leur etat
+  /provider    Afficher le fournisseur IA courant (ou /provider <nom> pour changer)
+  /model       Afficher ou choisir le modele (/model <nom>)
+  /api         Cles API : /api add|test|status|remove (saisie masquee)
   /status      Afficher l'état du programme
   /remember    Enregistrer un souvenir explicite (usage: /remember <texte>)
   /memory      Lister les souvenirs persistants
@@ -205,30 +208,39 @@ class CLI:
                     "Historique effacé en mémoire, mais la suppression de "
                     "l'historique persisté a échoué."
                 )
+        elif cmd == "/providers":
+            self._handle_providers_command()
         elif cmd == "/provider":
-            if self.provider is None:
-                print("Fournisseur courant : non configure")
-                print("Mode : aucun")
-                print("URL de base : (aucune)")
-                print("Modele : (aucun)")
-                print("Disponibilite : inconnue (aucun test effectue)")
+            if args:
+                self._handle_provider_select(args[0])
             else:
-                mode = self.settings.provider
-                if mode == "remote":
-                    base_url = self.settings.get("remote_base_url")
-                    model = self.settings.get("remote_model")
+                if self.provider is None:
+                    print("Fournisseur courant : non configure")
+                    print("Mode : aucun")
+                    print("URL de base : (aucune)")
+                    print("Modele : (aucun)")
+                    print("Disponibilite : inconnue (aucun test effectue)")
                 else:
-                    base_url = self.settings.get("local_base_url")
-                    model = self.settings.get("local_model")
-                print(f"Fournisseur courant : {self.provider.name}")
-                print(f"Mode : {mode}")
-                # Expurgation par precaution : une URL ou un nom de modele
-                # mal formes ne doivent jamais divulguer un secret.
-                print(f"URL de base : {sanitize_text(base_url)}")
-                print(f"Modele : {sanitize_text(model)}")
-                # Aucune commande d'affichage ne teste la disponibilite :
-                # sans controle explicite, l'etat reste inconnu.
-                print("Disponibilite : inconnue (aucun test effectue)")
+                    mode = self.settings.provider
+                    if mode == "remote":
+                        base_url = self.settings.get("remote_base_url")
+                        model = self.settings.get("remote_model")
+                    else:
+                        base_url = self.settings.get("local_base_url")
+                        model = self.settings.get("local_model")
+                    print(f"Fournisseur courant : {self.provider.name}")
+                    print(f"Mode : {mode}")
+                    # Expurgation par precaution : une URL ou un nom de modele
+                    # mal formes ne doivent jamais divulguer un secret.
+                    print(f"URL de base : {sanitize_text(base_url)}")
+                    print(f"Modele : {sanitize_text(model)}")
+                    # Aucune commande d'affichage ne teste la disponibilite :
+                    # sans controle explicite, l'etat reste inconnu.
+                    print("Disponibilite : inconnue (aucun test effectue)")
+        elif cmd == "/model":
+            self._handle_model_command(args)
+        elif cmd == "/api":
+            self._handle_api_command(args)
         elif cmd == "/status":
             provider_name = self.provider.name if self.provider else "non configure"
             mode = self.settings.provider if self.provider else "non configure"
@@ -339,6 +351,178 @@ class CLI:
             print(f"Commande inconnue : {cmd}. Tapez /help pour l'aide.")
 
     # --- Outils ---
+
+    # --- Multi-IA (mission) : fournisseurs, modeles, cles API ---
+
+    def _handle_providers_command(self) -> None:
+        """Lister les fournisseurs pris en charge et leur etat (sans secret)."""
+        from app.config import provider_config as cfg
+
+        for i, entree in enumerate(cfg.statut(), 1):
+            etat = "[actif] " if entree["actif"] else "        "
+            cle = entree["cle"] or "pas de cle"
+            modele = f" | modele : {sanitize_text(entree['modele'])}" if entree["modele"] else ""
+            print(f"  {i}. {entree['provider'].capitalize():<10} {etat}| cle : {cle}{modele}")
+
+    def _handle_provider_select(self, nom: str) -> None:
+        """Choisir un fournisseur distant : configuration suffisante exigee.
+
+        En cas d'echec, la configuration precedente est conservee (jamais
+        de basculement silencieux ni de perte).
+        """
+        from app.config import provider_config as cfg
+
+        nom = (nom or "").strip().lower()
+        if nom not in cfg.PROVIDERS_SUPPORTES:
+            print(
+                f"Fournisseur non pris en charge : {nom}. "
+                f"Supportes : {', '.join(cfg.PROVIDERS_SUPPORTES)}"
+            )
+            return
+        try:
+            info = cfg.activate(nom)
+        except ValueError as exc:
+            print(f"Selection refusee : {exc}")
+            print("Aucun changement effectue.")
+            return
+        modele = info.get("modele") or "non defini"
+        print(f"Fournisseur actif : {info['provider']} (modele : {modele})")
+        print("Changement pris en compte au prochain demarrage de miles.py.")
+        envs = cfg.environnement_prioritaire(nom)
+        if envs:
+            print("Attention : des variables d'environnement prioritaires existent deja pour ce fournisseur.")
+
+    def _handle_model_command(self, args: list[str]) -> None:
+        """Afficher ou choisir le modele du fournisseur actif."""
+        from app.config import provider_config as cfg
+
+        actif = cfg.fournisseur_actif()
+        if not args:
+            modele = cfg.modele_actif() or self.settings.get("remote_model")
+            print(f"Fournisseur actif : {actif or '(historique)'}")
+            print(f"Modele actif : {sanitize_text(modele) if modele else '(non defini)'}")
+            return
+        modele_saisi = args[0].strip()
+        try:
+            cfg.set_model(actif, modele_saisi)
+        except ValueError as exc:
+            print(f"Modele refuse : {exc}")
+            return
+        print(f"Modele retenu pour {actif} : {sanitize_text(modele_saisi)}")
+        print("Pris en compte au prochain demarrage de miles.py.")
+
+    def _handle_api_command(self, args: list[str]) -> None:
+        """Gestion des cles API : status | add | test | remove (jamais de cle)."""
+        import getpass
+
+        from app.config import provider_config as cfg
+
+        sous = args[0].lower() if args else "status"
+
+        if sous == "status":
+            for entree in cfg.statut():
+                ligne = f"  {entree['provider']:<10} | cle : {entree['cle'] or 'pas de cle'}"
+                if entree["modele"]:
+                    ligne += f" | modele : {sanitize_text(entree['modele'])}"
+                if entree["actif"]:
+                    ligne += "  [actif]"
+                print(ligne)
+            prio = cfg.environnement_prioritaire(cfg.fournisseur_actif())
+            if prio:
+                print("Priorite environnement (redemarrage requis pour tout changement) :")
+                for cle in prio:
+                    print(f"  - {cle} (definie dans le processus)")
+            return
+
+        if sous == "add":
+            if len(args) < 2:
+                print("Usage : /api add <fournisseur>")
+                return
+            nom = args[1].strip().lower()
+            if nom not in cfg.PROVIDERS_SUPPORTES:
+                print(f"Fournisseur non pris en charge : {nom}. "
+                      f"Supportes : {', '.join(cfg.PROVIDERS_SUPPORTES)}")
+                return
+            try:
+                cle = getpass.getpass(f"Nouvelle cle API {nom} : ")
+            except (EOFError, KeyboardInterrupt):
+                print("Saisie annulee.")
+                return
+            try:
+                etat = cfg.set_key(nom, cle)
+            except ValueError as exc:
+                print(f"Cle refusee : {exc}")
+                return
+            print(f"Cle {etat} pour {nom} (n={len(cle)}, jamais affichee).")
+            print("Verification de la connexion...")
+            self._tester_fournisseur(nom)
+            return
+
+        if sous == "test":
+            nom = args[1].strip().lower() if len(args) > 1 else cfg.fournisseur_actif()
+            if nom not in cfg.PROVIDERS_SUPPORTES:
+                print(f"Fournisseur non pris en charge : {nom}.")
+                return
+            print(f"Verification de la connexion a {nom}...")
+            self._tester_fournisseur(nom)
+            return
+
+        if sous == "remove":
+            if len(args) < 2:
+                print("Usage : /api remove <fournisseur>")
+                return
+            nom = args[1].strip().lower()
+            try:
+                reponse = input(f"Confirmer la suppression de la cle de {nom} ? (o/N) ")
+            except (EOFError, KeyboardInterrupt):
+                print("Suppression annulee.")
+                return
+            if reponse.strip().lower() not in ("o", "oui", "y", "yes"):
+                print("Suppression annulee.")
+                return
+            try:
+                ok = cfg.remove_key(nom)
+            except ValueError as exc:
+                print(f"Refus : {exc}")
+                return
+            print(f"Cle de {nom} supprimee." if ok else f"Aucune cle enregistree pour {nom}.")
+            return
+
+        print("Usage : /api status | /api add <fournisseur> | /api test [fournisseur] | /api remove <fournisseur>")
+
+    def _tester_fournisseur(self, nom: str) -> None:
+        """Tester la connexion d'un fournisseur (APPEL RESEAU EXPLICITE).
+
+        Execute uniquement sur commande de l'utilisateur (/api add, /api test).
+        Le resultat est un message explicite ; aucune cle n'est jamais
+        affichee ni journalisee (ni dans les messages d'erreur).
+        """
+        from app.ai_providers.registry import build_provider, est_soutenu
+        from app.config.provider_config import cle_pour, modele_fournisseur
+        from app.ai_providers.base import AIProviderError
+
+        if not est_soutenu(nom):
+            print(f"Fournisseur non pris en charge : {nom}.")
+            return
+        cle = cle_pour(nom)
+        if not cle:
+            print(f"Pas de cle pour {nom} : /api add {nom}")
+            return
+        modele = modele_fournisseur(nom) or self.settings.get("remote_model")
+        try:
+            fournisseur = build_provider(nom, model=modele, api_key=cle)
+        except ValueError as exc:
+            print(f"Construction impossible : {exc}")
+            return
+        try:
+            dispo = fournisseur.is_available()
+        except Exception as exc:  # noqa: BLE001 — jamais de cle dans le message
+            print(f"Verification impossible : {type(exc).__name__}.")
+            return
+        if dispo:
+            print("Connexion reussie.")
+        else:
+            print("Connexion echouee : verifier la cle, le modele ou le reseau.")
 
     def _handle_log_command(self, args: list[str]) -> None:
         """Afficher les derniers évènements du journal d'outils (lecture seule).

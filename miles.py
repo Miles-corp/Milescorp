@@ -104,14 +104,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _build_provider(settings: Settings):
-    """Instancier le fournisseur IA configuré, ou None si inconnu."""
-    if settings.provider == "remote":
-        return RemoteProvider(
-            base_url=settings.get("remote_base_url"),
-            model=settings.get("remote_model"),
-            api_key=settings.get("remote_api_key"),
-            timeout=settings.get("remote_timeout", 30),
-        )
+    """Instancier le fournisseur IA configuré, ou None si inconnu.
+
+    Multi-IA (mission) : si MILES_REMOTE_PROVIDER est défini (une
+    commande /provider <x> l'écrit), le registre construit l'adaptateur
+    NATIF du fournisseur (groq/openai compat, anthropic, gemini).
+    Sinon : voie rétrocompatible historique INCHANGÉE à partir de
+    MILES_REMOTE_* — l'installation existante continue de fonctionner.
+    Un échec de construction n'est jamais silencieux : avertissement en
+    err, puis aucun fournisseur (pas de repli caché sur un autre).
+    """
     if settings.provider == "local":
         return LocalProvider(
             base_url=settings.get("local_base_url"),
@@ -119,7 +121,34 @@ def _build_provider(settings: Settings):
             api_key=settings.get("local_api_key"),
             timeout=settings.get("local_timeout", 60),
         )
-    return None
+    # --- Multi-IA : fournisseur distant choisi explicitement
+    from app.ai_providers.registry import build_provider, est_soutenu
+    from app.config.provider_config import cle_pour, modele_fournisseur, fournisseur_actif
+
+    nom = fournisseur_actif(defaut=None)
+    if nom and est_soutenu(nom):
+        modele = modele_fournisseur(nom) or settings.get("remote_model")
+        try:
+            return build_provider(
+                nom,
+                model=modele or "",
+                api_key=cle_pour(nom) or settings.get("remote_api_key"),
+                base_url=settings.get("remote_base_url") or None,
+                timeout=int(settings.get("remote_timeout", 30)),
+            )
+        except ValueError as exc:
+            print(
+                f"Avertissement : fournisseur {nom} inutilisable ({exc}).",
+                file=sys.stderr,
+            )
+            return None
+    # --- Rétrocompatibilité : historique inchangé (MILES_REMOTE_*)
+    return RemoteProvider(
+        base_url=settings.get("remote_base_url"),
+        model=settings.get("remote_model"),
+        api_key=settings.get("remote_api_key"),
+        timeout=settings.get("remote_timeout", 30),
+    )
 
 
 def _build_transcript(settings: Settings) -> ConversationTranscript | None:
