@@ -280,6 +280,34 @@ avant de lancer MILES.
   `on` (ou `false` / `0` / `no` / `off`) ; toute autre valeur provoque une
   erreur de configuration explicite au démarrage.
 
+## 3sexies. Paquets matériels (boîtier Miles)
+
+Le dépôt publie trois paquets dans `hardware/packages/`. Chacun porte **sa
+propre documentation d'installation**, volontairement non recopiée ici (une
+seule source de vérité) :
+
+| Paquet | Documentation | Rôle |
+|---|---|---|
+| `pc-miles` | [`hardware/packages/pc-miles/README.md`](../../hardware/packages/pc-miles/README.md) | Installation sur le mini-PC Debian 13 : venv, `.env`, service systemd, lanceur de cockpit |
+| `backend-box` | [`hardware/packages/backend-box/README.md`](../../hardware/packages/backend-box/README.md) | Télémétrie matérielle locale (`127.0.0.1:8095`) et réception des relevés du boîtier |
+| `esp32-s3` | [`hardware/packages/esp32-s3/README.md`](../../hardware/packages/esp32-s3/README.md) | Firmware du boîtier : client uniquement, aucun port ouvert |
+
+Les archives de téléchargement se produisent avec
+`python3 scripts/build_release.py` : écriture limitée à `releases/` (exclu de
+Git), un `SHA256SUMS` permet de vérifier l'intégrité, et aucun fichier de
+secret n'y entre.
+
+**Écoute réseau** : MILES reste sur `127.0.0.1` par défaut. Le mode LAN
+(`--web-lan`) exige un jeton porteur persistant **et** une adresse privée
+nommée ; il est refusé au démarrage sinon. Procédure et règles :
+[`BOX_DEBIAN_SETUP.md`](BOX_DEBIAN_SETUP.md).
+
+**Contrôle après installation** : la procédure complète de vérification sur
+Debian 13 (préflight, deux passes d'installation, service, authentification,
+refus du mode réseau, télémétrie, intégrité des archives, redémarrage) est
+décrite dans [`VALIDATION_DEBIAN_13.md`](VALIDATION_DEBIAN_13.md), avec une
+grille de résultats à remplir.
+
 ## 4. Lancement
 
 ### Mode texte (dépendances standard uniquement)

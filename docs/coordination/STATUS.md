@@ -1,5 +1,40 @@
 # docs/coordination/STATUS.md — État du projet MILES
 
+## État instantané (2026-10-28, Agent A — écarts DEC-016 fermés, TASK-DEV-050)
+
+- **Branche** : `feat/miles-box-packages`, issue de `main` (`492ecb3`), **non fusionnée**.
+- **Tests** : **934 exécutés — 934 OK, 0 échec, 5 ignorés** (Windows 11, Python 3.12).
+- **Contrat d'écoute réseau** (`DEC-019`) : `assert_local_host` inchangée ; `assert_listen_host(host, allow_lan=False)` porte le contrat complet. Sans opt-in, seule `127.0.0.1` passe. Avec, une adresse **privée** passe et `0.0.0.0`, `::`, une adresse publique ou un nom d'hôte restent refusés. `allow_lan` n'a pas de setter. `--web-lan` exige un jeton **persistant** + `MILES_WEB_LAN_HOST`, sinon **code de sortie 1 sans serveur** (vérifié en réel, pas seulement en test).
+- **Tests du contrat** : les 10 tests de `TestWebServerLocalOnly` sont conservés et **renforcés** (refus de `0.0.0.0` et `::` aussi en mode LAN), **4 ajoutés** (14 au total) ; `tests/test_web_lan.py` en apporte **10**. Comptes revérifiés : le rapport d'audit annonçait 8, ce document 11. Aucune assertion supprimée ni affaiblie.
+- **Paquet PC** : `install.sh` exécute le préflight avec `bash` (il le soumettait à `python3`), est idempotent et crée l'utilisateur du service ; `cockpit-launcher.sh` lance le serveur Companion du dépôt au lieu d'un dossier `./cockpit` inexistant ; `miles.service` ne rend plus `.env` inscriptible et interdit explicitement l'ajout de `--web-lan`.
+- **Firmware ESP32-S3** : `BACKEND_URL` n'a plus de valeur par défaut (une URL de bouclage est refusée), un marqueur `REPLACE_ME` arrête le démarrage sans tenter de connexion, et **aucune valeur n'est inventée** (un capteur absent n'est pas envoyé). **Compilation réelle : `[SUCCESS]` en 1227,56 s**, image `firmware.bin` de 1 103 072 octets, RAM 14,2 %, Flash 32,5 % (`espressif32@8.0.0`, `toolchain-xtensa-esp-elf@14.2.0`, `framework-arduinoespressif32@4.30312.261024`).
+- **Télémétrie du boîtier** : route `/api/box` sur le serveur Companion (même origine, cible figée), consommée par `miles-bridge.js`. Une valeur ne s'affiche que si le backend a répondu, **toujours avec l'âge de la mesure** ; backend muet = 503 et « aucune valeur affichée ».
+- **Archives** : `scripts/build_release.py` laissait entrer `.pio/` et `__pycache__/` (comparaison de motifs avec des `/` sur des chemins Windows). Corrigé, mesuré : 3 archives + `SHA256SUMS`, aucune entrée technique. `tests/test_build_release.py` archive un faux paquet piégé et vérifie qu'aucun secret ne sort.
+- **Procédure de validation** : [`docs/installation/VALIDATION_DEBIAN_13.md`](../installation/VALIDATION_DEBIAN_13.md) — 12 phases, 15 contrôles, **écrite et non exécutée** (`TASK-DEV-051`).
+- **Réserve de vérification à assumer** : `hardware/packages/pc-miles/install.sh` a été corrigé **après** la dernière exécution de la suite (cible `/opt/Milescorp` avec `INSTALL_SERVICE=1`, tests lancés sous l'utilisateur du service, installation de l'unité par `tee`). Ces corrections sont **relues, pas exécutées** : le shell de l'agent était indisponible. À confirmer par `bash -n install.sh`, puis par les phases 2 à 8 de la procédure.
+- **Tâches** : `TASK-DEV-049`, `TASK-DEV-050` et `TASK-DEV-051` **DONE**.
+
+## Prochain objectif
+
+1. **Audit B** (`M-023`) sur trois surfaces : contrat réseau, relai `/api/box`, exclusions d'archives. **Rien ne fusionne avant.**
+2. **Validation Debian 13** : la chaîne post-D1 n'a jamais tourné dessus. C'est la seule preuve manquante pour « installable sur le mini-PC ». La procédure est prête — [`docs/installation/VALIDATION_DEBIAN_13.md`](../installation/VALIDATION_DEBIAN_13.md) : commandes exactes, sorties attendues, grille de 15 contrôles, limites assumées. **Écrite, non exécutée.**
+3. **Flash du firmware** sur le boîtier réel : compilation prouvée, matériel non testé.
+4. Reste ensuite : multi-fournisseurs (branche à rebaser) et les 10 audits Phase 6.3.
+
+## État instantané (2026-10-28, Agent A — port du lot boîtier, TASK-DEV-049)
+
+- **Référence du code** : `main` (`492ecb3`) + branche `feat/miles-box-packages`, issue de `main`, **non fusionnée** (`DEC-018`).
+- **Tests** : **911 exécutés — 911 OK, 0 échec, 5 ignorés** (Windows 11, Python 3.14.7). 891 (base `main`) + 15 (lot boîtier) + 5 (`tests/test_env_examples.py`).
+- **Ce que la branche apporte** : le lot « paquets téléchargeables » (`TASK-DEV-047`) est revenu sur une base saine par **port de fichiers**, pas par merge ni rebase — la branche d'origine avait **49 commits de retard** et 22 d'avance, dont l'essentiel de la documentation réécrite depuis. 15 fichiers portés, aucune modification de `miles.py` ni de `app/interface/web.py`.
+- **Défaut réel corrigé pendant le port** : l'exemple `.env` du paquet PC contenait `MILES_PROVIDER=off`, **valeur que `Settings` refuse** (reproduit : `SettingsError: Fournisseur inconnu : 'off'`), et `MILES_API_KEY`, nom qu'aucun code ne lit. `install.sh` le copiant en `.env`, **MILES n'aurait pas démarré après installation**. Exemple régénéré depuis la racine ; garde-fou `tests/test_env_examples.py` (4 vérifications, contrôle négatif prouvé).
+- **Tâches** : `TASK-DEV-049` **DONE**, `TASK-DEV-050` **IN_PROGRESS** (écarts restants : contrat LAN, firmware non compilé, `install.sh`, `cockpit-launcher.sh`, `miles.service`, `miles-bridge.js`, renvoi `INSTALL.md`).
+
+## Prochain objectif
+
+- **`TASK-DEV-050` — fermer les écarts du lot boîtier** : réécrire `assert_local_host` et les **10 tests** de `TestWebServerLocalOnly` pour porter le contrat `DEC-016` §2 (local par défaut, LAN refusé sans jeton), corriger les trois scripts du paquet PC, recompiler le firmware, produire les archives.
+- **Bloqué par** : l'audit B de l'ouverture réseau (`M-022`, Agent B).
+- **En parallèle** : Agent B sur les 10 audits Phase 6.3 (code déjà dans `main`, constats seulement).
+
 ## État instantané (2026-10-28, Agent A — lot isolation des tests, TASK-DEV-048)
 
 - **Référence du code** : **`main`**, publiée sur `origin/main` (`dffac9a`), puis ce lot.

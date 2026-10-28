@@ -277,6 +277,114 @@ class MilesRelayTest(unittest.TestCase):
         self.assertIn("MILES injoignable", str(result["body"]))
 
 
+class FakeBox(BaseHTTPRequestHandler):
+    """Backend boitier factice : une telemetrie plausible, aucune valeur reelle."""
+
+    server_version = "FakeBox"
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, fmt: str, *args: object) -> None:
+        pass
+
+    def do_GET(self) -> None:  # noqa: N802
+        payload = json.dumps(
+            {
+                "source": "boxtelemetry",
+                "cpu": {"charge": [0.42], "uptime_s": 120.0},
+                "temperatures": [{"capteur": "hwmon0", "celsius": 42.5}],
+                "ventilos": [{"capteur": "hwmon0", "tr/min": 1200}],
+                "injection_esp32": {"etat": "aucun"},
+            }
+        ).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+
+class BoxRelayTest(unittest.TestCase):
+    """Le cockpit lit le boitier en meme origine, et jamais une valeur inventee."""
+
+    def _point_box_at(self, port: int) -> None:
+        previous = os.environ.get("COMPANION_BOX_URL")
+        os.environ["COMPANION_BOX_URL"] = "http://127.0.0.1:%d" % port
+
+        def restore() -> None:
+            if previous is None:
+                os.environ.pop("COMPANION_BOX_URL", None)
+            else:
+                os.environ["COMPANION_BOX_URL"] = previous
+
+        self.addCleanup(restore)
+
+    def setUp(self) -> None:
+        # MILES factice : sert a prouver que /api/box ne lui est PAS relaye.
+        FakeMiles.received = []
+        self.miles = ThreadingHTTPServer(("127.0.0.1", 0), FakeMiles)
+        self._miles_thread = threading.Thread(
+            target=self.miles.serve_forever, daemon=True
+        )
+        self._miles_thread.start()
+
+        def stop_miles() -> None:
+            self.miles.shutdown()
+            self.miles.server_close()
+
+        self.addCleanup(stop_miles)
+        previous = os.environ.get("COMPANION_MILES_URL")
+        os.environ["COMPANION_MILES_URL"] = "http://127.0.0.1:%d" % (
+            self.miles.server_address[1]
+        )
+
+        def restore_miles() -> None:
+            if previous is None:
+                os.environ.pop("COMPANION_MILES_URL", None)
+            else:
+                os.environ["COMPANION_MILES_URL"] = previous
+
+        self.addCleanup(restore_miles)
+
+        self.server = CompanionTestServer()
+        self.addCleanup(self.server.stop)
+
+    def test_backend_absent_rend_503_sans_aucune_valeur(self) -> None:
+        """Sans backend, aucune valeur : pas de 200 vide, pas de chiffre."""
+        self._point_box_at(9)  # port ferme : injoignable
+        result = self.server.request("/api/box")
+        self.assertEqual(result["status"], 503)
+        body = str(result["body"])
+        self.assertIn("indisponible", body)
+        self.assertNotIn("celsius", body)
+        self.assertNotIn("tr/min", body)
+
+    def test_telemetrie_du_boitier_est_relayee(self) -> None:
+        box = ThreadingHTTPServer(("127.0.0.1", 0), FakeBox)
+        thread = threading.Thread(target=box.serve_forever, daemon=True)
+        thread.start()
+
+        def stop_box() -> None:
+            box.shutdown()
+            box.server_close()
+
+        self.addCleanup(stop_box)
+        self._point_box_at(box.server_address[1])
+
+        result = self.server.request("/api/box")
+        self.assertEqual(result["status"], 200)
+        charge = json.loads(str(result["body"]))
+        self.assertEqual(charge["source"], "boxtelemetry")
+        self.assertEqual(charge["temperatures"][0]["celsius"], 42.5)
+        self.assertEqual(charge["ventilos"][0]["tr/min"], 1200)
+
+    def test_route_du_boitier_n_est_pas_relayee_a_miles(self) -> None:
+        """`/api/box` est traite localement, pas transmis a MILES."""
+        self._point_box_at(9)
+        self.server.request("/api/box")
+        chemins = [entree["path"] for entree in FakeMiles.received]
+        self.assertNotIn("/api/box", chemins)
+
+
 class LoopbackOnlyTest(unittest.TestCase):
     def test_server_refuses_non_loopback_host(self) -> None:
         self.assertEqual(companion.main(["--host", "0.0.0.0", "--port", "0"]), 2)

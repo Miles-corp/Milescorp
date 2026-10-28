@@ -33,3 +33,13 @@ logs/*.log
 data/*.json
 data/*.jsonl
 data/*.db
+
+# Archives de téléchargement générées (jamais commitées)
+releases/
+
+# Boîtier : état local du backend et configuration firmware personnelle
+hardware/packages/backend-box/box_state.json
+platformio.local.ini
+.pio/
+.pio-venv/
+.pio-core/

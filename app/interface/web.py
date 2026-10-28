@@ -11,6 +11,7 @@ Par défaut, le serveur écoute uniquement sur 127.0.0.1.
 from __future__ import annotations
 
 import html
+import ipaddress
 import json
 import logging
 import os
@@ -65,19 +66,29 @@ __all__ = [
     "sanitize_text",
     "public_provider_error",
     "LOCAL_ONLY_HOST",
+    "LAN_OPT_IN_ENV",
+    "LAN_HOST_ENV",
     "MAX_BODY_BYTES",
     "WebServerSecurityError",
     "RequestBodyError",
     "assert_local_host",
+    "assert_listen_host",
     "WebApp",
     "MilesHandler",
     "MilesWebServer",
 ]
 
-# Adresse d'écoute du serveur web. Elle est imposée par le code et n'est
-# pas configurable : le service MILES doit rester strictement local, jamais
-# joignable depuis le réseau local ou Internet.
+# Adresse d'écoute du serveur web par défaut. Le service MILES écoute
+# uniquement ici, sauf opt-in explicite et vérifié (voir `assert_listen_host`).
 LOCAL_ONLY_HOST = "127.0.0.1"
+
+#: Opt-in d'écoute réseau : matérialise un choix humain, jamais un défaut.
+LAN_OPT_IN_ENV = "MILES_WEB_LAN"
+
+#: Adresse privée explicite à écouter quand l'opt-in est donné. Il n'existe
+#: volontairement aucune valeur par défaut : « toute interface » (0.0.0.0)
+#: n'est jamais acceptée.
+LAN_HOST_ENV = "MILES_WEB_LAN_HOST"
 
 # Taille maximale du corps d'une requête HTTP, en octets (64 KiB).
 # Au-delà, la requête est refusée avec HTTP 413 sans que les données
@@ -140,6 +151,69 @@ def assert_local_host(host: str) -> str:
         raise WebServerSecurityError(
             f"Adresse d'écoute refusée : {host!r}. Le serveur web MILES est "
             f"strictement local et n'écoute que sur {LOCAL_ONLY_HOST}."
+        )
+    return host
+
+
+def _est_adresse_privee(host: str) -> bool:
+    """Indiquer si ``host`` est une adresse IP privée utilisable en LAN.
+
+    Sont refusées : les formes non-IP (nom d'hôte), les adresses de bouclage
+    (déjà couvertes par ``LOCAL_ONLY_HOST``), les adresses « toutes
+    interfaces » (``0.0.0.0``, ``::``), le multicast et le link-local.
+    """
+    try:
+        adresse = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    if adresse.is_loopback or adresse.is_unspecified or adresse.is_multicast:
+        return False
+    if adresse.is_link_local:
+        return False
+    return bool(adresse.is_private)
+
+
+def assert_listen_host(host: str, *, allow_lan: bool = False) -> str:
+    """Vérifier une adresse d'écoute, locale par défaut, privée sur opt-in.
+
+    Le contrat est volontairement asymétrique :
+
+    - ``127.0.0.1`` est toujours accepté ;
+    - toute autre adresse est refusée **par défaut**, sans exception ;
+    - une adresse privée (RFC 1918, ULA IPv6) n'est acceptée que si
+      ``allow_lan`` est vrai, c'est-à-dire après un choix explicite de
+      l'utilisateur ;
+    - ``0.0.0.0``, ``::``, une adresse publique, un nom d'hôte ou une valeur
+      non textuelle restent refusés **même** avec ``allow_lan``.
+
+    Lever cette garde ne suffit donc pas à exposer MILES : il faut aussi
+    nommer une adresse privée précise, ce qui exclut l'écoute accidentelle
+    sur toutes les interfaces.
+    """
+    if not isinstance(host, str):
+        raise WebServerSecurityError(
+            f"Adresse d'écoute invalide : {host!r}. Le serveur web MILES "
+            f"n'écoute que sur {LOCAL_ONLY_HOST}, ou sur une adresse privée "
+            f"explicite avec --web-lan."
+        )
+    if host == LOCAL_ONLY_HOST:
+        return host
+    if not allow_lan:
+        raise WebServerSecurityError(
+            f"Adresse d'écoute refusée : {host!r}. Le serveur web MILES "
+            f"n'écoute que sur {LOCAL_ONLY_HOST} ; une adresse privée exige "
+            f"l'option explicite --web-lan."
+        )
+    if host in ("0.0.0.0", "::"):
+        raise WebServerSecurityError(
+            f"Adresse d'écoute refusée : {host!r} désigne toutes les "
+            f"interfaces. Indiquez une adresse privée précise ({LAN_HOST_ENV})."
+        )
+    if not _est_adresse_privee(host):
+        raise WebServerSecurityError(
+            f"Adresse d'écoute refusée : {host!r} n'est pas une adresse "
+            f"privée (RFC 1918 ou ULA IPv6). MILES n'écoute jamais sur une "
+            f"adresse publique."
         )
     return host
 
@@ -1527,15 +1601,20 @@ class MilesHandler(BaseHTTPRequestHandler):
 
 
 class MilesWebServer:
-    """Serveur web MILES, strictement local (127.0.0.1 uniquement).
+    """Serveur web MILES, local par défaut.
 
-    L'adresse d'écoute est imposée par le code et n'est pas configurable.
-    Toute tentative de démarrage sur une adresse non locale est refusée
-    explicitement, que ce soit via le constructeur ou via une affectation
-    directe de l'attribut `host`.
+    L'adresse d'écoute est validée à la construction, à toute affectation de
+    l'attribut ``host`` et de nouveau juste avant la liaison. Par défaut,
+    seule ``127.0.0.1`` est acceptée ; une adresse privée n'est acceptée que
+    si ``allow_lan`` a été explicitement demandé, et ``0.0.0.0`` n'est jamais
+    acceptée.
+
+    ``allow_lan`` ne peut pas être modifié après construction : le mode
+    d'écoute est fixé par l'appelant (:func:`miles.main` avec ``--web-lan``),
+    jamais par une affectation tardive.
     """
 
-    #: Adresse d'écoute autorisée.
+    #: Adresse d'écoute par défaut.
     ALLOWED_HOST = LOCAL_ONLY_HOST
 
     def __init__(
@@ -1543,30 +1622,41 @@ class MilesWebServer:
         app: WebApp,
         host: str = LOCAL_ONLY_HOST,
         port: int = 8080,
+        allow_lan: bool = False,
     ) -> None:
         self.app = app
-        # Passe par la propriété de validation : toute adresse non locale
+        # Fixé avant `host` : le setter consulte ce drapeau.
+        self._allow_lan = bool(allow_lan)
+        # Passe par la propriété de validation : toute adresse non autorisée
         # est refusée dès la construction.
         self.host = host
         self.port = port
         self._server: Optional[ThreadingHTTPServer] = None
 
     @property
+    def allow_lan(self) -> bool:
+        """Indiquer si l'écoute sur adresse privée a été explicitement demandée."""
+        return self._allow_lan
+
+    @property
     def host(self) -> str:
-        """Adresse d'écoute du serveur (toujours locale)."""
+        """Adresse d'écoute du serveur (locale, ou privée sur opt-in)."""
         return self._host
 
     @host.setter
     def host(self, value: str) -> None:
-        self._host = assert_local_host(value)
+        self._host = assert_listen_host(value, allow_lan=self._allow_lan)
 
     def start(self) -> None:
         # Revalidation avant toute liaison : `host` est un attribut public,
         # il pourrait avoir été modifié par affectation directe.
-        host = assert_local_host(self.host)
+        host = assert_listen_host(self.host, allow_lan=self._allow_lan)
         MilesHandler.app = self.app
         self._server = ThreadingHTTPServer((host, self.port), MilesHandler)
-        print(f"Interface web MILES sur http://{host}:{self.port}")
+        if self._allow_lan:
+            print(f"Interface web MILES sur http://{host}:{self.port} (mode LAN)")
+        else:
+            print(f"Interface web MILES sur http://{host}:{self.port}")
         self._server.serve_forever()
 
     def stop(self) -> None:

@@ -186,3 +186,45 @@ Convention : chaque décision reçoit un ID `DEC-###` (ou `D-###`), une date, un
   4. **Aucun test existant affaibli** : les deux assertions en échec étaient justes, c'est l'environnement qui était pollué. Aucune assertion n'a été modifiée ni supprimée.
 - **Conséquences** : suite complète **891 tests, 0 échec, 5 ignorés**, obtenue **avec le fichier parasite encore en place** (contrôle négatif), puis après suppression. Un `.env` contenant `MILES_REMOTE_MODEL=` ne produit plus un modèle vide en production, et `MILES_HISTORY_LIMIT=` ne bloque plus le démarrage. Limite assumée : la branche `feature/miles-multi-provider` n'est pas corrigée ici (elle écrit dans `MILES_ENV_FILE`, ce qui est le comportement attendu de l'application) ; le fuitage est signalé à Agent B dans `M-021`.
 - **Statut** : ACCEPTEE
+
+## DEC-018 — Retour du lot boîtier sur `main` par port de fichiers (ni merge, ni rebase)
+
+- **Date** : 2026-10-28
+- **Auteur** : Agent A
+- **Contexte** : le lot « paquets téléchargeables » (`TASK-DEV-047`) vit sur `fix/miles-d1-web-authorization`, branche partie de `3a59dae` (ère D1) : **49 commits de retard** sur `main` et **22 d'avance**, dont la majorité est de la documentation de coordination que `main` a réécrite depuis (`DECISIONS`, `MESSAGES`, `STATUS`, `continuations/`, `MISSIONS_REGISTRY`). Le contenu fonctionnel réellement utile tient en **15 fichiers additifs**, 2 scripts, 1 document et 3 fichiers de test.
+- **Décision** :
+  1. **Port, pas merge ni rebase.** Les fichiers utiles sont repris tels quels sur une branche neuve issue de `main`. Un merge ferait entrer de la documentation obsolète et écraserait des décisions récentes ; un rebase rejouerait 22 commits dont la plupart n'ont plus de sens. La branche d'origine reste intacte et non fusionnée comme archive.
+  2. **Le port est additif.** Aucun fichier existant de `main` n'est modifié, à deux exceptions près, justifiées et testées : `.gitignore` (ajout de `releases/`, exigé par `scripts/build_release.py`) et l'exemple `.env` du paquet PC (voir point 3).
+  3. **L'exemple `.env` d'un paquet est dérivé de la racine** (déjà exigé par `DEC-016`). Constat vérifié : la version portée contenait `MILES_PROVIDER=off`, valeur que `Settings` **refuse** (`SettingsError: Fournisseur inconnu : 'off'`), et `MILES_API_KEY`, nom qu'aucun code ne lit (`MILES_REMOTE_API_KEY` est le bon). `install.sh` copiant cet exemple en `.env`, **MILES ne démarrait pas après installation**. L'exemple est donc régénéré depuis la racine, complété des deux variables du paquet (`MILES_BOX_KEY`, `MILES_WEB_AUTH_TOKEN`).
+  4. **Garde-fou automatique** : `tests/test_env_examples.py` vérifie que (a) chaque exemple livré se charge sans erreur, (b) aucun exemple n'utilise un nom de variable cité par aucun code, (c) un exemple de paquet contient toutes les variables de celui de la racine, (d) aucun exemple ne porte de valeur de clé. Un exemple invalide casse désormais la suite, plus une installation.
+  5. **Le contrat réseau reste une étape séparée.** `miles.py` et `app/interface/web.py` ne sont **pas** touchés ici : sur `main`, `assert_local_host` est appelé par le setter `host` de `MilesWebServer` et garanti par **10 tests** de `TestWebServerLocalOnly`. Les réécrire est un travail de sécurité (`DEC-016` §2), pas un portage ; il fait l'objet de `TASK-DEV-050`.
+- **Conséquences** : `main` gagne le lot boîtier sans dette documentaire ; la suite passe de 891 à **911 tests** (0 échec, 5 ignorés) ; le diagnostic des paquets connaît désormais ses défauts restants, tracés dans `TASK-DEV-050` ; une classe entière de fautes de configuration silencieuses est fermée.
+- **Statut** : ACCEPTEE
+
+## DEC-019 — Contrat d'écoute réseau : local par défaut, LAN sur preuve
+
+- **Date** : 2026-10-28
+- **Auteur** : Agent A
+- **Contexte** : `DEC-016` §2 exigeait de réécrire la garde réseau, pas de la contourner. Sur `main`, `assert_local_host` était appliquée par le setter `host` de `MilesWebServer` et verrouillée par 10 tests de `TestWebServerLocalOnly`. Le lot boîtier avait ajouté une garde parallèle (`allow_lan`) sans toucher ce verrou : `--web-lan` n'aurait pas pu fonctionner, et rien ne prouvait le refus sans jeton.
+- **Décision** :
+  1. **Deux gardes, pas une.** `assert_local_host` reste inchangée (refus de tout ce qui n'est pas `127.0.0.1`). Une seconde fonction, `assert_listen_host(host, allow_lan=False)`, porte le contrat complet. Un appelant qui ignore le mode LAN obtient donc exactement le comportement d'avant.
+  2. **Asymétrie volontaire.** Sans `allow_lan`, seule `127.0.0.1` passe. Avec `allow_lan`, une adresse **privée** (RFC 1918 ou ULA IPv6) est acceptée — mais `0.0.0.0`, `::`, une adresse publique, un nom d'hôte, une adresse de bouclage IPv6 ou une valeur non textuelle restent refusés. Nommer une adresse précise est obligatoire : l'écoute accidentelle sur toutes les interfaces devient impossible.
+  3. **Le mode d'écoute est figé à la construction.** `allow_lan` est une propriété sans setter : une affectation tardive lève `AttributeError`. `start()` revalide de toute façon l'adresse avant la liaison.
+  4. **Refus au démarrage, pour deux raisons distinctes.** `miles.py --web-lan` exige (a) un jeton porteur **persistant** (`MILES_WEB_AUTH_TOKEN`) — un jeton éphémère affiché une fois ne convient pas à un service joignable par le réseau — et (b) `MILES_WEB_LAN_HOST` nommant une adresse privée. `--web-lan` sans `--web` est également refusé. Dans tous ces cas : code de sortie 1, aucun serveur construit (prouvé par un test qui remplacerait `MilesWebServer` par un objet qui échoue).
+  5. **Aucun test affaibli.** Les 10 tests de `TestWebServerLocalOnly` sont conservés et renforcés (les refus de `0.0.0.0` et `::` sont désormais vérifiés **aussi** en mode LAN) ; **4 tests sont ajoutés** (la classe en compte **14**) ; `tests/test_web_lan.py` en apporte **10**, qui couvrent les refus et le cas complet. Comptes vérifiés par comptage des `def test_`, après qu'un rapport d'audit en ait annoncé 8 et ce document 11 : les deux étaient faux.
+- **Conséquences** : le défaut est inchangé à l'identique (`127.0.0.1`) ; l'ouverture réseau est possible mais ne peut résulter ni d'un oubli, ni d'une variable vide, ni d'une affectation tardive. **L'ouverture réelle reste soumise à l'audit B** : aucune installation ne doit l'activer avant cet audit.
+- **Statut** : ACCEPTEE
+
+## DEC-020 — Paquet PC, télémétrie du boîtier et archives : défauts corrigés
+
+- **Date** : 2026-10-28
+- **Auteur** : Agent A
+- **Contexte** : la relecture du lot porté (`TASK-DEV-049`) puis la vérification des livrables ont établi plusieurs défauts **reproductibles**, qu'aucun test ne couvrait.
+- **Décision et corrections** :
+  1. **`install.sh`** lançait le préflight par `python3 box_preflight.sh` : un script bash soumis à Python, échec garanti. Il est désormais exécuté par `bash`, et le script est idempotent (clone, venv, `.env`, tests, service sur demande), avec création de l'utilisateur système avant l'installation de l'unité.
+  2. **`cockpit-launcher.sh`** servait un dossier `./cockpit` inexistant, ce qui aurait publié une copie statique non authentifiée. Il lance maintenant le serveur Companion du dépôt (`assets/web` sous `/cockpit/`), conformément à `DEC-015` — une seule implémentation.
+  3. **`miles.service`** déclarait `User=miles` sans que l'utilisateur soit créé, et rendait `.env` inscriptible alors que seul `--setup` l'écrit. L'unité décrit ses conditions réelles : utilisateur existant, `ReadWritePaths` limité à `data/`, `UMask=0077`, et **aucune** option `--web-lan` (commentaire explicite pour empêcher qu'on l'ajoute sans audit).
+  4. **Firmware** : `BACKEND_URL` valait `http://127.0.0.1:8095`, c'est-à-dire l'ESP32 lui-même ; et deux relevés factices (`-99`, `-1`) étaient envoyés comme des mesures. Désormais : plus aucune adresse par défaut (le firmware refuse une URL de bouclage), configuration incomplète = arrêt net sans connexion, et **aucune valeur inventée** — un capteur absent n'est pas envoyé du tout.
+  5. **Archives** : `exclure()` comparait les motifs sur le chemin complet avec des `/`, alors que Windows produit des `\`. Mesuré : `.pio/` (artefacts de compilation) et `__pycache__/` **entraient dans les archives livrées**. La fonction compare maintenant des **segments** et gère les deux séparateurs ; `tests/test_build_release.py` archive un faux paquet piégé et vérifie qu'aucun secret ne sort, **contenu des fichiers compris**.
+- **Conséquences** : le paquet PC est cohérent avec ses scripts ; la télémétrie du boîtier est lue en même origine (`/api/box` sur le serveur Companion, cible figée) et n'affiche une valeur **que si le backend a répondu, avec l'âge de la mesure** ; les archives ne contiennent que des sources. Compilation réelle du firmware : `[SUCCESS]`, image de 1 103 072 octets. **Flash et comportement sur matériel restent non vérifiés.**
+- **Statut** : ACCEPTEE

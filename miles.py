@@ -10,7 +10,14 @@ from app.ai_providers.remote import RemoteProvider
 from app.config.settings import Settings
 from app.core.conversation import Conversation
 from app.interface.cli import CLI
-from app.interface.web import MilesWebServer, WebApp
+from app.interface.web import (
+    LAN_HOST_ENV,
+    LOCAL_ONLY_HOST,
+    MilesWebServer,
+    WebApp,
+    WebServerSecurityError,
+    assert_listen_host,
+)
 from app.interface.web_auth import (
     WebAuthenticator,
     WebCredentialStore,
@@ -73,6 +80,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=8080,
         help="Port d'écoute de l'interface web (défaut: 8080)",
+    )
+    parser.add_argument(
+        "--web-lan",
+        action="store_true",
+        help=(
+            "Exposer l'interface web sur une adresse privée du réseau local "
+            f"(exige un jeton porteur configuré et {LAN_HOST_ENV})"
+        ),
     )
     parser.add_argument(
         "--setup",
@@ -175,9 +190,46 @@ def _list_conversations(transcript: ConversationTranscript | None) -> int:
     return 0
 
 
+def _lan_refusal_reason(settings: Settings) -> str | None:
+    """Motiver un refus d'écoute réseau, ou ``None`` si elle est autorisée.
+
+    L'ouverture au réseau local est un choix explicite qui exige **deux**
+    conditions, vérifiées avant toute liaison :
+
+    - un jeton porteur **persistant** (``MILES_WEB_AUTH_TOKEN``) : un jeton
+      éphémère, affiché une fois puis perdu au redémarrage, ne convient pas
+      à un service joignable par le réseau ;
+    - une adresse privée explicite, jamais « toutes les interfaces ».
+
+    Le refus est prononcé au démarrage : MILES ne démarre pas à moitié
+    exposé.
+    """
+    if not WebAuthenticator.from_settings(settings).is_configured:
+        return (
+            "option --web-lan refusée : aucun jeton porteur n'est configuré "
+            "(MILES_WEB_AUTH_TOKEN). Sur le réseau local, MILES exige une "
+            "authentification persistante, pas un jeton éphémère."
+        )
+    host = os.environ.get(LAN_HOST_ENV, "").strip()
+    if not host:
+        return (
+            f"option --web-lan refusée : {LAN_HOST_ENV} doit nommer une adresse "
+            "privée explicite (ex. 192.168.1.42). 0.0.0.0 n'est jamais accepté."
+        )
+    try:
+        assert_listen_host(host, allow_lan=True)
+    except WebServerSecurityError as exc:
+        return f"option --web-lan refusée : {exc}"
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.web_lan and not args.web:
+        print("Erreur : --web-lan n'a de sens qu'avec --web.", file=sys.stderr)
+        return 1
 
     # L'assistant de configuration est exécutable même avec une configuration
     # défaillante : il écrit le `.env`, il ne le lit pas via Settings.
@@ -299,7 +351,17 @@ def main(argv: list[str] | None = None) -> int:
                 conversation.attach_transcript(transcript)
 
     if args.web:
-        # Interface web locale : elle exige une authentification par jeton.
+        # Ouverture réseau : refusée au démarrage tant que les deux conditions
+        # ne sont pas réunies (jeton persistant + adresse privée explicite).
+        lan_host: str | None = None
+        if args.web_lan:
+            refusal = _lan_refusal_reason(settings)
+            if refusal is not None:
+                print(f"Erreur : {refusal}", file=sys.stderr)
+                return 1
+            lan_host = os.environ.get(LAN_HOST_ENV, "").strip()
+
+        # Interface web : elle exige une authentification par jeton.
         authenticator, displayed_token = _build_web_authenticator(settings)
         web_app = WebApp(
             settings=settings,
@@ -310,7 +372,17 @@ def main(argv: list[str] | None = None) -> int:
             mission_runner=mission_runner,
             authenticator=authenticator,
         )
-        server = MilesWebServer(web_app, port=args.web_port)
+        server = MilesWebServer(
+            web_app,
+            host=lan_host or LOCAL_ONLY_HOST,
+            port=args.web_port,
+            allow_lan=bool(lan_host),
+        )
+        if lan_host:
+            print(
+                f"Attention : interface web exposée sur {lan_host}:{args.web_port} "
+                "(mode LAN). Tout client du réseau local doit présenter le jeton."
+            )
         if displayed_token:
             print("=" * 72)
             print("Jeton d'accès de l'interface web (affiché une seule fois) :")

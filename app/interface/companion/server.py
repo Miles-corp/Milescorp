@@ -28,6 +28,13 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 MILES_DEFAULT = "http://127.0.0.1:8080"
 PORT_DEFAULT = 8787
 
+# Backend boitier (telemetrie materielle). Cible figee : le cockpit ne peut
+# pas faire pointer ce relai ailleurs, et aucun chemin n'est repris de la
+# requete cliente (pas de relai arbitraire).
+BOX_DEFAULT = "http://127.0.0.1:8095"
+BOX_PATH = "/box/telemetry"
+BOX_TIMEOUT_S = 2.0
+
 # Racine du depot : trois niveaux au-dessus de app/interface/companion.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(ROOT)))
 
@@ -86,6 +93,11 @@ MIME = {
 
 def miles_url() -> str:
     return os.environ.get("COMPANION_MILES_URL", MILES_DEFAULT).rstrip("/")
+
+
+def box_url() -> str:
+    """URL du backend boitier (locale par defaut)."""
+    return os.environ.get("COMPANION_BOX_URL", BOX_DEFAULT).rstrip("/")
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -221,7 +233,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    def _serve_box(self) -> None:
+        """Relayer la telemetrie du boitier, ou dire qu'elle est indisponible.
+
+        Le cockpit interroge cette route en meme origine : aucune requete
+        inter-origine, et le navigateur n'apprend pas l'existence du port
+        8095. Si le backend ne repond pas, on renvoie 503 **sans valeur** :
+        le cockpit affichera « aucune valeur affichee » au lieu d'un chiffre
+        fabrique (DEC-014, DEC-016 §4).
+        """
+        try:
+            with urllib.request.urlopen(
+                box_url() + BOX_PATH, timeout=BOX_TIMEOUT_S
+            ) as resp:
+                payload = resp.read()
+                status = resp.status
+                ctype = resp.headers.get("Content-Type", "application/json")
+        except Exception as exc:  # noqa: BLE001 - l'echec est le resultat attendu
+            payload = (
+                '{"etat": "indisponible", "detail": "%s"}' % type(exc).__name__
+            ).encode()
+            status, ctype = 503, "application/json; charset=utf-8"
+        self._send_bytes(payload, status, ctype)
+
     def _serve_route(self, path: str) -> None:
+        # Boitier : relai local dedie, avant le relai generique vers MILES.
+        if path == "/api/box":
+            return self._serve_box()
+
         # Les routes de l'agent vont vers MILES.
         if path.startswith(API_PREFIXES) or path in {
             "/session",
