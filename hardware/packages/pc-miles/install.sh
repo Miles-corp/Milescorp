@@ -9,14 +9,21 @@
 #   édité à la main (permissions 600).
 #
 # Variables d'environnement reconnues :
-#   MILES_DIR      répertoire d'installation du dépôt (défaut : ./Milescorp)
+#   MILES_DIR      répertoire d'installation du dépôt
+#                  (défaut : /opt/Milescorp avec INSTALL_SERVICE=1, sinon ./Milescorp)
 #   MILES_REPO_URL dépôt à cloner
 #   MILES_USER     utilisateur du service (défaut : miles)
 #   INSTALL_SERVICE=1 pour installer et démarrer l'unité systemd
 set -euo pipefail
 
 PAQUET_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CIBLE="${MILES_DIR:-$PWD/Milescorp}"
+# Service système : la cible doit être un chemin système, pas le répertoire
+# courant (l'utilisateur du service n'y aurait pas accès).
+if [ "${INSTALL_SERVICE:-0}" = "1" ] && [ -z "${MILES_DIR:-}" ]; then
+    CIBLE="/opt/Milescorp"
+else
+    CIBLE="${MILES_DIR:-$PWD/Milescorp}"
+fi
 DEPOT="${MILES_REPO_URL:-https://github.com/Miles-corp/Milescorp.git}"
 UTILISATEUR="${MILES_USER:-miles}"
 
@@ -92,12 +99,19 @@ fi
 # 5. Contrôles automatiques (aucun réseau requis)
 echo
 echo "--- Tests du dépôt ---"
-(
-    cd "$CIBLE"
-    # shellcheck disable=SC1091
-    . .venv/bin/activate
-    python3 -m unittest discover -s tests -q
-)
+# Les tests tournent avec l'utilisateur qui possède l'arborescence : les
+# exécuter sous un autre compte ferait échouer les écritures dans data/ et
+# donnerait un faux négatif.
+if [ "${INSTALL_SERVICE:-0}" = "1" ]; then
+    sudo -u "$UTILISATEUR" bash -c "cd '$CIBLE' && ./.venv/bin/python3 -m unittest discover -s tests -q"
+else
+    (
+        cd "$CIBLE"
+        # shellcheck disable=SC1091
+        . .venv/bin/activate
+        python3 -m unittest discover -s tests -q
+    )
+fi
 
 # 6. Service systemd, uniquement sur demande explicite
 echo
@@ -105,7 +119,8 @@ if [ "${INSTALL_SERVICE:-0}" = "1" ]; then
     echo "--- Service systemd ---"
     # L'unité livrée cite /opt/Milescorp : on l'adapte au répertoire réel.
     sed "s#/opt/Milescorp#$CIBLE#g" "$PAQUET_DIR/miles.service" \
-        | sudo install -m 644 /dev/stdin /etc/systemd/system/miles.service
+        | sudo tee /etc/systemd/system/miles.service > /dev/null
+    sudo chmod 644 /etc/systemd/system/miles.service
     sudo systemctl daemon-reload
     sudo systemctl enable --now miles
     echo "Service 'miles' activé (écoute locale sur 127.0.0.1:8080)."

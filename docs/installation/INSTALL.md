@@ -302,6 +302,12 @@ secret n'y entre.
 nommée ; il est refusé au démarrage sinon. Procédure et règles :
 [`BOX_DEBIAN_SETUP.md`](BOX_DEBIAN_SETUP.md).
 
+**Contrôle après installation** : la procédure complète de vérification sur
+Debian 13 (préflight, deux passes d'installation, service, authentification,
+refus du mode réseau, télémétrie, intégrité des archives, redémarrage) est
+décrite dans [`VALIDATION_DEBIAN_13.md`](VALIDATION_DEBIAN_13.md), avec une
+grille de résultats à remplir.
+
 ## 4. Lancement
 
 ### Mode texte (dépendances standard uniquement)

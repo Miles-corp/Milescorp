@@ -10,6 +10,13 @@
 > authentification réelle côté client n'existe pas** (jeton porteur +
 > session = l'interface actuelle est locale uniquement).
 
+> **Note (2026-10-28)** : le mode LAN existe désormais dans le code —
+> `--web-lan` exige un jeton porteur **persistant** et une adresse privée
+> nommée, et refuse de démarrer sinon (`DEC-019`). Cela ne lève **pas** la
+> règle ci-dessus : l'ouverture reste interdite jusqu'à l'audit indépendant.
+> La procédure de contrôle d'une installation complète est dans
+> [`VALIDATION_DEBIAN_13.md`](VALIDATION_DEBIAN_13.md).
+
 ## 1. Prérequis
 
 - Debian 13 (testé ici : document rédigé sur la base des rapports du projet ;

@@ -15,7 +15,7 @@
 ## Prochain objectif
 
 1. **Audit B** (`M-023`) sur trois surfaces : contrat réseau, relai `/api/box`, exclusions d'archives. **Rien ne fusionne avant.**
-2. **Validation Debian 13** : la chaîne post-D1 n'a jamais tourné dessus. C'est la seule preuve manquante pour « installable sur le mini-PC ».
+2. **Validation Debian 13** : la chaîne post-D1 n'a jamais tourné dessus. C'est la seule preuve manquante pour « installable sur le mini-PC ». La procédure est prête — [`docs/installation/VALIDATION_DEBIAN_13.md`](../installation/VALIDATION_DEBIAN_13.md) : commandes exactes, sorties attendues, grille de 15 contrôles, limites assumées. **Écrite, non exécutée.**
 3. **Flash du firmware** sur le boîtier réel : compilation prouvée, matériel non testé.
 4. Reste ensuite : multi-fournisseurs (branche à rebaser) et les 10 audits Phase 6.3.
 
