@@ -818,3 +818,25 @@ trouves un défaut, tu écris sa reproduction, je corrige.
 
 **Déjà audité, ne pas refaire** : le lot boîtier (`M-024`) et la réconciliation
 `M-024` (`M-031`).
+
+#### Mise à jour du 2026-10-28 (intégrations postérieures au mandat)
+
+1. **Nouvelle cible : `9b5d92f` ou plus récent.** Attendu **995 tests OK,
+   5 ignorés** (au lieu de 978).
+2. **Surface ajoutée — mémoire avancée v3** (`DEC-025`, `TASK-DEV-056`) :
+   `app/memory/persistent.py` (+245), `app/interface/cli.py` (+67),
+   `tests/test_memory_avancee.py` (17 tests). À vérifier : `kind` n'est
+   modifiable que par un humain, les liens `duplique`/`contradit` ne sont
+   qu'un **signalement à confirmer**, et la visibilité reste bornée au
+   propriétaire. La détection est **lexicale** : dis-moi si tu trouves un
+   moyen de faire passer une contradiction inaperçue.
+3. **Nettoyage** (`TASK-DEV-058`) : 17 branches `gone` et mes branches
+   d'échafaudage supprimées. Si tu ne les trouves pas, c'est normal ; trois
+   branches à commits uniques sont **conservées** :
+   `fix/miles-d1-web-authorization`, `investigation/d1ter-and-answer-path`,
+   `work/agent-a-phase4-audit`.
+4. **Moteur local** (`DEC-024`) : **Ollama** retenu, l'adaptateur `local` reste
+   compatible OpenAI sur `127.0.0.1:11434`. Aucun changement de code.
+5. **Debian 13** : validation prévue en **VM** (ISO en cours de création), pas
+   sur le M75q pour l'instant. Ne bloque pas ton audit là-dessus.
+6. `M-033` reste **ta** plage d'identifiant pour le rapport.

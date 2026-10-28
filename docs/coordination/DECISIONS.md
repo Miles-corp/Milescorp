@@ -279,3 +279,29 @@ Convention : chaque décision reçoit un ID `DEC-###` (ou `D-###`), une date, un
   - aller-retour réel sur un `.env` : espaces, `#`, `=`, `+`, `/` et unicode **identiques** après relecture, variables voisines conservées, `statut()` sans la clé ; refus de `"`, `'`, antislash, saut de ligne, `NUL`, tabulation, espace.
 - **Limites assumées** : aucun **appel réseau réel** n'a été effectué (tests à mocks) ; la clé Gemini transite dans l'URL par construction de l'API ; la modification **concurrente** du `.env` n'est pas testée.
 - **Statut** : ACCEPTEE
+
+## DEC-024 — Moteur local : Ollama, llama.cpp reporté
+
+- **Date** : 2026-10-28
+- **Auteur** : Agent A
+- **Contexte** : `MI-010` laissait ouvert le choix du moteur local pour la RTX 3050 du boîtier. L'adaptateur `local` parle déjà le protocole compatible OpenAI sur `MILES_LOCAL_BASE_URL` (défaut `http://localhost:11434`), c'est-à-dire l'API d'Ollama.
+- **Décision** : **Ollama**. Raisons, dans l'ordre : aucun code à écrire ni à tester (l'adaptateur existe et est couvert) ; gestion des modèles et du GPU CUDA incluse ; service systemd fourni, donc démarrage au boot du mini-PC ; aucune dépendance Python supplémentaire ; aucune clé d'API à gérer puisqu'il écoute en local.
+- **llama.cpp reporté**, pas rejeté : il exigerait un adaptateur dédié, une chaîne de compilation et des choix de quantification à figer, pour un gain de performance **non mesuré** ici. À réexaminer seulement si une latence mesurée sur le M75q devient gênante — avec la mesure, pas avant.
+- **Conséquences** : sur le boîtier, installer Ollama, tirer un modèle, puis `MILES_PROVIDER=local` et `MILES_LOCAL_BASE_URL=http://127.0.0.1:11434`. Aucun changement de code.
+- **Limite** : aucune mesure de performance sur RTX 3050 n'a été faite — le matériel n'est pas accessible depuis cette session.
+- **Statut** : ACCEPTEE
+
+## DEC-025 — Mémoire avancée v3 intégrée (MI-022)
+
+- **Date** : 2026-10-28
+- **Auteur** : Agent A
+- **Contexte** : branche locale `feature/miles-memoire-avancee` (`99c8590`, 17 tests, jamais poussée), en attente de validation humaine depuis la mission `MI-022`. Décision humaine : **valider et intégrer**.
+- **Décision** : intégrer telle quelle. Apports :
+  1. **`kind`** d'un souvenir — `inconnu`, `fait`, `hypothese` — modifiable par un humain (`set_kind`), jamais par le modèle.
+  2. **Liens entre souvenirs** (`memory_links`) : `duplique` et `contradit`, détectés à l'écriture, **confirmables** par un humain (`confirm_link`).
+  3. **Visibilité par propriétaire** : chaque souvenir reste rattaché à son `owner_user_id` (prolongement de `D-MEM-01`).
+  4. **Résumé pur** (`resume_memoire`) : fonction sans effet de bord, réutilisable par le CLI et le web.
+  5. **Commandes** : `/fait`, `/hypothese`, `/contradictions`, `/confirmer`.
+- **Preuves d'exécution** (2026-10-28, Windows 11, Python 3.12) : `tests.test_memory_avancee` **17/17 OK** ; suite complète **995 tests, OK, 5 ignorés** ; fusion **sans conflit**.
+- **Limite assumée** : la détection de contradiction est **lexicale** (`_normaliser` + `_sans_negation`), donc heuristique — deux formulations éloignées du même fait ne seront pas reliées, et une négation complexe peut échapper. C'est un signalement à confirmer par un humain, jamais une vérité automatique.
+- **Statut** : ACCEPTEE
