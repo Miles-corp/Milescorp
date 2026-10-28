@@ -228,3 +228,34 @@ Convention : chaque décision reçoit un ID `DEC-###` (ou `D-###`), une date, un
   5. **Archives** : `exclure()` comparait les motifs sur le chemin complet avec des `/`, alors que Windows produit des `\`. Mesuré : `.pio/` (artefacts de compilation) et `__pycache__/` **entraient dans les archives livrées**. La fonction compare maintenant des **segments** et gère les deux séparateurs ; `tests/test_build_release.py` archive un faux paquet piégé et vérifie qu'aucun secret ne sort, **contenu des fichiers compris**.
 - **Conséquences** : le paquet PC est cohérent avec ses scripts ; la télémétrie du boîtier est lue en même origine (`/api/box` sur le serveur Companion, cible figée) et n'affiche une valeur **que si le backend a répondu, avec l'âge de la mesure** ; les archives ne contiennent que des sources. Compilation réelle du firmware : `[SUCCESS]`, image de 1 103 072 octets. **Flash et comportement sur matériel restent non vérifiés.**
 - **Statut** : ACCEPTEE
+
+## DEC-021 — La convention `.local` est vérifiée par refus, pas par avertissement
+
+- **Date** : 2026-10-28
+- **Auteur** : Agent A
+- **Contexte** : l'audit B (`M-024`) a relevé que `scripts/build_release.py` exclut par construction les `*.ini.local`, mais archive sans broncher un `*.ini` ordinaire. `M-025` a répondu par la convention écrite (en-tête du script, doc du firmware, test) ; `M-027` a confirmé la convention mais recommandé en plus un **avertissement** quand un `*.ini` non-`.local` contient des motifs de clé.
+- **Décision** :
+  1. **Un avertissement ne suffit pas** : il s'affiche et la livraison continue, donc le secret part quand même. `tests/test_build_release.py` dit du script qu'il est « le dernier rempart avant publication » ; un rempart qui prévient sans empêcher n'en est pas un. Le script **refuse** : sortie 1, **aucune archive créée**, même partiellement.
+  2. **Portée volontairement étroite** : seuls les `*.ini` **ordinaires** sont relus (les `.ini.local` sont déjà exclus), seules les lignes actives sont examinées (commentaires `;`, `#`, `//` ignorés, sinon la documentation du dépôt elle-mêmes déclencherait l'alerte), et les valeurs de gabarit (`REPLACE_ME`, `CHANGEME`, `CHANGE_ME`, `A_COMPLETER`, `TODO`, vide) sont tolérées — elles sont dans le dépôt et ne sont pas des secrets.
+  3. **Le message d'erreur ne peut pas devenir la fuite** : il nomme le fichier, la ligne et la **variable**, jamais la valeur.
+  4. **Six tests** couvrent le refus, dont un **non-faux-positif sur le `platformio.ini` réel du dépôt** et une vérification qu'aucune archive n'existe après refus. `test_build_release.py` passe de 6 à **12** tests.
+- **Conséquences** : la règle `.local` n'est plus une consigne mais une condition de livraison. Un identifiant laissé dans un `*.ini` ordinaire fait échouer la construction des archives au lieu de partir chez l'utilisateur. Limite assumée : le contrôle porte sur des **noms de variables** et non sur une détection d'entropie — une clé rangée sous un nom anodin reste invisible.
+- **Statut** : ACCEPTEE
+
+## DEC-022 — `*.ini.local` ne protégeait pas `platformio.local.ini` : exclusion corrigée
+
+- **Date** : 2026-10-28
+- **Auteur** : Agent A
+- **Contexte** : première exécution réelle du refus de `DEC-021` (shell de l'agent rétabli). `test_ini_local_ignore` **échoue** : `avertir_identifiants_ini` signale `platformio.local.ini`. Diagnostic : le motif d'exclusion était `*.ini.local`, alors que la convention écrite partout — en-tête du script, `hardware/packages/esp32-s3/platformio.ini`, README du firmware, `VALIDATION_DEBIAN_13.md`, `.gitignore` — est `*.local.ini`. `fnmatch("platformio.local.ini", "*.ini.local")` est **faux** : les identifiants WiFi réels partaient donc dans l'archive, et le test censé le prouver n'avait jamais été lancé.
+- **Décision** :
+  1. `MOTIFS_EXCLUS` couvre les deux orthographes (`*.local.ini`, `*.ini.local`) : la convention documentée est honorée, l'ancienne reste tolérée.
+  2. `avertir_identifiants_ini` ne décide plus par suffixe codé en dur mais par `exclure(relatif)` : **une seule règle**. Un fichier qui ne part pas ne peut plus être signalé, et réciproquement. Deux règles distinctes avaient divergé.
+  3. Le message de refus cite désormais `*.local.ini`.
+- **Preuve d'exécution** (2026-10-28, Windows 11, Python 3.14.7) :
+  - `tests.test_build_release` : **12 tests, OK** ;
+  - essai réel avec `platformio.local.ini` contenant `-DWIFI_PASS="vrai_secret"` → construction **exit 0**, fichier **absent** de `miles-esp32-s3-2026-10-28.tar.gz` ;
+  - essai réel avec le même secret dans un `platformio.ini` ordinaire → **exit 1**, `REFUS : identifiants dans un *.ini ordinaire`, **aucune archive créée** (3 avant, 3 après) ;
+  - contenu des archives : `platformio.ini` (gabarit `REPLACE_ME`) et `.env.example` partent ; aucun `.env`, `.pem` ni `.key` ;
+  - suite complète : **942 tests, OK, 5 ignorés**.
+- **Leçon de méthode** : `DEC-021` a été écrite, relue et fusionnée **sans exécution**. La relecture n'a pas vu que la règle d'exclusion et le test qu'elle prétendait satisfaire ne parlaient pas du même nom de fichier. Un test écrit et jamais lancé n'est pas une preuve, c'est une intention.
+- **Statut** : ACCEPTEE

@@ -13,6 +13,12 @@ ils doivent porter l'extension `.local` (ex. `platformio.local.ini`), exclue
 par construction. Un `*.ini` ordinaire, lui, est archivé : y placer des
 identifiants les ferait partir dans le livrable.
 
+Convention **vérifiée**, pas seulement écrite (agents B, M-024 puis M-027) :
+avant toute écriture, chaque `*.ini` ordinaire est relu et le script **REFUSE**
+de produire les archives s'il y trouve un identifiant en clair. Un
+avertissement seul aurait laissé le secret partir ; le refus garantit
+qu'aucune archive fautive n'existe. Sortie 1, aucun fichier créé.
+
 Usage : python3 scripts/build_release.py
 """
 
@@ -20,6 +26,8 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import re
+import sys
 import tarfile
 from datetime import date
 from pathlib import Path
@@ -35,15 +43,37 @@ RELEASES = RACINE / "releases"
 #: les artefacts de compilation et les caches Python).
 SEGMENTS_EXCLUS = frozenset({".env", ".pio", "__pycache__", ".git", ".pytest_cache"})
 
-#: Motifs de NOM jamais archivés. `*.ini.local` porte la convention : les
-#: fichiers personnels (SSID, clés) finissent par `.local`, les fichiers
-#: livrés (platformio.ini) n'en contiennent aucun.
+#: Motifs de NOM jamais archivés. Deux orthographes sont reconnues pour le
+#: suffixe personnel : `platformio.local.ini` (la convention documentée) et
+#: `platformio.ini.local` (variante tolérée). Un seul des deux était exclu
+#: auparavant, si bien que le fichier d'identifiants réel partait dans
+#: l'archive (DEC-022). Les fichiers livrés (`platformio.ini`) restent
+#: archivés : ils ne portent que des gabarits `REPLACE_ME`.
 MOTIFS_EXCLUS = (
     "auth.json",
     "box_state.json",
     "*.pem",
     "*.key",
-    "*.ini.local",   # identifiants WiFi/backend : seule la version vierge part
+    # Convention documentée (`platformio.local.ini`) — le motif en `*.ini.local`
+    # ne la couvrait PAS : les identifiants WiFi partaient dans l'archive.
+    "*.local.ini",
+    "*.ini.local",
+)
+
+#: Fragments de nom de variable qui dénotent un identifiant. Utilisés pour
+#: relire les `*.ini` **ordinaires** (donc archivés) avant de livrer.
+MOTIFS_SENSIBLES = "KEY|TOKEN|PASS|SECRET|SSID|PSK|PWD"
+
+#: Valeurs de gabarit : elles figurent dans le dépôt et ne sont pas des
+#: secrets (le firmware refuse de démarrer tant qu'elles n'ont pas changé).
+VALEURS_GABARIT = frozenset(
+    {"", "REPLACE_ME", "CHANGEME", "CHANGE_ME", "A_COMPLETER", "TODO"}
+)
+
+_IDENTIFIANT = re.compile(
+    rf"-?D?(?P<cle>[A-Za-z0-9_]*(?:{MOTIFS_SENSIBLES})[A-Za-z0-9_]*)"
+    r"\s*=\s*(?P<valeur>\S*)",
+    re.IGNORECASE,
 )
 
 
@@ -62,6 +92,45 @@ def exclure(nom: str) -> bool:
         for segment in segments
         for motif in MOTIFS_EXCLUS
     )
+
+
+def avertir_identifiants_ini(dossier: Path) -> list[str]:
+    """Lister les `*.ini` ordinaires qui portent un identifiant en clair.
+
+    Un `*.ini` ordinaire **est archivé** : un SSID, une clé ou un mot de passe
+    laissé là part chez l'utilisateur. Les fichiers personnels doivent porter
+    l'extension `.local`, exclue par construction.
+
+    Les lignes de commentaire (``;``, ``#``, ``//``) sont ignorées : la
+    documentation du dépôt cite des exemples et ne doit pas déclencher
+    d'alerte. **La valeur n'est jamais retournée**, seulement le nom de la
+    variable — un message d'erreur ne doit pas devenir la fuite.
+    """
+    avertissements: list[str] = []
+    for chemin in sorted(dossier.rglob("*.ini")):
+        relatif = chemin.relative_to(dossier.parent)
+        # Décision dérivée de la règle d'archive elle-même : un fichier qui ne
+        # part pas n'a pas à être signalé. Deux règles distinctes avaient
+        # divergé (`*.ini.local` d'un côté, `platformio.local.ini` de l'autre).
+        if exclure(str(relatif)):
+            continue
+        try:
+            contenu = chemin.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for numero, ligne in enumerate(contenu.splitlines(), start=1):
+            depouillee = ligne.strip()
+            if not depouillee or depouillee.startswith((";", "#", "//")):
+                continue
+            for trouve in _IDENTIFIANT.finditer(depouillee):
+                valeur = trouve.group("valeur").strip().strip('\\"').strip()
+                if valeur.upper() in VALEURS_GABARIT:
+                    continue
+                avertissements.append(
+                    f"{relatif}:{numero} : '{trouve.group('cle').upper()}' "
+                    "porte une valeur en clair"
+                )
+    return avertissements
 
 
 def construire_archive(nom_paquet: str, dossier: Path) -> Path:
@@ -90,6 +159,25 @@ def main() -> int:
     if not paquets:
         print("Aucun paquet trouvé dans hardware/packages/")
         return 1
+
+    # Refus fail-closed AVANT la moindre écriture : une archive contenant un
+    # identifiant ne doit pas exister, même temporairement.
+    alertes = [
+        alerte for dossier in paquets for alerte in avertir_identifiants_ini(dossier)
+    ]
+    if alertes:
+        print(
+            "REFUS : identifiants dans un *.ini ordinaire (il serait archivé) :",
+            file=sys.stderr,
+        )
+        for alerte in alertes:
+            print(f"  - {alerte}", file=sys.stderr)
+        print(
+            "  → déplacer ces valeurs dans un *.local.ini, exclu des archives.",
+            file=sys.stderr,
+        )
+        return 1
+
     sommes = []
     for dossier in paquets:
         archive = construire_archive(dossier.name, dossier)
