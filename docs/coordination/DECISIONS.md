@@ -277,7 +277,7 @@ Convention : chaque décision reçoit un ID `DEC-###` (ou `D-###`), une date, un
   - `test_provider_*` + `test_status_provider_diagnostics` : **49 OK** ; les 2 échecs signalés par Agent B sur la branche seule **disparaissent** — `main` les avait corrigés (`DEC-017`), la fusion les apporte donc résolus ;
   - suite complète : **978 tests, OK, 5 ignorés** ;
   - aller-retour réel sur un `.env` : espaces, `#`, `=`, `+`, `/` et unicode **identiques** après relecture, variables voisines conservées, `statut()` sans la clé ; refus de `"`, `'`, antislash, saut de ligne, `NUL`, tabulation, espace.
-- **Limites assumées** : aucun **appel réseau réel** n'a été effectué (tests à mocks) ; la clé Gemini transite dans l'URL par construction de l'API ; la modification **concurrente** du `.env` n'est pas testée.
+- **Limites assumées** : aucun **appel réseau réel** n'a été effectué (tests à mocks) ; la clé Gemini transite dans l'URL par construction de l'API ; la modification **concurrente** du `.env` est **mesurée, pas garantie** : `write_env` est atomique (`os.replace`, jamais de fichier corrompu), mais `set_key` fait lire-modifier-écrire — quatre processus écrivant quatre clés différentes ont perdu une clé **1 fois sur 40 tours** (2026-10-28). Aucun verrou ajouté : CLI mono-utilisateur. À fermer par un verrou `O_CREAT|O_EXCL` avec reprise si l'écriture devient concurrente (web, multi-instance).
 - **Statut** : ACCEPTEE
 
 ## DEC-024 — Moteur local : Ollama, llama.cpp reporté

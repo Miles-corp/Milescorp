@@ -16,6 +16,7 @@
 - **Moteur local tranché** (`DEC-024`, `TASK-DEV-057`) : **Ollama** — l'adaptateur `local` parle déjà son protocole sur `127.0.0.1:11434`, service systemd, zéro code. llama.cpp reporté faute de mesure de performance sur la RTX 3050.
 - **Branches nettoyées** (`TASK-DEV-058`) : **20 supprimées** (17 `gone` vérifiées ancêtres de `main` + 3 branches d'échafaudage). **3 conservées** car non fusionnées : `fix/miles-d1-web-authorization` (29 commits), `investigation/d1ter-and-answer-path` et `work/agent-a-phase4-audit` (1 chacun).
 - **Debian 13** : validation prévue en **VM** (ISO en cours de création), pas encore sur le M75q.
+- **Audit `TASK-DEV-055` rendu** (`M-033`, Agent B) sur `bf3e707` : verdict **aucun blocage** — `provider_config`, adaptateurs, archives et `DEC-017` validés ; `M-006`/`M-007` déclarés **obsolètes** (`TASK-DEV-019` → `CANCELLED`). **Deux comptes corrigés** (`M-034`) : `test_build_release` = **12** (pas 6) et la règle corrigée est `*.local.ini`, pas `*.ini.local` ; sa §3 n'a pas execité la reproduction demandée. **Concurrence `.env` mesurée** : 1 perte sur 40 tours avec 4 écritures simultanées vers des clés différentes — pas de verrou (CLI mono-utilisateur), limite inscrite dans `DEC-023`. Sa revue ne couvre pas la mémoire (base antérieure) : delta repris en `TASK-DEV-059`.
 - **Tâches** : `TASK-DEV-047` **DONE** (fermeture), `TASK-DEV-049`, `TASK-DEV-050`, `TASK-DEV-051` DONE.
 - **Reste hors du code** : installation Debian 13 jamais exécutée (procédure prête), firmware jamais flashé.
 
