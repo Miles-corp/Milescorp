@@ -62,6 +62,32 @@ class TestInjection(unittest.TestCase):
             # sans clé configurée : aucune injection acceptée (fail-closed)
             self.assertFalse(bt._verifier_cle(None, json.dumps({"cle": ""}).encode()))
 
+    def test_verification_cle_resiste_aux_corps_inattendus(self) -> None:
+        """Aucun corps ne doit provoquer d'exception (ni 500, ni fuite)."""
+        with patch.dict(os.environ, {"MILES_BOX_KEY": "partagee-locale"}):
+            for corps in (
+                b"[]",                       # liste, pas un objet
+                b"null",                     # null
+                b"\"chaine\"",                # chaine nue
+                json.dumps({"cle": 123}).encode(),      # cle non textuelle
+                json.dumps({"cle": None}).encode(),
+                json.dumps({"cle": ["a"]}).encode(),
+                b"",                         # corps vide
+            ):
+                with self.subTest(corps=corps):
+                    self.assertFalse(bt._verifier_cle(None, corps))
+
+    def test_verification_cle_accepte_les_caracteres_non_ascii(self) -> None:
+        """La comparaison porte sur des octets : l'Unicode ne doit pas lever."""
+        cle = "clé-partagée-éàü"
+        with patch.dict(os.environ, {"MILES_BOX_KEY": cle}):
+            self.assertTrue(
+                bt._verifier_cle(None, json.dumps({"cle": cle}, ensure_ascii=False).encode("utf-8"))
+            )
+            self.assertFalse(
+                bt._verifier_cle(None, json.dumps({"cle": "clé-partagée"}, ensure_ascii=False).encode("utf-8"))
+            )
+
 
 class TestMain(unittest.TestCase):
     def test_refus_lan_sans_cle(self) -> None:

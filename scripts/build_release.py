@@ -6,7 +6,12 @@ Contrat :
 - une archive par paquet : `releases/miles-<paquet>-<date>.tar.gz` ;
 - `releases/SHA256SUMS` pour vérifier l'intégrité du téléchargement ;
 - aucun secret dans les archives (`.env`, clés et identifiants WiFi
-  des `build_flags` ne sont JAMAIS copiés — seuls les `.example` le sont).
+  des `build_flags` ne sont JAMAIS copiés — seuls les `.example` le sont) ;
+
+**Convention obligatoire pour les fichiers de configuration personnels :**
+ils doivent porter l'extension `.local` (ex. `platformio.local.ini`), exclue
+par construction. Un `*.ini` ordinaire, lui, est archivé : y placer des
+identifiants les ferait partir dans le livrable.
 
 Usage : python3 scripts/build_release.py
 """
@@ -30,7 +35,9 @@ RELEASES = RACINE / "releases"
 #: les artefacts de compilation et les caches Python).
 SEGMENTS_EXCLUS = frozenset({".env", ".pio", "__pycache__", ".git", ".pytest_cache"})
 
-#: Motifs de NOM de fichier jamais archivés.
+#: Motifs de NOM jamais archivés. `*.ini.local` porte la convention : les
+#: fichiers personnels (SSID, clés) finissent par `.local`, les fichiers
+#: livrés (platformio.ini) n'en contiennent aucun.
 MOTIFS_EXCLUS = (
     "auth.json",
     "box_state.json",
