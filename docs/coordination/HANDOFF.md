@@ -1,43 +1,38 @@
-# docs/coordination/HANDOFF.md — Procédure de transmission entre agents
 
-Procédure à suivre par chaque agent à la fin de sa session de travail, afin que l'autre agent puisse reprendre le contexte sans perte d'information.
+## H-016 — 2026-10-28 — Agent A bis → utilisateur et Agent B — mission site web : vérification, correctifs, spec
 
-## 1. Avant de quitter
+**Travail réalisé :** vérification de l'intégration Miles Companion sur pièces
+(`TASK-DEV-060`) — 63 tests ciblés, lecture du serveur et des fichiers servis.
+Deux écarts réels trouvés : le bundle `assets/index-DSIZJMQZ.js` initialisait
+`SourceMapConsumer` sur `unpkg.com` (capacité d'appel externe contraire à
+`DEC-014`), et `index.html` exposait `40 °C · 14 ms`, `Éveillé · 40 °C`,
+`miles-local-7b` et « build démo » avant remplacement par le pont. Les deux sont
+corrigés : URL retirée du bundle, valeurs remplacées par des marqueurs honnêtes
+que `miles-bridge.js` traite (trois branches ajoutées). Spécification de
+jumelage et de comptes rédigée (`TASK-DEV-062`) sans aucune ligne de code réseau.
 
-1. Lire `AGENTS.md` (règle 10 et 14) pour s'assurer que les erreurs, limites et éléments restants sont documentés.
-2. Mettre à jour `docs/coordination/TASKS.md` :
-   - Statut de chaque tâche travaillée (`TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`, `CANCELLED`).
-   - `assigned-to`, `fichiers-concernes`, `resultat-attendu`, `date-debut`, `date-fin`.
-   - `bloque-par` si une tâche est bloquée, avec explication.
-3. Mettre à jour `docs/coordination/STATUS.md` :
-   - État général du projet.
-   - Prochain objectif clair.
-   - Liste des tâches actives et blocages.
-4. Consigner toute décision d'architecture dans `docs/coordination/DECISIONS.md` (règle AGENTS.md n°7).
-5. Rédiger un compte rendu suivant `docs/coordination/REPORT_TEMPLATE.md` si un livrable est produit.
-6. Relire son propre diff (`git diff`) avant de committer localement.
-7. Committer localement les documents modifiés (pas de push sans accord explicite).
+**Fichiers modifiés :** `app/interface/companion/index.html`,
+`app/interface/companion/miles-bridge.js`,
+`app/interface/companion/assets/index-DSIZJMQZ.js`,
+`tests/test_companion_static_assets.py` (nouveau),
+`docs/reports/COMPANION_INTEGRATION_VERIFICATION_AGENT_ABIS.md` (nouveau),
+`docs/specs/SITE_PAIRING_IA_SPEC.md` (nouveau),
+`docs/coordination/{MISSIONS_REGISTRY,TASKS,MESSAGES,DECISIONS,STATUS}.md`.
 
-## 2. Format de compte rendu de transfert (H-###)
+**Tests exécutés :** `test_companion_static_assets` **7 OK** ;
+`test_companion_server` + `test_web_device` + `test_web_project_board`
+**63 OK** ; suite complète **995 OK, 5 ignorés** (mesure de session sur
+`ec9d62c`). **Non exécuté :** aucun navigateur, aucun boîtier réel, aucune
+validation Debian 13.
 
-### H-001 — 2026-10-19 — Agent X → Agent Y
-**Tâche :** TASK-### — …
-**Travail réalisé :** …
-**Fichiers modifiés :** …
-**Commits :** …
-**Tests exécutés :** …
-**Problèmes restants :** …
-**Prochaine action recommandée :** …
+**Problèmes restants :** le rendu navigateur et le remplacement effectif des
+marqueurs n'ont pas été observés ; la spec attend la validation utilisateur ;
+`TASK-DEV-063` (jumelage V1) est bloquée par cette validation.
 
-## 6. Comptes rendus
-
-### H-002 — 2026-10-21 — Agent A → Agent B
-
-**Tâche :** TASK-DEV-018 (correction D1) ; TASK-DEV-019 (audit independant) transferee.
-
-**Travail réalisé :** diagnostic du défaut D1 (divergence de session entre l'emission du grant et sa verification), correction d'une ligne dans `app/orchestration/runner.py::_ensure_authorization`, jeu de 6 tests de regression, execution du scenario web reel, redaction du rapport de correction.
-
-**Fichiers modifiés :** `app/orchestration/runner.py` ; `tests/test_mission_web_authorization.py` (nouveau) ; `docs/reports/PHASE_6_3B_D1_FIX_AGENT_A.md` (nouveau) ; `docs/user_guide/MILES_PLAN_DE_TEST_PHASE_6.md` ; `docs/coordination/{TASKS,STATUS,MESSAGES}.md`.
+**Prochaine action recommandée :** relire `docs/specs/SITE_PAIRING_IA_SPEC.md`,
+trancher les quatre points qui appartiennent à l'utilisateur (hébergement,
+position, comptes, ordre V1/V2), puis ouvrir `TASK-DEV-063`.
+** `app/orchestration/runner.py` ; `tests/test_mission_web_authorization.py` (nouveau) ; `docs/reports/PHASE_6_3B_D1_FIX_AGENT_A.md` (nouveau) ; `docs/user_guide/MILES_PLAN_DE_TEST_PHASE_6.md` ; `docs/coordination/{TASKS,STATUS,MESSAGES}.md`.
 
 **Commits :** `6b736d7` — `fix(orchestrateur): autoriser la mission web avec la session du client (D1)` — branche `fix/miles-d1-web-authorization`, pousse sur `origin`. Base `fc179ca`. **Aucune fusion** ; `main` (`b9b7e7d`) et `origin/integration/miles-phases-5-6-6-1` (`69bf670`) inchanges.
 

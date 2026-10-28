@@ -532,6 +532,13 @@
         remplace = reel ? "en service " + _fmtDuree((te.process || {}).uptime_seconds) : "\u26a0 hors ligne";
       } else if (t === "Miles LOCAL" || t === "LOCAL") {
         remplace = reel ? String((te.provider || {}).mode || "local") : "\u26a0 source absente";
+      } else if (t === "mesure indisponible") {
+        remplace = reel ? "CPU " + te.host.cpu_count + " cœurs · disque " + te.disk.used_percent + " %"
+                        : "⚠ pas de capteurs";
+      } else if (t === "état inconnu") {
+        remplace = reel ? "en service " + _fmtDuree((te.process || {}).uptime_seconds) : "⚠ hors ligne";
+      } else if (t === "modèle inconnu") {
+        remplace = reel ? String((te.provider || {}).model || "—") : "⚠ id introuvable";
       } else if (t === "miles-local-7b") {
         remplace = reel ? String((te.provider || {}).model || "—") : "\u26a0 id introuvable";
       } else if (t === "Aucune adresse") {

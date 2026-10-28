@@ -1,28 +1,30 @@
-# docs/coordination/DECISIONS.md — Registre des décisions MILES
 
-Convention : chaque décision reçoit un ID `DEC-###` (ou `D-###`), une date, un auteur, un contexte, la décision et un statut (`PROPOSEE`, `ACCEPTEE`, `REJETEE`, `OBSOLETE`). Journal append-only : les décisions ne sont jamais modifiées rétroactivement.
+## DEC-026 — La clé API reste sur la box ; le site n'en détient aucune copie
 
-## DEC-001 — Système de coordination asynchrone par fichiers Markdown
-
-- **Date** : 2026-10-19
-- **Auteur** : Agent A
-- **Contexte** : Deux instances OpenCode sur deux PC distincts, aucun serveur permanent, aucun service payant, pas de communication directe entre agents.
-- **Décision** : La coordination s'appuie exclusivement sur des fichiers Markdown dans `docs/coordination/` (`AGENTS.md`, `WORKFLOW.md`, `TASKS.md`, `DECISIONS.md`, `STATUS.md`, `HANDOFF.md`, `REPORT_TEMPLATE.md`), synchronisés via Git et GitHub. La communication est asynchrone.
+- **Date** : 2026-10-28
+- **Auteur** : Agent A bis
+- **Contexte** : la vision utilisateur décrit un onglet IA sur le site et un
+  jumelage box ↔ site. Le risque évident est de faire transiter les clés
+  fournisseurs par un site, même « juste pour configurer ».
+- **Décision** :
+  1. **Aucune clé API côté site**, sous aucune forme : ni stockée, ni relayée,
+     ni journalisée, ni affichée, ni saisie dans un formulaire du site. La
+     saisie se fait sur la page locale de la box, qui écrit son `.env` par le
+     mécanisme existant (`provider_config`, écriture atomique et masquage).
+  2. Le site ne reçoit qu'un **état** : fournisseur actif, modèle actif,
+     configuré ou non. Toute absence de réponse s'affiche « inconnu ».
+  3. **Jumelage V1 sans serveur** : code court affiché par la box, comparaison
+     à temps constant, jeton révocable, aucun paquet hors du réseau local.
+  4. **V2 avec passerelle** : la box ouvre une connexion **sortante**
+     persistante (une box derrière NAT n'est pas joignable) ; la passerelle ne
+     relaie que des signaux, aucun contenu ni secret.
+  5. **Position** : consentement distinct, arrondi, rétention bornée, refus
+     possible sans perte de fonction.
+- **Conséquences** : l'hébergement de la passerelle, la collecte de position et
+  l'obligation de comptes sont des **décisions utilisateur** ; rien n'est
+  provisionné. La spec `docs/specs/SITE_PAIRING_IA_SPEC.md` en découle.
 - **Statut** : ACCEPTEE
-
-## DEC-002 — Identifiants des agents et format des tâches
-
-- **Date** : 2026-10-19
-- **Auteur** : Agent A
-- **Contexte** : Il faut distinguer clairement les deux agents et tracer chaque tâche.
-- **Décision** : Les agents sont `Agent A` (PC principal, git `DripMind`) et `Agent B` (second PC). Les tâches utilisent l'identifiant `TASK-###` avec les statuts `TODO`, `IN_PROGRESS`, `BLOCKED`, `DONE`, `CANCELLED`.
-- **Statut** : ACCEPTEE
-
-## DEC-003 — Pas de développement fonctionnel dans la Mission 001
-
-- **Date** : 2026-10-19
-- **Auteur** : Agent A
-- **Contexte** : La mission 001 concerne uniquement l'organisation, la documentation et les règles de collaboration.
+tion et les règles de collaboration.
 - **Décision** : Aucune fonctionnalité de l'assistant MILES n'est développée durant cette mission.
 - **Statut** : ACCEPTEE
 
