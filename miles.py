@@ -73,6 +73,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=8080,
         help="Port d'écoute de l'interface web (défaut: 8080)",
     )
+    parser.add_argument(
+        "--web-lan",
+        action="store_true",
+        help="Exposer l'interface web sur le LAN (fail-closed : exige un jeton porteur et une IP privée explicite)",
+    )
     return parser
 
 
@@ -282,7 +287,32 @@ def main(argv: list[str] | None = None) -> int:
             mission_runner=mission_runner,
             authenticator=authenticator,
         )
-        server = MilesWebServer(web_app, port=args.web_port)
+        server_host = None
+        if args.web_lan:
+            # Fail-closed : pas de token porteur, pas de LAN.
+            if not authenticator.is_configured() and not os.environ.get("MILES_WEB_AUTH_TOKEN", ""):
+                print(
+                    "ERREUR : --web-lan refuse sans jeton porteur configuré "
+                    "(MILES_WEB_AUTH_TOKEN ou --setup).",
+                    file=sys.stderr,
+                )
+                return 1
+            # Fail-closed : sans IP privée explicite, pas de LAN.
+            server_host = os.environ.get("MILES_WEB_LAN_HOST", "")
+            if not server_host:
+                print(
+                    "ERREUR : --web-lan exige MILES_WEB_LAN_HOST=192.168.x.x "
+                    "(IP privée explicite). 0.0.0.0 et :: sont refusés.",
+                    file=sys.stderr,
+                )
+                return 1
+            os.environ["MILES_WEB_LAN"] = "1"
+        if server_host:
+            server = MilesWebServer(
+                web_app, host=server_host, port=args.web_port, allow_lan=True
+            )
+        else:
+            server = MilesWebServer(web_app, port=args.web_port)
         if displayed_token:
             print("=" * 72)
             print("Jeton d'accès de l'interface web (affiché une seule fois) :")

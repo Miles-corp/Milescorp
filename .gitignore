@@ -32,3 +32,6 @@ logs/*.log
 # Données utilisateur
 data/*.json
 data/*.db
+
+# Archives de téléchargement générées (jamais commitées)
+releases/

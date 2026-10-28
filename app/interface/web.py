@@ -107,6 +107,40 @@ def assert_local_host(host: str) -> str:
         )
     return host
 
+
+#: Préfixes d'adresses privées acceptés en mode LAN (opt-in explicite).
+_PREFIXES_PRIVES = ("192.168.", "10.", "172.16.", "127.0.0.")
+
+
+def assert_lan_host(host: str) -> str:
+    """Adresse d'écoute LAN — mode opt-in, **fail-closed**.
+
+    Conditions (toutes exigées, sinon refus) :
+    - variable d'environnement ``MILES_WEB_LAN=1`` (posée par miles.py
+      uniquement après vérification d'un jeton porteur configuré) ;
+    - adresse IP **privée** explicite (jamais 0.0.0.0, :: ou publique).
+
+    Ce mode reste soumis à l'audit B avant tout déploiement réseau réel
+    (règle BOX_DEBIAN_SETUP.md : ouverture réseau interdite sans
+    authentification réelle).
+    """
+    if not isinstance(host, str) or not host:
+        raise WebServerSecurityError("Adresse LAN invalide : hôte vide.")
+    if os.environ.get("MILES_WEB_LAN", "").strip() != "1":
+        raise WebServerSecurityError(
+            "Mode LAN non actif (MILES_WEB_LAN != 1) — écoute refusée."
+        )
+    if host in ("0.0.0.0", "::", "*"):
+        raise WebServerSecurityError(
+            f"Adresse trop large refusée : {host!r} — mode LAN = IP privée explicite."
+        )
+    if not any(host.startswith(p) for p in _PREFIXES_PRIVES) and host != "localhost":
+        raise WebServerSecurityError(
+            f"Adresse non privée refusée : {host!r} — mode LAN : IP privée uniquement "
+            "(192.168.x, 10.x, 172.16.x)."
+        )
+    return host
+
 # Motifs de secrets : définis dans app/utilities/redaction.py (source unique
 # de vérité, partagée avec la persistance des conversations).
 # La classification publique des erreurs fournisseur est définie dans
@@ -1341,27 +1375,30 @@ class MilesWebServer:
         app: WebApp,
         host: str = LOCAL_ONLY_HOST,
         port: int = 8080,
+        allow_lan: bool = False,
     ) -> None:
         self.app = app
         # Passe par la propriété de validation : toute adresse non locale
-        # est refusée dès la construction.
+        # est refusée dès la construction (fail-closed ; allow_lan exige
+        # MILES_WEB_LAN=1 ET une IP privée explicite).
+        self.allow_lan = allow_lan
         self.host = host
         self.port = port
         self._server: Optional[ThreadingHTTPServer] = None
 
     @property
     def host(self) -> str:
-        """Adresse d'écoute du serveur (toujours locale)."""
+        """Adresse d'écoute du serveur (locale par défaut)."""
         return self._host
 
     @host.setter
     def host(self, value: str) -> None:
-        self._host = assert_local_host(value)
+        self._host = assert_lan_host(value) if self.allow_lan else assert_local_host(value)
 
     def start(self) -> None:
         # Revalidation avant toute liaison : `host` est un attribut public,
         # il pourrait avoir été modifié par affectation directe.
-        host = assert_local_host(self.host)
+        host = assert_lan_host(self.host) if self.allow_lan else assert_local_host(self.host)
         MilesHandler.app = self.app
         self._server = ThreadingHTTPServer((host, self.port), MilesHandler)
         print(f"Interface web MILES sur http://{host}:{self.port}")
