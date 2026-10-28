@@ -1,6 +1,14 @@
 # docs/coordination/STATUS.md — État du projet MILES
 
-## État instantané (2026-10-27, Agent A — après le lot « tri, `main`, cockpit unique »)
+## État instantané (2026-10-28, Agent A — lot isolation des tests, TASK-DEV-048)
+
+- **Référence du code** : **`main`**, publiée sur `origin/main` (`dffac9a`), puis ce lot.
+- **Tests** : **891 exécutés — 891 OK, 0 échec, 5 ignorés**. C'est la **première suite entièrement verte** depuis la Phase 6.4B : les 2 échecs de `tests/test_status_provider_diagnostics.py` sont expliqués et corrigés.
+- **Cause des 2 échecs** : `tests/__init__.py` redirigeait `MILES_ENV_FILE` vers un chemin **fixe** (`%TEMP%\miles_tests_no_such_env_file`) ; ce fichier existait pourtant (97 octets, 2026-10-27 15:14) et contenait `MILES_REMOTE_MODEL=` vide. Ses clés n'existent que sur `feature/miles-multi-provider` : une exécution de cette branche avait écrit son faux `.env` dans le chemin partagé, et toutes les sessions suivantes le lisaient. **Ce n'était pas un défaut du code de `main`**, et aucune assertion n'a été modifiée.
+- **Correctifs (DEC-017)** : isolation dans un répertoire `mkdtemp` **unique par session** ; règle **valeur vide = source absente** (processus et `.env`), documentée dans `INSTALL.md` §3ter. Un `MILES_REMOTE_MODEL=` ne produit plus un modèle vide, un `MILES_HISTORY_LIMIT=` ne bloque plus le démarrage.
+- **Tâches** : **31 DONE · 17 TODO** — détail dans `TASKS.md`. Publié sur GitHub : `main` et `feature/miles-multi-provider` (les deux seules références qui portaient du travail invisible).
+
+## État instantané (2026-10-27, Agent A — après le lot « tri, `main`, cockpit unique ») — historique
 
 - **Référence du code** : **`main`** — alignée sur `integration/miles-post-d1` par **avance rapide locale**, sans `push` (DEC-004) : **77 commits d'avance sur `origin/main`**. 250 fichiers suivis, 58 fichiers de tests.
 - **Tests** : **876 exécutés — 874 OK, 2 échecs, 5 ignorés**. Les 2 échecs (`tests/test_status_provider_diagnostics.py`) sont **reproduits à l'identique dans une copie de `HEAD` sans `.env`** : ils ne viennent pas de ce lot. Le rapport précédent les attribuait au `.env` du poste ; cette vérification ne le confirme pas, la cause exacte reste à déterminer (hors de ce lot).

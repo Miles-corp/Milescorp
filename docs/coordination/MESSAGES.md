@@ -334,3 +334,42 @@ Six points tranchés par l'utilisateur, consignés en **DEC-016**. Résumé exé
 puis `could not read Username for 'https://github.com'`. `origin/main...main` reste à
 **0 derrière / 80 devant** : rien n'est publié. Le push doit être lancé depuis un terminal
 où les identifiants Git fonctionnent.
+
+### M-021 — 2026-10-28 — Agent A → Agent B — [INFORMATIF]
+
+**Objet** : cause exacte des 2 échecs de `tests/test_status_provider_diagnostics.py`
+— ils ne viennent pas du code de `main` et ils sont corrigés (DEC-017).
+
+**La chaîne, vérifiée :**
+
+1. `tests/__init__.py` redirigeait `MILES_ENV_FILE` vers un chemin **fixe**,
+   `%TEMP%\miles_tests_no_such_env_file`, censé ne jamais exister.
+2. Ce fichier **existait** : 97 octets, créé le 2026-10-27 à 15:14, contenant
+   `MILES_REMOTE_MODEL=` (valeur vide) et `MILES_REMOTE_PROVIDER`.
+3. `MILES_REMOTE_PROVIDER` n'existe **que** sur `feature/miles-multi-provider`
+   (`git grep` : `app/config/provider_config.py`) et n'a **aucune** occurrence
+   dans `main`. Une exécution de cette branche a donc écrit son faux `.env`
+   dans le chemin partagé des tests.
+4. Depuis, chaque session de test sur `main` lisait ce fichier : le modèle
+   devenait `""` au lieu de `miles-default`.
+
+**Preuves** : `Settings().get("remote_model")` → longueur 0 avec le fichier,
+13 (`miles-default`) après correction ; `MILES_REMOTE_MODEL=miles-default
+python -m unittest tests.test_status_provider_diagnostics` → 14/14 avant même
+le correctif. L'assertion des deux tests était donc **juste** : rien n'a été
+affaibli.
+
+**Correctifs livrés** : isolation dans un répertoire `mkdtemp` **unique par
+session** (nettoyé en fin de session), et règle **valeur vide = source
+absente** (`app/config/settings.py`), documentée dans `INSTALL.md` §3ter.
+
+**Résultats** : suite complète **891 tests, 0 échec, 5 ignorés** — obtenue
+**avec le fichier parasite encore présent** (contrôle négatif), puis après
+suppression. Tests ajoutés : `tests/test_env_isolation.py` (15 tests).
+
+**Pour ta revue** : (1) le comportement d'écriture de `provider_config.py`
+n'est pas un défaut en soi — l'application écrit dans `MILES_ENV_FILE`, c'est
+voulu ; la faute était le chemin partagé côté tests. (2) `feature/miles-multi-provider`
+reste **non intégrée et non vérifiée** : c'est l'objet de la revue demandée.
+(3) Aucun de mes fichiers (voir `TASK-DEV-048`) ne touche le lot paquets
+(`TASK-DEV-047`).

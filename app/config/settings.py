@@ -48,6 +48,23 @@ def _coerce_bool(value: Any, source: str) -> bool:
     )
 
 
+def _is_blank(value: Any) -> bool:
+    """Indiquer si une valeur de configuration est vide.
+
+    Une valeur vide (ou composée d'espaces) n'est pas une configuration :
+    elle est traitée comme une source absente, ce qui laisse la main à la
+    source suivante puis, à défaut, à la valeur par défaut. Sans cette
+    règle, un ``MILES_REMOTE_MODEL=`` sans valeur dans un ``.env``
+    remplaçait le modèle par une chaîne vide et produisait des erreurs
+    fournisseur incompréhensibles au lieu d'un repli explicite.
+    """
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    return False
+
+
 class Settings:
     """Paramètres de configuration de MILES."""
 
@@ -157,39 +174,42 @@ class Settings:
         # fichier .env (jamais l'inverse).
         for env_name, key in env_mapping.items():
             value = os.environ.get(env_name)
-            if value is None:
+            if _is_blank(value):
+                # Une valeur vide n'est pas une configuration : la source
+                # suivante prend le relais (voir ``_is_blank``).
                 value = dotenv_values.get(env_name)
-            if value is not None:
-                # Conversion de type pour les champs numériques
-                if key in (
-                    "remote_timeout",
-                    "local_timeout",
-                    "history_limit",
-                    "memory_max_memories_in_context",
-                    "memory_max_content_length",
-                    "mission_max_steps",
-                    "mission_max_attempts",
-                    "mission_max_duration_seconds",
-                    "mission_max_tool_calls",
-                    "mission_max_interactions",
-                ):
-                    try:
-                        value = int(value)
-                    except ValueError as exc:
-                        raise SettingsError(
-                            f"La variable {env_name} doit être un entier, valeur reçue: {value!r}"
-                        ) from exc
-                elif key == "voice_enabled":
-                    value = value.lower() in ("1", "true", "yes", "on")
-                elif key == "memory_enabled":
-                    # Conversion explicite : "false" ne doit pas être
-                    # interprété comme vrai par bool().
-                    value = _coerce_bool(value, env_name)
-                elif key == "conversation_persist":
-                    value = _coerce_bool(value, env_name)
-                elif key in ("mission_enabled", "mission_persist"):
-                    value = _coerce_bool(value, env_name)
-                self._values[key] = value
+            if _is_blank(value):
+                continue
+            # Conversion de type pour les champs numériques
+            if key in (
+                "remote_timeout",
+                "local_timeout",
+                "history_limit",
+                "memory_max_memories_in_context",
+                "memory_max_content_length",
+                "mission_max_steps",
+                "mission_max_attempts",
+                "mission_max_duration_seconds",
+                "mission_max_tool_calls",
+                "mission_max_interactions",
+            ):
+                try:
+                    value = int(value)
+                except ValueError as exc:
+                    raise SettingsError(
+                        f"La variable {env_name} doit être un entier, valeur reçue: {value!r}"
+                    ) from exc
+            elif key == "voice_enabled":
+                value = value.lower() in ("1", "true", "yes", "on")
+            elif key == "memory_enabled":
+                # Conversion explicite : "false" ne doit pas être
+                # interprété comme vrai par bool().
+                value = _coerce_bool(value, env_name)
+            elif key == "conversation_persist":
+                value = _coerce_bool(value, env_name)
+            elif key in ("mission_enabled", "mission_persist"):
+                value = _coerce_bool(value, env_name)
+            self._values[key] = value
 
         # Validation
         self._validate()
@@ -199,7 +219,9 @@ class Settings:
 
         Utilise uniquement la bibliothèque standard Python (aucun
         python-dotenv). Les variables déjà présentes dans l'environnement
-        du processus sont prioritaires : elles sont ignorées ici.
+        du processus (avec une valeur non vide) sont prioritaires : elles
+        sont ignorées ici. Une variable vide dans l'environnement du
+        processus ne bloque pas la lecture du fichier.
         Un fichier .env absent n'empêche pas le démarrage.
 
         Le fichier est lu dans un dictionnaire local : l'environnement du
@@ -230,7 +252,9 @@ class Settings:
                         value = value[1:-1]
                     # Ne pas écraser une variable déjà définie dans le
                     # environnement du processus.
-                    if key not in os.environ:
+                    # Une valeur vide dans l'environnement du processus est
+                    # une source absente : le fichier reprend alors la main.
+                    if _is_blank(os.environ.get(key)):
                         values[key] = value
         except OSError:
             # Fichier .env illisible : on ignore, le démarrage continue.
