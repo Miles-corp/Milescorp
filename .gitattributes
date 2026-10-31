@@ -1,2 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Scripts shell et preseed : toujours LF (evite le CRLF de Windows)
+*.sh text eol=lf
+*.cfg text eol=lf
+*.ps1 text eol=lf

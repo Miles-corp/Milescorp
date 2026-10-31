@@ -21,7 +21,7 @@ set -euo pipefail
 DEBIAN_DIR="${DEBIAN_DIR:-https://cdimage.debian.org/debian-cd/current/amd64/iso-cd}"
 NETINST_PATTERN='debian-[0-9.]+-amd64-netinst\.iso'
 WORK="${WORK:-$PWD/.usb-iso-build}"
-OUTDIR="$PWD/releases"
+OUTDIR="/root/miles-iso-build/out"
 ISA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$ISA_DIR/../../.." && pwd)"
 
@@ -159,22 +159,49 @@ cp "$ISA_DIR/miles-provision.sh"     "$WORK/files/miles-provision.sh"
 cp "$ISA_DIR/miles-provision.service" "$WORK/files/miles-provision.service"
 
 # ------------------------------------------------- 6. INITRD + MENUS
-echo "=== 5/6 — Injection dans l'initrd et coupes des delais ==="
-INITRD="$WORK/initrd.gz"
-xorriso -osirrox on -indev "$ISO" -extract /install.amd/initrd.gz "$INITRD" 2>/dev/null
+# Nettoyage des extraits d une execution precedente (evite les residus console=ttyS0)
+rm -f "$WORK"/initrd.gz "$WORK"/initrd-new.gz "$WORK"/grub.cfg "$WORK"/isolinux.cfg
+rm -rf "$WORK"/initrd "$WORK"/initrd-* "$WORK"/isolinux "$WORK"/verify
+echo "=== 5/6 — Injection dans les DEUX initrd et coupes des delais ==="
+# DEUX initrd coexistent : l'initrd TEXTE (/install.amd/initrd.gz) et
+# l'initrd GRAPHIQUE (/install.amd/gtk/initrd.gz) — l'entree par defaut
+# de GRUB (« Graphical install », écran debian 13) charge LE GTK.
+# Sans injection dans les deux, le boot graphique demarre SANS preseed
+# (reproduit le 29/10 en QEMU UEFI : « Failed to retrieve the
+# preconfiguration file ... non-automated mode »).
+MAP_INITRD=()
+for CHEMIN_INITRD in /install.amd/initrd.gz /install.amd/gtk/initrd.gz; do
+    NOM=$(basename "$CHEMIN_INITRD")
+    DOSSIER="$WORK/initrd-$(echo "$CHEMIN_INITRD" | tr '/' '_')"
+    xorriso -osirrox on -indev "$ISO" -extract "$CHEMIN_INITRD" "$DOSSIER/initrd.gz" 2>/dev/null \
+        || { echo "ERREUR : extraction de $CHEMIN_INITRD impossible."; exit 1; }
 
-mkdir -p "$WORK/initrd"
-( cd "$WORK/initrd"
-  gzip -dc "$INITRD" > initrd.cpio 2>/dev/null || { echo "ERREUR : initrd non gzip (zstd ?) — verifier la version Debian."; exit 1; }
-  cpio -idm --quiet < initrd.cpio
-  rm -f initrd.cpio
-  cp "$PRESED" ./preseed.cfg
-  find . -print0 | cpio -o --null --format=newc --quiet 2>/dev/null | gzip -9 > "$WORK/initrd-new.gz"
-)
-echo "preseed.cfg injecte dans l'initrd."
+    # Zero residu : cpio sans -u refuse d'ecraser un fichier plus recent,
+    # un dossier non vide melange l'ancien et le nouveau contenu.
+    rm -rf "$DOSSIER/arbre"
+    mkdir -p "$DOSSIER/arbre"
+    ( cd "$DOSSIER/arbre"
+      gzip -dc ../initrd.gz > initrd.cpio 2>/dev/null \
+          || { echo "ERREUR : $CHEMIN_INITRD non gzip (zstd ?)"; exit 1; }
+      cpio -idm --quiet < initrd.cpio
+      rm -f initrd.cpio
+      cp "$PRESED" ./preseed.cfg
+      find . -print0 | cpio -o --null --format=newc --quiet 2>/dev/null \
+          | gzip -9 > "$DOSSIER/initrd-new.gz"
+    ) || { echo "ERREUR : repack de $CHEMIN_INITRD."; exit 1; }
+
+    [ -s "$DOSSIER/initrd-new.gz" ] || { echo "ERREUR : repack vide ($CHEMIN_INITRD)."; exit 1; }
+    MAP_INITRD+=( -map "$DOSSIER/initrd-new.gz" "$CHEMIN_INITRD" )
+    echo "preseed.cfg injecte dans $CHEMIN_INITRD"
+done
 
 # Menus : BIOS (isolinux) + UEFI (grub) → aucune touche a appuyer.
-GRUB_ARGS="auto=true priority=critical"
+# file=/preseed.cfg (alias officiel file -> preseed/file) : sans lui,
+# network-preseed affiche "Location of initial preconfiguration file"
+# en mode auto (reproduit en QEMU UEFI le 29/10).
+# console=ttyS0,115200n8 : rend l'installateur visible sur la console serie
+# (sinon tout passe par le framebuffer et on est aveugle en test QEMU).
+GRUB_ARGS="auto=true priority=critical file=/preseed.cfg frontend=text"
 
 # BIOS : le contenu des menus vit dans PLUSIEURS fichiers inclus
 # (isolinux.cfg → menu.cfg → adtxt.cfg / gtk.cfg / ...). On extrait tout
@@ -186,7 +213,15 @@ if [ -d "$WORK/isolinux" ]; then
     for CFG in "$WORK/isolinux"/*.cfg; do
         [ -f "$CFG" ] || continue
         AVANT=$(md5sum "$CFG" | cut -d' ' -f1)
-        sed -i -E "s/^([[:space:]]*append[[:space:]]+.*)$/\1 $GRUB_ARGS/; s/^timeout .*/timeout 1/; s/^prompt .*/prompt 0/" "$CFG"
+        # Les arguments d'automatisation doivent aller AVANT le separateur
+        # ' --- ' (traite par libdebian-installer) : apres, ils sont ecartes.
+        # Delimiteur '|' : la valeur contient des '/' (file=/preseed.cfg).
+        sed -i -E "s/vga=788/vga=normal/g" "$CFG"
+        if grep -q -- ' ---' "$CFG"; then
+            sed -i -E "s| ---| $GRUB_ARGS ---|; s|^timeout .*|timeout 1|; s|^prompt .*|prompt 0|" "$CFG"
+        else
+            sed -i -E "s|^([[:space:]]*append[[:space:]]+.*)\$|\1 $GRUB_ARGS|; s|^timeout .*|timeout 1|; s|^prompt .*|prompt 0|" "$CFG"
+        fi
         APRES=$(md5sum "$CFG" | cut -d' ' -f1)
         if [ "$AVANT" != "$APRES" ]; then
             MAP_ISOLINUX+=( -map "$CFG" "/isolinux/$(basename "$CFG")" )
@@ -198,7 +233,17 @@ fi
 # le menu peut attendre indefiniment : on l'injecte si absent.
 xorriso -osirrox on -indev "$ISO" -extract /boot/grub/grub.cfg "$WORK/grub.cfg" 2>/dev/null || true
 if [ -f "$WORK/grub.cfg" ]; then
-    sed -i -E "s/^(\s*linux(16|efi)?\s.*)$/\1 $GRUB_ARGS/" "$WORK/grub.cfg"
+    # Arguments AVANT ' --- ' (marqueur traite par libdebian-installer) ;
+    # sinon apres ' --- ' le d-i les ecarte et l'installation repart en manuel.
+    # Delimiteur '|' : la valeur contient des '/' (file=/preseed.cfg).
+    # if/else : JAMAIS les deux (le duplicate apres ' --- ' n'est pas voulu).
+    # vga=normal : mode VGA standard, evite l ecran noir dans VirtualBox/VMware
+    sed -i -E "s/vga=788/vga=normal/g" "$WORK/grub.cfg"
+    if grep -q -- ' ---' "$WORK/grub.cfg"; then
+        sed -i -E "s| ---| $GRUB_ARGS ---|" "$WORK/grub.cfg"
+    else
+        sed -i -E "s,^([[:space:]]*linux(16|efi)?[[:space:]].*)\$,\\1 $GRUB_ARGS," "$WORK/grub.cfg"
+    fi
     if grep -q '^set timeout=' "$WORK/grub.cfg"; then
         sed -i -E "s/^set timeout=.*/set timeout=0/; s/^set timeout_style=.*/set timeout_style=hidden/" "$WORK/grub.cfg"
     else
@@ -217,7 +262,7 @@ XORRISO_ARGS=(
   -indev "$ISO"
   -outdev "$OUTISO"
   -boot_image any replay
-  -map "$WORK/initrd-new.gz" /install.amd/initrd.gz
+  "${MAP_INITRD[@]}"
   -map "$WORK/files" /files
   -map "$PRESED" /preseed.cfg
 )
@@ -245,6 +290,9 @@ echo "ISO PRETE : $OUTISO"
 echo "Taille    : $(du -h "$OUTISO" | cut -f1)"
 echo "SHA256    : $(cut -d' ' -f1 "$OUTDIR/SHA256-ISO-SUMS")"
 echo "--------------------------------------------------------------"
+mkdir -p /mnt/c/Users/StanC/Desktop/Milescorp/releases
+cp -f "$OUTISO" /mnt/c/Users/StanC/Desktop/Milescorp/releases/
+echo "Copie vers Windows : OK"
 echo "Suite : ecrire sur la cle USB avec Rufus (voir README.md),"
 echo "puis TEST VirtualBox AVANT de la brancher sur le mini-PC."
 echo "=============================================================="

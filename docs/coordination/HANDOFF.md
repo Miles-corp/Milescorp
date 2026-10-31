@@ -81,7 +81,7 @@ Procédure à suivre par chaque agent à la fin de sa session de travail, afin q
 
 **Tests exécutés :** suite complète **566 tests OK / 4 ignorés** (Windows, Python 3.14) ; ISO vérifiée par script indépendant (contenu, 20 append `auto=true`, grub timeout=0, El Torito BIOS+UEFI, hashes `$6$`, zéro jeton résiduel).
 
-**ISO livrée :** `releases/miles-debian13-autoinstall-20261028.iso` — 805 634 048 o, SHA256 `07b8d9718099dc8c959243b864ed58b3f1cfb3924067ee9b2ac2763938b55259` (+ `SHA256-ISO-SUMS`). Mots de passe de **TEST** embarqués (hashés) : `miles` / `Miles-Test-2026`, root de secours `Root-Test-2026`. Pour le HP réel : soit on garde et on change après (`passwd`), soit rebuild interactif avec les vrais.
+**ISO livrée :** `releases/miles-debian13-autoinstall-20261031.iso` — 805 634 048 o, SHA256 `07b8d9718099dc8c959243b864ed58b3f1cfb3924067ee9b2ac2763938b55259` (+ `SHA256-ISO-SUMS`). Mots de passe de **TEST** embarqués (hashés) : `miles` / `Miles-Test-2026`, root de secours `Root-Test-2026`. Pour le HP réel : soit on garde et on change après (`passwd`), soit rebuild interactif avec les vrais.
 
 **Problèmes restants / limites :**
 1. **Test VirtualBox NON exécuté** (délégué à l'ami, checklist fournie) — condition avant de graver la clé.
