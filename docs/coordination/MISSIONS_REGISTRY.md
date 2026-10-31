@@ -17,6 +17,7 @@ dans `docs/reports/`, `docs/specs/` et les messages `M-###`.
 | MI-023 | Vérifier l'intégration Miles Companion (détachement, valeurs inventées, surface HTTP) | **DONE** — 2 écarts trouvés et corrigés | Agent A bis | `docs/reports/COMPANION_INTEGRATION_VERIFICATION_AGENT_ABIS.md` |
 | MI-024 | Spécifier comptes, onglet IA et jumelage box ↔ site (V1 locale, V2 passerelle) | **SPEC LIVRÉE** — en attente de validation utilisateur | Agent A bis | `docs/specs/SITE_PAIRING_IA_SPEC.md` |
 | MI-025 | Implémenter le jumelage local V1 (code affiché, sans serveur) | **TODO** — bloquée par la validation de `MI-024` | Agent A bis | à créer après validation |
+| MI-026 | Site Companion propriétaire : coque React, comptes locaux, capteurs réels, mode développeur | **DONE** — vérification navigateur et tests exécutés ; revue B en `TASK-DEV-065` | Agent A | `docs/reports/SITE_COMPANION_V1_AGENT_A.md`, `DEC-027`, `M-037` |
 | MI-009 | Refonte UI web par IA de conception | TODO (prompt livré sur l'ancienne branche) | Utilisateur | `docs/web_design/PROMPT_DE_LANCEMENT_WEB.md` (branche D1) |
 
 ## Missions closes récemment
@@ -35,3 +36,5 @@ dans `docs/reports/`, `docs/specs/` et les messages `M-###`.
 - Une mission `TODO` bloquée indique **bloquée par quoi**.
 - Toute mission touchant au réseau ou à la position exige une décision
   explicite de l'utilisateur avant implémentation.
+| MI-027 | Connecter une box du réseau local depuis le site (adresse vérifiée, sans jumelage par code) | **CANCELLED** — remplacée par `MI-028` (appairage par QR) | Agent A bis | `app/interface/companion/boxes.py`, `tests/test_companion_boxes.py` |
+| MI-028 | Appairage box ↔ appareil par QR code (remplace MI-027) | **DONE** — 13 tests, parcours navigateur | Agent A bis | `app/interface/companion/pairing.py`, `tests/test_companion_pairing.py` |

@@ -332,3 +332,16 @@ Aucun blocage à ce jour.
   d'identifiants inopérant, aucun terminal interactif) : rien n'est publié.
 - **Reste à faire** : push de `main` depuis un terminal authentifié ; exécution du lot par le
   second agent ; revue indépendante d'Agent B une fois les commits accessibles.
+
+## Site Companion propriétaire — livraison (Agent A, 2026-10-29)
+
+- **Décision** : `DEC-027`. **Tâches** : `TASK-DEV-064` (DONE), `TASK-DEV-065` (revue Agent B, TODO). **Message** : `M-037`.
+- **Livré** : l'export Readdy n'est plus servi. Coque React/TypeScript (`frontend/src/**`, build `dist/`), serveur Python (comptes, sessions, CSRF, applets typées, capteurs `/proc` et `/sys`, mode développeur, journal, relais MILES borné côté serveur).
+- **Sécurité** : `scrypt` + sel, sessions dont seul le SHA-256 est stocké, cookie `HttpOnly` `SameSite=Strict`, deux administrateurs maximum, verrouillage après 5 échecs, jeton MILES jamais renvoyé au navigateur, `/setup` et backend boîtier limités à la boucle locale.
+- **Mesures** : uniquement réelles. Sur Windows, CPU/RAM/température sont déclarés « non mesuré » avec leur raison ; le disque est réellement lu. Aucune valeur inventée.
+- **Vérification navigateur (8787)** : connexion administrateur, accueil, `/boitier`, bascule du mode développeur, journal (2 événements d'audit, 25 accès HTTP), aucune erreur console hors 401 avant connexion et 503 missions (MILES absent).
+- **Tests** : suite complète **1038 tests, 0 échec, 5 ignorés** (183,9 s) ; modules Companion rejoués seuls : **64 OK** ; build Vite **59 modules**, JS 100,3 Ko gzip.
+- **Non vérifié** : MILES réel, backend boîtier réel, fournisseur IA réel, écoute LAN (toujours interdite), Debian 13, audit de design du Lab (Lab en travaux).
+- **Reste à faire** : revue indépendante `TASK-DEV-065` ; décision utilisateur sur la suppression définitive de l'export Readdy ; push éventuel sur accord explicite.
+- **Connexion box par adresse** (`TASK-DEV-066`, `MI-027`) : la page Découvrir n'est plus une attente — champ d'adresse privée, sonde réelle vers `/api/companion/session` (signature `Server: MilesCompanion`), box listée uniquement si un Companion répond, test et retrait réservés aux administrateurs. **13 tests** (`tests/test_companion_boxes.py`) et suite Companion **66 tests OK** ; aucune écoute LAN ouverte, aucun nom de domaine résolu.
+- **Appairage par QR** (`TASK-DEV-067`, `MI-028`) : le champ d'adresse de `TASK-DEV-066` est retiré ; l'identité de la box et son jeton vivent dans `data/box_identity.json`, le QR imprimable est généré par la CLI (`pairing qr`), la page `/appairer` associe l'appareil sans compte, et les appareils associés sont listés puis révoqués par un administrateur. Le contrôle d'origine accepte désormais la même origine que l'hôte, ce qui rend l'appairage utilisable depuis un téléphone sur le LAN. **13 tests** ; QR de la première box : `data/box-001-qr.png` et `.svg`. L'écoute LAN reste verrouillée (`--lan`).

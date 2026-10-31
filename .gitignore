@@ -9,6 +9,11 @@ venv/
 env/
 .env
 
+# Site Companion : dépendances et build locaux
+node_modules/
+app/interface/companion/frontend/dist/
+app/interface/companion/dist/
+
 # Configuration et secrets locaux
 .env
 config/*.local.json
@@ -33,6 +38,7 @@ logs/*.log
 data/*.json
 data/*.jsonl
 data/*.db
+data/*.db-*
 
 # Archives de téléchargement générées (jamais commitées)
 releases/
@@ -43,3 +49,7 @@ platformio.local.ini
 .pio/
 .pio-venv/
 .pio-core/
+
+# QR d'appairage imprimé : contient le jeton de la box, jamais commité
+data/box-*.png
+data/box-*.svg

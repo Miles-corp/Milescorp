@@ -279,3 +279,19 @@ deux PC hors du dépôt.
 
 **Prochaine action recommandée :** rebaser `feature/miles-multi-provider` (`b0ba016`) sur `main` et la repasser aux tests, puis exécuter la procédure Debian 13 sur le mini-PC — c'est la dernière preuve manquante pour « installable ».
 
+
+## H-017 — 2026-10-29 — Agent A → Agent B — site Companion réécrit en code propriétaire
+
+**Tâche :** `TASK-DEV-064` — DONE. Revue demandée : `TASK-DEV-065`.
+
+**Travail réalisé :** remplacement de l'export Readdy par notre propre site. Coque React/TypeScript (neuf vues, confirmation d'action, mode développeur, gestion des comptes) construite dans `app/interface/companion/frontend/` et servie depuis `dist/`. Serveur Python réécrit autour de comptes locaux (`scrypt`, sessions hachées, CSRF, deux administrateurs maximum), d'applets typées (`system` / `render` / `action`), de capteurs réels (`/proc`, `/sys`, disque) avec indisponibilité motivée, d'un journal d'audit expurgé et d'un relais MILES borné dont le jeton reste côté serveur. L'ancien pont `miles-bridge.js` et la route publique `/api/box` ne sont plus servis.
+
+**Fichiers modifiés :** `app/interface/companion/**` (nouveaux modules `auth.py`, `store.py`, `sensors.py`, `providers.py`, `audit.py`, `applets.py`, `miles_client.py`, `setup.html/css`, `frontend/**`, `dist/**`), `tests/test_companion_{auth,sensors,server,static_assets}.py`, `.gitignore`, `ORGANISATION.md`, `docs/reports/SITE_COMPANION_V1_AGENT_A.md`, `docs/coordination/{DECISIONS,TASKS,MESSAGES,STATUS,HANDOFF,MISSIONS_REGISTRY}.md`.
+
+**Commits :** aucun. Aucun push.
+
+**Tests exécutés :** `python -m unittest discover -s tests -t .` → **1038 tests, 0 échec, 5 ignorés** (183,9 s) ; rejeu ciblé des quatre modules Companion après le dernier changement → **64 OK** ; `npm run build` → 59 modules, JS 100,3 Ko gzip. Vérification navigateur réelle sur `127.0.0.1:8787` (connexion, accueil, `/boitier`, mode développeur, journal).
+
+**Problèmes restants :** MILES, le backend boîtier et tout fournisseur IA n'étaient pas démarrés ; les états « non configuré » / « muet » sont affichés tels quels. L'écoute LAN reste interdite sans audit indépendant. L'ancien export Readdy reste sur disque, non servi, dans l'attente d'un accord de suppression. `DEC-026` et `H-016` étaient déjà pris par Agent A bis : ce lot est `DEC-027` / `H-017`.
+
+**Prochaine action recommandée :** revue indépendante `TASK-DEV-065` (aucune ressource distante, aucun secret renvoyé au navigateur, deux administrateurs maximum, mesures honnêtes, `/setup` local), puis validation utilisateur avant tout push.

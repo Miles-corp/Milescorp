@@ -150,3 +150,49 @@ sudo systemctl restart miles
 *Référence : `docs/installation/INSTALL.md` (config des 19 variables MILES_*),
 `scripts/box_preflight.py` (diagnostic matériel), rapports d'audit B pour la
 validation réelle.*
+
+
+## Appairage par QR code
+
+Le boîtier porte un QR code : le scanner avec l'appareil photo d'un téléphone
+ouvre le site sur ce téléphone et associe l'appareil à la box, sans saisir
+d'adresse ni de code.
+
+1. Générer le QR, une fois, depuis la box :
+
+   ```bash
+   python -m app.interface.companion.pairing qr \
+     --out data/box-001-qr.png --host 192.168.1.42 --port 8787
+   ```
+
+   Remplacer `--host` par l'adresse IP de la box sur le réseau local
+   (`hostname -I` ou `ip -4 addr`). Un PNG suffit pour l'impression ; `--out
+   …svg` produit une version vectorielle.
+
+2. Coller le QR au dos du boîtier. Il contient
+   `http://<box>:8787/appairer#t=<jeton>` : le jeton est dans le fragment, donc
+   jamais transmis au serveur ni écrit dans le journal d'accès.
+
+3. Scanner avec l'appareil photo du téléphone : le navigateur ouvre la page
+   d'appairage, l'appareil est associé, puis il suffit de se connecter avec son
+   compte. Un appareil associé est visible et révocable depuis
+   **Découvrir → Appareils associés** (administrateurs).
+
+L'identité de la box (dont le jeton) est dans `data/box_identity.json`
+(mode 600 sous Linux, ignoré par Git). Pour révoquer tous les QR déjà imprimés :
+
+```bash
+python -m app.interface.companion.pairing rotate
+```
+
+Régénérer alors le QR et remplacer l'étiquette ; `pairing show` affiche
+l'identité et l'URL courante.
+
+**Limite navigateur** : la caméra intégrée au site n'est disponible qu'en
+HTTPS ou sur `localhost`. Sur le réseau local en `http`, le navigateur interdit
+la caméra : utiliser l'appareil photo du téléphone (il ouvre directement le
+lien), ou coller le lien du QR dans le champ prévu.
+
+**Sécurité** : appairer ne donne aucun accès au compte ni aux données ; la
+session reste exigée partout. Les essais sont limités à dix par cinq minutes.
+

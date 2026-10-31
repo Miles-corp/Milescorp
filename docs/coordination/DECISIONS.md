@@ -1,3 +1,23 @@
+## DEC-027 — Le site Companion devient notre code : coque React, comptes locaux, capteurs réels
+
+- **Date** : 2026-10-29
+- **Auteur** : Agent A
+- **Contexte** : le Companion était encore un export Readdy retouché (page pré-rendue, pont `miles-bridge.js`, relais générique `/api/*`, jeton MILES demandé dans le navigateur, aucune notion de compte). L'utilisateur a demandé de le séparer de Readdy pour en faire notre propriété, d'y ajouter les capteurs (sans connexion réelle) et un mode développeur. Plan validé avant exécution.
+- **Décision** :
+  1. **Coque propriétaire** : React + TypeScript + Vite dans `app/interface/companion/frontend/`, build servi depuis `dist/` par le serveur Python (bibliothèque standard uniquement, aucune dépendance Python nouvelle).
+  2. **Comptes locaux à la box** : aucun compte public, aucune inscription depuis le site, aucun e-mail sortant. L'administrateur crée les comptes en CLI ; **deux administrateurs maximum** garantis par transaction SQLite, tous les autres comptes sont `user`. Mots de passe `scrypt` + sel, sessions opaques dont seul le SHA-256 est stocké, cookie `HttpOnly` `SameSite=Strict`, CSRF synchronisé, verrouillage après 5 échecs.
+  3. **Le jeton MILES reste côté serveur** : `miles_client.py` ouvre la session avec `MILES_WEB_AUTH_TOKEN` et ne relaie qu'une liste blanche de routes. Le navigateur ne voit jamais ce jeton.
+  4. **Capteurs réels uniquement** : `sensors.py` lit `/proc` et `/sys` ; toute mesure absente est renvoyée **indisponible avec sa raison**, jamais une valeur inventée (DEC-014). Le backend boîtier local (`127.0.0.1:8095`) est lu côté serveur, refusé hors boucle locale.
+  5. **Mode développeur par compte** : activé dans les réglages, il ajoute les détails bruts des capteurs et ouvre le journal d'audit et le journal d'accès HTTP. Il ne donne aucun droit supplémentaire sur les actions ; les administrateurs seuls gèrent les comptes.
+  6. **Applets typées** : `system` (primitive réelle), `render` (état déjà calculé), `action` (effet réel, confirmation à jeton unique). Le registre serveur est la seule source de vérité : une action inconnue est refusée.
+  7. **Aucune ressource distante** : polices, icônes et scripts sont servis localement ; CSP `default-src 'self'` ; aucune requête sortante hors MILES local.
+  8. **Écoute locale par défaut** : `127.0.0.1:8787`. L'ouverture LAN reste refusée tant que l'audit indépendant et `COMPANION_LAN_AUDITED=1` ne sont pas réunis (DEC-016/DEC-019) — la règle n'est pas contournée par ce lot.
+  9. **Base locale** : `data/companion.db` (ignorée par Git), à côté des autres bases `data/`.
+- **Conséquences** : `index.html`, `miles-bridge.js` et `assets/` de l'export Readdy ne sont plus servis (conservés hors service pour historique) ; `/api/box` public et le relais `/api/*` disparaissent ; toute modification d'interface exige `npm ci && npm run build` dans `frontend/`.
+- **Preuves d'exécution** : voir `docs/reports/SITE_COMPANION_V1_AGENT_A.md` (suite complète, tests dédiés, vérification navigateur réelle, mesures honnêtes sur Windows).
+- **Limites assumées** : MILES et le backend boîtier n'étaient pas démarrés pendant la vérification (états « non configuré » / « indisponible » affichés tels quels) ; aucun fournisseur IA réel n'a été appelé ; l'écoute LAN n'a pas été testée puisqu'elle reste interdite ; l'audit de design du Lab n'a pas été exécuté (Lab en travaux, consigne utilisateur).
+- **Statut** : ACCEPTEE
+
 
 ## DEC-026 — La clé API reste sur la box ; le site n'en détient aucune copie
 

@@ -1,34 +1,26 @@
 """Non-régression : le site Companion ne charge aucune ressource distante.
 
-Défauts trouvés le 2026-10-28 (`TASK-DEV-060`, corrigés en `TASK-DEV-061`) :
-
-1. le bundle Readdy initialisait `SourceMapConsumer` sur
-   ``https://unpkg.com/source-map@.../mappings.wasm`` — capacité d'appel
-   externe dans un livrable censé fonctionner hors ligne (`DEC-014`) ;
-2. `index.html` affichait des mesures inventées (`40 °C`, `14 ms`) et le
-   libellé « build démo » avant que le pont ne les remplace.
-
-Ces tests portent sur les fichiers **servis**, pas sur le serveur : ils
-échouent si une valeur de démonstration ou un hôte distant réapparaît.
+Le site servi est la coque construite dans ``dist/``, plus l'ancien export
+Readdy (conservé hors service). Ces tests portent sur les fichiers
+**réellement servis** et échouent si un hôte distant ou une mesure inventée
+réapparaît dans le build.
 """
 
 from __future__ import annotations
 
+import json
 import re
 import unittest
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parent.parent
 COMPANION = RACINE / "app" / "interface" / "companion"
-HTML = COMPANION / "index.html"
-PONT = COMPANION / "miles-bridge.js"
-ASSETS = COMPANION / "assets"
-BUNDLE = ASSETS / "index-DSIZJMQZ.js"
-CSS = sorted(ASSETS.glob("*.css")) + sorted((ASSETS / "remixicon").glob("*.css"))
+DIST = COMPANION / "dist"
+HTML = DIST / "index.html"
+BUNDLES = sorted((DIST / "app").glob("*.js"))
+CSS = sorted((DIST / "app").glob("*.css"))
 
 #: Hôtes dont un chargement trahirait un détachement incomplet.
-#: Forme URL (`//hote`) et non simple mot : le bundle cite `readdy.ai` dans
-#: un filtre de liens et un logo neutralisé, sans jamais le charger.
 HOTES_INTERDITS = (
     "//unpkg.com",
     "//cdnjs.cloudflare.com",
@@ -45,16 +37,17 @@ HOTES_INTERDITS = (
 URL_ABSOLUE = re.compile(r"https?://")
 MESURE = re.compile(r"\d{1,3}\s*°C|\b\d+\s*ms\b")
 
-#: Marqueurs neutres que `miles-bridge.js` sait remplacer par une mesure réelle.
-MARQUEURS = ("mesure indisponible", "état inconnu", "modèle inconnu")
+
+class BuildPresentTest(unittest.TestCase):
+    def test_build_shell_exists(self) -> None:
+        self.assertTrue(HTML.is_file(), "exécutez npm run build dans frontend/")
+        self.assertTrue(BUNDLES, "aucun bundle JS dans dist/app")
+        self.assertTrue(CSS, "aucune feuille CSS dans dist/app")
 
 
 class TestRessourcesDistantes(unittest.TestCase):
     def test_html_sans_url_absolue(self) -> None:
         self.assertEqual(URL_ABSOLUE.findall(HTML.read_text(encoding="utf-8")), [])
-
-    def test_pont_sans_url_absolue(self) -> None:
-        self.assertEqual(URL_ABSOLUE.findall(PONT.read_text(encoding="utf-8")), [])
 
     def test_css_sans_url_absolue(self) -> None:
         for feuille in CSS:
@@ -64,17 +57,56 @@ class TestRessourcesDistantes(unittest.TestCase):
                 )
 
     def test_bundle_sans_hote_chargeable(self) -> None:
-        contenu = BUNDLE.read_text(encoding="utf-8", errors="replace")
-        for hote in HOTES_INTERDITS:
-            with self.subTest(hote=hote):
-                self.assertNotIn(hote, contenu)
+        for bundle in BUNDLES:
+            contenu = bundle.read_text(encoding="utf-8", errors="replace")
+            for hote in HOTES_INTERDITS:
+                with self.subTest(bundle=bundle.name, hote=hote):
+                    self.assertNotIn(hote, contenu)
+
+    def test_html_reference_uniquement_le_local(self) -> None:
+        contenu = HTML.read_text(encoding="utf-8")
+        references = re.findall(r'(?:src|href)="([^"]+)"', contenu)
+        self.assertTrue(references)
+        for reference in references:
+            with self.subTest(reference=reference):
+                self.assertTrue(
+                    reference.startswith(("/app/", "/assets/", "/icons/", "/manifest.webmanifest")),
+                    "ressource non locale : %s" % reference,
+                )
+
+
+class TestApplicationInstallable(unittest.TestCase):
+    """Manifeste et service worker : installation locale, jamais hors API."""
+
+    def test_manifeste_valide_et_icones_presentes(self) -> None:
+        manifeste = DIST / "manifest.webmanifest"
+        self.assertTrue(manifeste.is_file(), "manifeste absent du build")
+        data = json.loads(manifeste.read_text(encoding="utf-8"))
+        self.assertEqual(data["display"], "standalone")
+        self.assertEqual(data["start_url"], "/")
+        self.assertEqual(data["name"], "Miles Companion")
+        tailles = {icone["sizes"] for icone in data["icons"]}
+        self.assertIn("192x192", tailles)
+        self.assertIn("512x512", tailles)
+        self.assertTrue(any(icone.get("purpose") == "maskable" for icone in data["icons"]))
+        for icone in data["icons"]:
+            with self.subTest(icone=icone["src"]):
+                chemin = DIST / icone["src"].lstrip("/")
+                self.assertTrue(chemin.is_file(), "icône absente : %s" % chemin)
+
+    def test_service_worker_ne_met_jamais_l_api_en_cache(self) -> None:
+        worker = DIST / "sw.js"
+        self.assertTrue(worker.is_file(), "service worker absent du build")
+        source = worker.read_text(encoding="utf-8")
+        self.assertIn(
+            'const BYPASS = ["/api/", "/setup", "/healthz", "/cockpit/"];', source
+        )
+        self.assertIn("/manifest.webmanifest", source)
 
 
 class TestValeursInventees(unittest.TestCase):
     def test_html_sans_mesure(self) -> None:
-        """Aucun chiffre de température ou de latence dans le HTML servi."""
-        contenu = HTML.read_text(encoding="utf-8")
-        self.assertEqual([m.group(0) for m in MESURE.finditer(contenu)], [])
+        self.assertEqual([m.group(0) for m in MESURE.finditer(HTML.read_text(encoding="utf-8"))], [])
 
     def test_html_sans_libelle_de_demonstration(self) -> None:
         contenu = HTML.read_text(encoding="utf-8")
@@ -82,12 +114,12 @@ class TestValeursInventees(unittest.TestCase):
             with self.subTest(libelle=interdit):
                 self.assertNotIn(interdit, contenu)
 
-    def test_pont_remplace_les_marqueurs(self) -> None:
-        """Les marqueurs neutres doivent rester traités : sinon la page reste vide."""
-        pont = PONT.read_text(encoding="utf-8")
-        for marqueur in MARQUEURS:
-            with self.subTest(marqueur=marqueur):
-                self.assertIn(marqueur, pont)
+    def test_aucun_chiffre_de_capteur_dans_le_html(self) -> None:
+        """Les mesures viennent de l'API, jamais d'un HTML pré-rempli."""
+        contenu = HTML.read_text(encoding="utf-8")
+        for invente in ("40 °C", "14 ms", "42.5", "87 %"):
+            with self.subTest(valeur=invente):
+                self.assertNotIn(invente, contenu)
 
 
 if __name__ == "__main__":

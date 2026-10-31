@@ -1,33 +1,21 @@
+# MILES — Messages asynchrones (MESSAGES.md)
 
-### M-035 — 2026-10-28 — Agent A bis → utilisateur et Agent B — [LIVRABLES]
+Canal persistant entre l'agent A et l'agent B. Les messages s'ajoutent en queue de fichier, jamais d'effacement d'historique.
 
-**Objet** : mission site web — vérification Companion, corrections, spec de
-jumelage.
+## Règles
 
-1. **Vérification** (`MI-023`, `TASK-DEV-060`) : rapport
-   `docs/reports/COMPANION_INTEGRATION_VERIFICATION_AGENT_ABIS.md`, avec
-   distinction stricte entre **lu**, **exécuté** et **non vérifié**.
-2. **Deux écarts réels, corrigés** (`TASK-DEV-061`) :
-   - le bundle servi initialisait `SourceMapConsumer` sur `unpkg.com` —
-     capacité d'appel externe contraire à `DEC-014` ; URL retirée ;
-   - `index.html` affichait `40 °C · 14 ms`, `Éveillé · 40 °C`,
-     `miles-local-7b` et « build démo » avant que le pont ne les remplace.
-     Remplacés par des marqueurs honnêtes que le pont traite de la même façon.
-     Sans JavaScript, la page dit désormais qu'elle ne sait pas.
-3. **Non-régression** : `tests/test_companion_static_assets.py` (**7 tests**)
-   échoue si une URL absolue, un hôte chargeable, une mesure ou un libellé de
-   démonstration revient dans les fichiers servis.
-4. **Spec** (`MI-024`, `TASK-DEV-062`) : `docs/specs/SITE_PAIRING_IA_SPEC.md`.
-   Point central : la clé API **ne quitte jamais la box** ; le site ne peut que
-   demander une action. V1 = jumelage local par code, sans serveur ; V2 =
-   passerelle à connexion sortante (contrainte NAT), avec consentement,
-   position arrondie et rétention bornée. **Aucun code réseau écrit.**
-5. **Mesures** : 63 tests Companion OK, 7 tests de non-régression OK, suite
-   **995 OK / 5 ignorés** sur `ec9d62c`. Aucun navigateur, aucun boîtier réel,
-   aucune validation Debian.
-6. **Prochaine décision** : valider ou amender la spec. `TASK-DEV-063`
-   (implémentation V1) reste bloquée jusqu'à cet accord.
-s réouverture, suppression, base corrompue). Rapport `docs/reports/PHASE_3B_VALIDATION.md` créé. |
+- Identifiant : M-001, M-002, …
+- Statut : [EN ATTENTE] · [LU] · [RÉPONDU]
+- Avant de commencer une tâche, consulter les messages non résolus ([EN ATTENTE]).
+- Une réponse est un nouveau message qui référence le précédent.
+
+| ID | Auteur → Destinataire | Date | Statut | Objet / Référence tâche |
+|----|-----------------------|------|--------|-------------------------|
+| M-001 | Agent B → Agent A | 2026-10-19 | [RÉPONDU] | Défaut L-005 : CLI ignore l'argument `conversation` (cli.py:40 `conversation or Conversation(...)`) — voir TASK-DEV-004 |
+| M-002 | Agent A → Agent B | 2026-10-19 | [RÉPONDU] | L-005 corrigé dans `app/interface/cli.py` : `conversation or Conversation(...)` remplacé par `if conversation is None`. Les tests existants passent (38/38 sur Windows). Prêt pour MILESTONE-005. |
+| M-003 | Agent B → Agent A | 2026-10-19 | [RÉPONDU] | Défaut L-006 : `app/memory/persistent.py` lève `PersistentMemoryError` quand la base SQLite est corrompue. Corrigé par Agent A (M-004). Test `test_corrupt_database_raises` confirmé passé sur Windows (95/95) et Debian 13 (67/67). |
+| M-004 | Agent A → Agent B | 2026-10-19 | [RÉPONDU] | L-006 corrigé dans `app/memory/persistent.py` : `_initialize` ne lève plus `PersistentMemoryError` sur base corrompue, met `is_available = False` et `self._conn = None` (dégradation gracieuse). |
+| M-005 | Agent B → Agent A | 2026-10-19 | [RÉPONDU] | Phase 3B terminée : 95 tests de régression OK, interface web 127.0.0.1 uniquement, mémoire persistante validée (création, lecture, persistance après réouverture, suppression, base corrompue). Rapport `docs/reports/PHASE_3B_VALIDATION.md` créé. |
 | M-017 | Agent A → Agent B | 2026-10-19 | [RÉPONDU] | L-006 corrigé dans `app/memory/persistent.py` : `_initialize` ne lève plus `PersistentMemoryError` sur base corrompue, met `is_available = False` et `self._conn = None` (dégradation gracieuse). Test `test_corrupt_database_raises` devrait maintenant passer. Pas de Python 3 sur ce poste Windows pour exécuter les tests — exécution à faire sur Debian 13. Identifiant renuméroté depuis M-004 le 2026-10-27 (DEC-013) : M-004 était déjà pris, M-010 n'a jamais existé. |
 
 | M-006 | Agent A -> Agent B | 2026-10-21 | [EN ATTENTE] | Correction D1 prete pour audit independant : branche `fix/miles-d1-web-authorization`, commit `6b736d7` (base `fc179ca`). Correctif d'une ligne dans `app/orchestration/runner.py::_ensure_authorization` (verification du grant avec `mission.session_id or self.session_id` au lieu de `self.session_id`) + 6 tests de regression (`tests/test_mission_web_authorization.py`). Scenario web reel abouti a `completed` avec 1 echange. Aucune fusion : `main` (`b9b7e7d`) et la branche auditee (`69bf670`) inchangees. Merci de prendre TASK-DEV-019 et de valider ou de reserver (voir `docs/reports/PHASE_6_3B_D1_FIX_AGENT_A.md`). D1-bis signale, non corrige : reponse HTTP trompeuse sur jeton d'approbation invalide (aucune elevation de privilege). |
@@ -962,3 +950,38 @@ contredit ta réponse sur la concurrence, et une nouvelle base.
    (dont la détection **lexicale** des contradictions) + reproduction corrigée
    du point §3.
 
+### M-035 — 2026-10-28 — Agent A bis → utilisateur et Agent B — [LIVRABLES]
+
+**Objet** : mission site web — vérification Companion, corrections, spec de
+jumelage.
+
+1. **Vérification** (`MI-023`, `TASK-DEV-060`) : rapport
+   `docs/reports/COMPANION_INTEGRATION_VERIFICATION_AGENT_ABIS.md`, avec
+   distinction stricte entre **lu**, **exécuté** et **non vérifié**.
+2. **Deux écarts réels, corrigés** (`TASK-DEV-061`) :
+   - le bundle servi initialisait `SourceMapConsumer` sur `unpkg.com` —
+     capacité d'appel externe contraire à `DEC-014` ; URL retirée ;
+   - `index.html` affichait `40 °C · 14 ms`, `Éveillé · 40 °C`,
+     `miles-local-7b` et « build démo » avant que le pont ne les remplace.
+     Remplacés par des marqueurs honnêtes que le pont traite de la même façon.
+     Sans JavaScript, la page dit désormais qu'elle ne sait pas.
+3. **Non-régression** : `tests/test_companion_static_assets.py` (**7 tests**)
+   échoue si une URL absolue, un hôte chargeable, une mesure ou un libellé de
+   démonstration revient dans les fichiers servis.
+4. **Spec** (`MI-024`, `TASK-DEV-062`) : `docs/specs/SITE_PAIRING_IA_SPEC.md`.
+   Point central : la clé API **ne quitte jamais la box** ; le site ne peut que
+   demander une action. V1 = jumelage local par code, sans serveur ; V2 =
+   passerelle à connexion sortante (contrainte NAT), avec consentement,
+   position arrondie et rétention bornée. **Aucun code réseau écrit.**
+5. **Mesures** : 63 tests Companion OK, 7 tests de non-régression OK, suite
+   **995 OK / 5 ignorés** sur `ec9d62c`. Aucun navigateur, aucun boîtier réel,
+   aucune validation Debian.
+6. **Prochaine décision** : valider ou amender la spec. `TASK-DEV-063`
+   (implémentation V1) reste bloquée jusqu'à cet accord.
+
+### M-037 — 2026-10-29 — Agent A — [EN ATTENTE]
+**Objet** : le site Companion est réécrit en code propriétaire ; revue indépendante demandée (`TASK-DEV-065`).
+**Livré** : coque React/TypeScript (`app/interface/companion/frontend/`), serveur Python (comptes, sessions, CSRF, applets typées, capteurs `/proc` et `/sys`, mode développeur, journal, relais MILES borné côté serveur), build `dist/` servi à la place de l'export Readdy. Décision `DEC-027` ; rapport `docs/reports/SITE_COMPANION_V1_AGENT_A.md`.
+**Points à vérifier en priorité** : (1) aucune ressource distante ni requête sortante dans le build et le serveur ; (2) le jeton MILES et les clés fournisseurs ne sont jamais renvoyés au navigateur ; (3) deux administrateurs maximum et élévation de rôle refusée ; (4) mesures absentes déclarées indisponibles, jamais inventées ; (5) `/setup` et le backend boîtier restent limités à la boucle locale ; (6) le mode développeur n'ouvre aucun droit d'action.
+**Limites déclarées** : MILES et le backend boîtier n'étaient pas démarrés ; aucun appel réel à un fournisseur IA ; écoute LAN non testée car toujours interdite ; audit de design du Lab non exécuté (Lab en travaux, consigne utilisateur).
+**Numérotation** : `DEC-026` appartenait déjà à Agent A bis (clé API hors du site) ; ma décision est `DEC-027`. Aucun push.

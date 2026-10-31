@@ -72,7 +72,7 @@ scripts/                 emplacement réservé aux scripts d'exploitation
 | `app/connectors/` | connecteurs locaux. `computer/actions.py` = actions locales autorisées ; les autres sous-dossiers sont **réservés**. |
 | `app/core/` | cœur conversationnel (`conversation.py`) : historique et tours de parole. |
 | `app/interface/` | interfaces : `cli.py` (terminal), `web.py` (serveur web + API), `web_auth.py` (sessions, origine, CSRF), `project_board.py` (lecture des documents de coordination), `device_telemetry.py` (mesures réelles du poste). |
-| `app/interface/companion/` | **Miles Companion** : serveur local (8787), build statique de l'application, pont `miles-bridge.js`. |
+| `app/interface/companion/` | **Miles Companion** : site local propriétaire (serveur 8787, coque React dans `frontend/` et build `dist/`, comptes et sessions, capteurs réels, relais borné vers MILES). L'ancien export Readdy (`index.html`, `miles-bridge.js`, `assets/`) n'est plus servi. |
 | `app/memory/` | mémoire persistante locale (`persistent.py`), historique (`history.py`), transcriptions de conversations (`transcript.py`). |
 | `app/orchestration/` | missions : planification, exécution, observation, compte rendu, persistance, messages d'attente honnêtes (`progress.py`). |
 | `app/routing/` | routeur de demandes (`router.py`) : classification rapide/approfondi, désactivé par défaut. |
@@ -178,8 +178,13 @@ fichiers suivis : les douze qui s'y trouvaient encore ont été retirés (§11).
 # Serveur MILES (API + cockpit). Le jeton d'accès s'affiche au démarrage.
 python miles.py --web                 # 127.0.0.1:8080
 
-# Façade Miles Companion (application + cockpit sous /cockpit/).
+# Site Miles Companion (coque React + cockpit sous /cockpit/).
+# Premier lancement : créer l'administrateur sur la box (aucune inscription publique).
+python -m app.interface.companion.auth add <identifiant> --role admin
 python app/interface/companion/server.py --port 8787
+
+# Après une modification de l'interface : reconstruire la coque servie.
+cd app/interface/companion/frontend && npm ci && npm run build
 
 # Tests : l'ensemble de la suite, sans réseau externe.
 python -m unittest discover -s tests
@@ -219,7 +224,10 @@ Détail du tour précédent de ce tri (inventaire et identifiants) :
 |---|---|
 | Ajouter une route HTTP | `app/interface/web.py` (route + contrôle), `assets/web/app.js` (client), `tests/test_web*.py` |
 | Modifier le design du cockpit | `assets/web/index.html`, `assets/web/app.css`, `assets/web/app.js` |
-| Modifier l'application Companion | `app/interface/companion/index.html`, `miles-bridge.js` (pont), `assets/` (build statique) |
+| Modifier l'application Companion | `app/interface/companion/frontend/src/**` (React/TypeScript), puis `npm run build` ; serveur et API dans `server.py` |
+| Comprendre les comptes, rôles et sessions | `app/interface/companion/auth.py`, `store.py` (base `data/companion.db`) |
+| Ajouter un capteur réel | `app/interface/companion/sensors.py` (mesure ou indisponibilité motivée) |
+| Ajouter ou typer une applet | `app/interface/companion/applets.py` (`system` / `render` / `action`) |
 | Brancher les capteurs de la Miles Box | `app/interface/device_telemetry.py` (mesures et capteurs déclarés indisponibles) |
 | Changer un statut de tâche | page Projet du cockpit (transitions validées par le serveur) — jamais à la main dans `TASKS.md` si le cockpit peut le faire |
 | Comprendre une décision d'architecture | `docs/coordination/DECISIONS.md` |

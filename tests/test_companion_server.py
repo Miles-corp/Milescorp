@@ -50,12 +50,18 @@ class CompanionTestServer:
         return self._port
 
     def request(
-        self, path: str, method: str = "GET", body: object = None
+        self,
+        path: str,
+        method: str = "GET",
+        body: object = None,
+        accept: str | None = None,
     ) -> dict[str, object]:
         """Requête sans suivi de redirection."""
         url = "http://127.0.0.1:%d%s" % (self._port, path)
         data = None
         headers = {}
+        if accept:
+            headers["Accept"] = accept
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
@@ -68,6 +74,7 @@ class CompanionTestServer:
                     "body": resp.read().decode("utf-8", "replace"),
                     "type": resp.headers.get("Content-Type", ""),
                     "location": resp.headers.get("Location", ""),
+                    "sw_allowed": resp.headers.get("Service-Worker-Allowed", ""),
                 }
         except urllib.error.HTTPError as exc:
             return {
@@ -75,6 +82,7 @@ class CompanionTestServer:
                 "body": exc.read().decode("utf-8", "replace"),
                 "type": exc.headers.get("Content-Type", ""),
                 "location": exc.headers.get("Location", ""),
+                "sw_allowed": exc.headers.get("Service-Worker-Allowed", ""),
             }
 
     def stop(self) -> None:
@@ -165,10 +173,13 @@ class CompanionRoutesTest(unittest.TestCase):
                 self.assertEqual(result["status"], 404)
 
     def test_application_files_are_the_only_public_ones(self) -> None:
-        index = self.server.request("/index.html")
-        bridge = self.server.request("/miles-bridge.js")
-        self.assertEqual(index["status"], 200)
-        self.assertEqual(bridge["status"], 200)
+        """Seule la coque construite est publique, jamais les sources."""
+        shell = self.server.request("/")
+        self.assertEqual(shell["status"], 200)
+        self.assertIn('id="root"', str(shell["body"]))
+        # L'ancien site Readdy n'est plus une ressource publique.
+        self.assertEqual(self.server.request("/index.html")["status"], 404)
+        self.assertEqual(self.server.request("/miles-bridge.js")["status"], 404)
         # Le code du serveur n'est pas une ressource publique.
         self.assertEqual(self.server.request("/server.py")["status"], 404)
 
@@ -182,12 +193,38 @@ class CompanionRoutesTest(unittest.TestCase):
     def test_unknown_asset_is_still_a_404(self) -> None:
         self.assertEqual(self.server.request("/assets/absent.png")["status"], 404)
 
+    def test_missions_is_a_page_for_browsers(self) -> None:
+        """Le chemin /missions appartient à l'application, pas au relais MILES."""
+        page = self.server.request("/missions", accept="text/html,application/xhtml+xml")
+        self.assertEqual(page["status"], 200)
+        self.assertIn("text/html", str(page["type"]))
+        self.assertIn('id="root"', str(page["body"]))
+
+    def test_pwa_files_are_served(self) -> None:
+        """Manifeste, service worker et icônes : installation depuis le navigateur."""
+        manifeste = self.server.request("/manifest.webmanifest")
+        self.assertEqual(manifeste["status"], 200)
+        self.assertIn("application/manifest+json", str(manifeste["type"]))
+        self.assertIn("standalone", str(manifeste["body"]))
+
+        worker = self.server.request("/sw.js")
+        self.assertEqual(worker["status"], 200)
+        self.assertIn("javascript", str(worker["type"]))
+        self.assertEqual(worker["sw_allowed"], "/")
+
+        icone = self.server.request("/icons/icon-192.png")
+        self.assertEqual(icone["status"], 200)
+        self.assertIn("image/png", str(icone["type"]))
+        self.assertEqual(self.server.request("/icons/absent.png")["status"], 404)
+
 
 class ServedPageTest(unittest.TestCase):
     """La page servie ne doit contenir que des ressources locales."""
 
     def setUp(self) -> None:
-        self.html = (COMPANION_DIR / "index.html").read_text(encoding="utf-8")
+        # La page réellement servie est la coque construite, pas l'ancien
+        # export Readdy conservé pour historique.
+        self.html = (COMPANION_DIR / "dist" / "index.html").read_text(encoding="utf-8")
 
     def test_page_is_french(self) -> None:
         self.assertIn('lang="fr"', self.html)
@@ -304,7 +341,11 @@ class FakeBox(BaseHTTPRequestHandler):
 
 
 class BoxRelayTest(unittest.TestCase):
-    """Le cockpit lit le boitier en meme origine, et jamais une valeur inventee."""
+    """L'ancienne route publique `/api/box` a disparu avec le pont Readdy.
+
+    Le boîtier est désormais lu côté serveur (session exigée) et sa lecture
+    réelle est couverte par ``tests/test_companion_sensors.py``.
+    """
 
     def _point_box_at(self, port: int) -> None:
         previous = os.environ.get("COMPANION_BOX_URL")
@@ -348,37 +389,16 @@ class BoxRelayTest(unittest.TestCase):
         self.server = CompanionTestServer()
         self.addCleanup(self.server.stop)
 
-    def test_backend_absent_rend_503_sans_aucune_valeur(self) -> None:
-        """Sans backend, aucune valeur : pas de 200 vide, pas de chiffre."""
-        self._point_box_at(9)  # port ferme : injoignable
+    def test_ancienne_route_publique_est_fermee(self) -> None:
+        """Aucune route `/api/box` non authentifiée ne subsiste."""
+        self._point_box_at(9)
         result = self.server.request("/api/box")
-        self.assertEqual(result["status"], 503)
-        body = str(result["body"])
-        self.assertIn("indisponible", body)
-        self.assertNotIn("celsius", body)
-        self.assertNotIn("tr/min", body)
-
-    def test_telemetrie_du_boitier_est_relayee(self) -> None:
-        box = ThreadingHTTPServer(("127.0.0.1", 0), FakeBox)
-        thread = threading.Thread(target=box.serve_forever, daemon=True)
-        thread.start()
-
-        def stop_box() -> None:
-            box.shutdown()
-            box.server_close()
-
-        self.addCleanup(stop_box)
-        self._point_box_at(box.server_address[1])
-
-        result = self.server.request("/api/box")
-        self.assertEqual(result["status"], 200)
-        charge = json.loads(str(result["body"]))
-        self.assertEqual(charge["source"], "boxtelemetry")
-        self.assertEqual(charge["temperatures"][0]["celsius"], 42.5)
-        self.assertEqual(charge["ventilos"][0]["tr/min"], 1200)
+        self.assertEqual(result["status"], 404)
+        self.assertNotIn("celsius", str(result["body"]))
+        self.assertNotIn("tr/min", str(result["body"]))
 
     def test_route_du_boitier_n_est_pas_relayee_a_miles(self) -> None:
-        """`/api/box` est traite localement, pas transmis a MILES."""
+        """`/api/box` n'existe plus, et rien de tel n'est transmis à MILES."""
         self._point_box_at(9)
         self.server.request("/api/box")
         chemins = [entree["path"] for entree in FakeMiles.received]

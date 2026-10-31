@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Miles — connexion d'un fournisseur IA</title>
+<link rel="icon" type="image/svg+xml" href="/assets/miles.svg">
+<link rel="stylesheet" href="/setup.css">
+</head>
+<body>
+<main class="setup">
+  <p class="eyebrow">Page locale de la box</p>
+  <h1>Connecter un fournisseur IA</h1>
+  <p class="lead">La clé est écrite dans le <code>.env</code> de la box, de façon atomique.
+  Elle n'est jamais renvoyée à l'écran, ni affichée, ni transmise au site.</p>
+
+  <p class="notice" role="status">{{MESSAGE}}</p>
+
+  <form method="post" action="/setup" autocomplete="off">
+    <input type="hidden" name="csrf" value="{{CSRF}}">
+
+    <label for="provider">Fournisseur</label>
+    <select id="provider" name="provider" required>
+      {{PROVIDERS}}
+    </select>
+
+    <label for="model">Modèle <span class="hint">(facultatif, identifiant exact)</span></label>
+    <input id="model" name="model" type="text" value="{{MODEL}}" spellcheck="false"
+           placeholder="laisser vide pour le modèle par défaut">
+
+    <label for="api_key">Clé API</label>
+    <input id="api_key" name="api_key" type="password" required
+           autocomplete="new-password" spellcheck="false">
+    <p class="hint">Saisie uniquement sur cette page, ouverte sur la box elle-même
+    (127.0.0.1). Aucun formulaire de clé n'existe dans l'interface distante.</p>
+
+    <button type="submit">Enregistrer sur la box</button>
+  </form>
+
+  <section class="after">
+    <h2>Après l'enregistrement</h2>
+    <p>MILES instancie son fournisseur au démarrage : un redémarrage de
+    <code>miles.py</code> est nécessaire pour activer la nouvelle clé.
+    L'état affiché par le site restera « configuré, redémarrage requis » tant que
+    ce redémarrage n'a pas eu lieu.</p>
+    <p><a href="/">Retour au site</a></p>
+  </section>
+</main>
+</body>
+</html>
