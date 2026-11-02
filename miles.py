@@ -79,6 +79,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Exposer l'interface web sur le LAN (fail-closed : exige un jeton porteur et une IP privée explicite)",
     )
+    parser.add_argument(
+        "--setup",
+        action="store_true",
+        help="Assistant de configuration interactif : fournisseur, clé API, jeton web, clé box (écrit .env atomiquement)",
+    )
     return parser
 
 
@@ -169,9 +174,109 @@ def _list_conversations(transcript: ConversationTranscript | None) -> int:
     return 0
 
 
+def _run_setup() -> int:
+    """Assistant de configuration interactif (mode --setup).
+
+    Demande le fournisseur, la clé API (masquée), génère le jeton web et la
+    clé box si absents, écrit .env de façon atomique. Ne jamais afficher
+    de secret.
+    """
+    import secrets
+
+    env_path = os.path.join(os.getcwd(), ".env")
+    existing = {}
+    if os.path.isfile(env_path):
+        try:
+            for line in open(env_path, encoding="utf-8"):
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                existing[k.strip()] = v.strip()
+        except OSError:
+            pass
+
+    print("=" * 60)
+    print("MILES - assistant de configuration")
+    print("=" * 60)
+
+    providers = ["remote", "local", "off"]
+    print("Fournisseurs disponibles : remote (API distante), local (Ollama), off")
+    provider = input("Fournisseur [remote] : ").strip().lower() or "remote"
+    if provider not in providers:
+        print("Fournisseur inconnu : " + provider, file=sys.stderr)
+        return 1
+
+    api_key = ""
+    if provider == "remote":
+        try:
+            import getpass
+            api_key = getpass.getpass("Cle API (saisie masquee, vide = ignorer) : ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("", file=sys.stderr)
+            return 1
+
+    web_token = existing.get("MILES_WEB_AUTH_TOKEN", "").strip()
+    if not web_token:
+        web_token = secrets.token_hex(32)
+        print("Jeton web genere (affiche une seule fois, conserve dans .env).")
+
+    box_key = existing.get("MILES_BOX_KEY", "").strip()
+    if not box_key:
+        box_key = secrets.token_urlsafe(32)
+        print("Cle box generee (conservee dans .env).")
+
+    lines = []
+    lines.append("# MILES - configuration generee par --setup")
+    lines.append("# NE JAMAIS commettre ce fichier.")
+    lines.append("")
+    lines.append("MILES_PROVIDER=" + provider)
+    lines.append("MILES_REMOTE_BASE_URL=" + existing.get("MILES_REMOTE_BASE_URL", "http://localhost:8000"))
+    lines.append("MILES_REMOTE_MODEL=" + existing.get("MILES_REMOTE_MODEL", "miles-default"))
+    lines.append("MILES_REMOTE_TIMEOUT=" + existing.get("MILES_REMOTE_TIMEOUT", "30"))
+    if api_key:
+        lines.append("MILES_REMOTE_API_KEY=" + api_key)
+    elif existing.get("MILES_REMOTE_API_KEY"):
+        lines.append("MILES_REMOTE_API_KEY=" + existing["MILES_REMOTE_API_KEY"])
+    lines.append("MILES_LOCAL_BASE_URL=" + existing.get("MILES_LOCAL_BASE_URL", "http://localhost:11434"))
+    lines.append("MILES_LOCAL_MODEL=" + existing.get("MILES_LOCAL_MODEL", "miles-local"))
+    lines.append("MILES_LOCAL_TIMEOUT=" + existing.get("MILES_LOCAL_TIMEOUT", "60"))
+    lines.append("MILES_HISTORY_LIMIT=" + existing.get("MILES_HISTORY_LIMIT", "10"))
+    lines.append("MILES_VOICE_ENABLED=" + existing.get("MILES_VOICE_ENABLED", "false"))
+    lines.append("MILES_MEMORY_ENABLED=" + existing.get("MILES_MEMORY_ENABLED", "false"))
+    lines.append("MILES_MEMORY_DB_PATH=" + existing.get("MILES_MEMORY_DB_PATH", "data/memory.db"))
+    lines.append("MILES_CONVERSATION_PERSIST=" + existing.get("MILES_CONVERSATION_PERSIST", "true"))
+    lines.append("MILES_CONVERSATION_DB_PATH=" + existing.get("MILES_CONVERSATION_DB_PATH", "data/conversations.db"))
+    lines.append("MILES_WEB_AUTH_TOKEN=" + web_token)
+    lines.append("MILES_BOX_KEY=" + box_key)
+
+    tmp = env_path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+        os.replace(tmp, env_path)
+    except OSError as exc:
+        print("Erreur d ecriture : " + str(exc), file=sys.stderr)
+        return 1
+
+    try:
+        os.chmod(env_path, 0o600)
+    except OSError:
+        pass
+
+    print()
+    print("Configuration ecrite dans .env (permissions 600).")
+    print("Jeton web (conserve dans .env) :", web_token[:8] + "..." + web_token[-4:])
+    print("Lancez MILES avec : python3 miles.py --web")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if getattr(args, "setup", False):
+        return _run_setup()
 
     try:
         settings = Settings(config_path=args.config)

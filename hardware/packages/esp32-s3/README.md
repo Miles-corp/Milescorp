@@ -45,5 +45,5 @@ La LED passe au **vert** quand le backend box répond, **rouge** sinon.
 
 ## État de la vérification
 - **Code source livré** (README, platformio.ini, main.cpp) ;
-- **Compilation et flash NON VÉRIFIÉS ici** (pas d'outil ESP32 dans le périmètre actuel) ;
+- **Compilation VERIFIEE (PlatformIO 6.2.0) - firmware.bin (1 101 488 octets) dans build-output/ ; sortie dans build-output/build.log ;
 - **Tests backend** : `tests/test_boxtelemetry.py` (7/7 OK, Windows).

@@ -157,6 +157,8 @@ mkdir -p "$WORK/files"
 cp "$PAYLOAD"                       "$WORK/files/miles-source.tar.gz"
 cp "$ISA_DIR/miles-provision.sh"     "$WORK/files/miles-provision.sh"
 cp "$ISA_DIR/miles-provision.service" "$WORK/files/miles-provision.service"
+cp "$ISA_DIR/miles-late.sh" "$WORK/files/miles-late.sh"
+chmod +x "$WORK/files/miles-late.sh"
 
 # ------------------------------------------------- 6. INITRD + MENUS
 # Nettoyage des extraits d une execution precedente (evite les residus console=ttyS0)

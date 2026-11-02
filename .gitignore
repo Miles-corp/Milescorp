@@ -38,3 +38,6 @@ releases/
 
 # Construction ISO usb-installer (contient l'ISO Debian de 792 Mo)
 .usb-iso-build/
+
+# PlatformIO (build ESP32)
+hardware/packages/esp32-s3/.pio/
