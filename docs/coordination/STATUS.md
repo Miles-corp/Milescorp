@@ -345,3 +345,53 @@ Aucun blocage à ce jour.
 - **Reste à faire** : revue indépendante `TASK-DEV-065` ; décision utilisateur sur la suppression définitive de l'export Readdy ; push éventuel sur accord explicite.
 - **Connexion box par adresse** (`TASK-DEV-066`, `MI-027`) : la page Découvrir n'est plus une attente — champ d'adresse privée, sonde réelle vers `/api/companion/session` (signature `Server: MilesCompanion`), box listée uniquement si un Companion répond, test et retrait réservés aux administrateurs. **13 tests** (`tests/test_companion_boxes.py`) et suite Companion **66 tests OK** ; aucune écoute LAN ouverte, aucun nom de domaine résolu.
 - **Appairage par QR** (`TASK-DEV-067`, `MI-028`) : le champ d'adresse de `TASK-DEV-066` est retiré ; l'identité de la box et son jeton vivent dans `data/box_identity.json`, le QR imprimable est généré par la CLI (`pairing qr`), la page `/appairer` associe l'appareil sans compte, et les appareils associés sont listés puis révoqués par un administrateur. Le contrôle d'origine accepte désormais la même origine que l'hôte, ce qui rend l'appairage utilisable depuis un téléphone sur le LAN. **13 tests** ; QR de la première box : `data/box-001-qr.png` et `.svg`. L'écoute LAN reste verrouillée (`--lan`).
+
+## Reprise ISO Debian 13 — démarrage automatique (Agent A, 2026-11-08)
+
+- **Décision** : `DEC-032`. **Tâche** : `TASK-DEV-068` (DONE). **Handoff** : `H-018`.
+- **Cause racine** : `isolinux/spkgtk.cfg`, inclus en dernier, portait `timeout 1` + `ontimeout ... speakup.synth=soft` : l'installateur vocal remplaçait le menu graphique. Le `default installgui` direct et la suppression sèche de l'`ontimeout` ont été testés puis rejetés.
+- **Correctif** : `spkgtk.cfg` garde l'entrée vocale manuelle, mais son `ontimeout` démarre directement `/install.amd/vmlinuz` avec l'initrd graphique, `preseed/file=/preseed.cfg` et sans `speakup`; `isolinux.cfg` reste sur `vesamenu.c32`. Garde-fous dans le build et sur l'ISO finale.
+- **ISO** : `releases/miles-debian13-autoinstall-20261108.iso`, 762 Mo, SHA256 `00f88ac52294c846c450d6fd3a063cc8d959cfc34cb94c36b9ce8b1352787290` ; `sha256sum -c` OK.
+- **Preuves QEMU** : BIOS → installateur à 60 s (`Detect and mount installation media`) ; UEFI OVMF → installateur en français à 80 s (`Charger des composants depuis le support d'installation`). Captures : `logs/qemu-bios-fixed-{15,35,60}.png`, `logs/qemu-uefi-fixed-{25,50,80}.png`.
+- **Code** : User-Agent `MILES/1.0` sur chat et sonde Groq ; Gemini en en-tête `x-goog-api-key` sans clé dans l'URL ; lecture CLI binaire `surrogateescape` avec repli sur `input()`.
+- **Tests** : suite complète **1062 OK, 5 ignorés** (181,481 s) ; contrôles ciblés **29 OK** ; `bash -n` OK.
+- **Déjà présents** : `hmac.compare_digest` dans `boxtelemetry.py`, exclusions `.local` de `build_release.py`, provisioning dans `/opt/Milescorp` avec `chown miles`. Aucun rebasage multi-provider : aucune branche locale, `main` contient déjà le Companion.
+- **Non exécuté / limites** : VirtualBox absent ; installation complète non menée jusqu'au premier boot ; aucun appel Gemini réel ; aucun commit/push.
+- **Reste à faire** : test VirtualBox avec la checklist, validation du premier boot `miles`, puis revue indépendante Agent B.
+
+## Reprise ISO du 2026-11-09 — question de langue (Agent A, en cours)
+
+- **Tâche** : `TASK-DEV-069`. **Décision** : `DEC-033`.
+- **Constat** : l'ISO 20261108 s'arrêtait sur « Select a language » ; `preseed/file` n'était pas appliqué avant `localechooser` et `S30initrd-preseed` échouait (`Illegal number`).
+- **Correctif en cours de validation** : `preseed/file=/cdrom/preseed.cfg` réactivé, `S30` neutralisé dans les deux initrds, `localechooser` fixé en français et marqué vu. Le test minimal a rendu `LANG_COUNT=0` et atteint le menu principal ; un build propre est en cours.
+- **Reste à faire** : terminer le build, vérifier le SHA256 et les initrds, installer en QEMU UEFI/TCG sans touche, premier boot `miles`, puis `TASK-DEV-069`, `DEC-033`, `H-019` et le rapport.
+
+## Preuve d'installation complète du 2026-11-10 (Agent A, DONE)
+
+- **Tâche** : `TASK-DEV-069` (DONE). **Décision** : `DEC-033` + addendum 2026-11-10. **Handoff** : `H-019`. **Rapport** : `docs/reports/ISO_BOOT_FIX_20261109_AGENT_A.md`.
+- **Cause vraie du blocage** : `miles-late.sh` en `#!/bin/bash` (absent de l'installateur) faisait échouer le `late_command` → dialogue bloquant `preseed/command_failed`. La note `finish-install/reboot_in_progress` était déjà neutralisée (cdebconf `Flags: seen`). Correctif POSIX (`#!/bin/sh`, `dash -n` OK).
+- **ISO** : `releases/miles-debian13-autoinstall-20261110.iso`, 798294016 o, SHA256 `dfa8257a4e74e1b387ca79f8b92fb25696903117cf1b9a2254bdda6603517c5f` ; somme inscrite dans `releases/SHA256-ISO-SUMS`, `sha256sum -c` OK.
+- **Installation UEFI/TCG sans touche** : l'installateur demande lui-même le reboot (`Requesting system reboot`), zéro `Terminer` dans le log série (107690 o) ; disque 2457796608 o. QEMU sorti seul (`-no-reboot`), NOQEMU confirmé.
+- **Premier boot** : session `miles` tty1 (uid 1000, sudo) ; `miles-late-ran` (`2026-11-10 08:31:57`, OK), `miles-provision.done` (`2026-11-10 15:08:49`), `systemctl is-enabled miles` → enabled, `/opt/Milescorp` 115 entrées `miles:miles`. Captures : `logs/firstboot-screen.png` (propre, sans identifiant), transcript `logs/guest-exec.log`.
+- **Réserve (lot ultérieur)** : `miles.py` seulement en `worktrees/<id>/miles.py` dans la payload, `data/` manquant → service `miles` enabled mais en boucle de redémarrage. Aucun commit/push. `logs/dbg-*.png` supprimés.
+
+## Service miles actif au premier boot — ISO 20261111 (Agent A, DONE 2026-11-11)
+
+- **Tâche** : `TASK-DEV-070` (DONE). **Décision** : `DEC-034`. **Handoff** : `H-020`. **Rapport** : `docs/reports/ISO_PAYLOAD_FIX_20261111_AGENT_A.md`.
+- **Cause du service en boucle** : `status=226/NAMESPACE` — `ReadWritePaths` cite `/opt/Milescorp/.env`, inexistant. App OK hors sandbox (manuel port 8081).
+- **Correctifs** : `touch "$DEST/.env"` en provision ; `chmod 644` de l'unité installée ; prune `*/.manus` ; build sur ext4 natif (`WORK=/home/stanc/usb-build-11`). `bash -n`/`dash -n` OK.
+- **ISO** : `releases/miles-debian13-autoinstall-20261111.iso`, 812974080 o, SHA256 `a6a4653ae59a0cd2deec6fa25b126851449dc6bc9871f836c8a629416fd2299c` ; tarball 1004 fichiers, 0 `manus`, `miles.py` au sommet.
+- **Installation n°5 sans touche** : `Requesting system reboot`, zéro `Terminer` (108004 o), disque 2529361920 o, QEMU sorti seul.
+- **Premier boot** : `provision.done` 10:47:36 ; `is-enabled` → enabled ; `is-active` → **active** ; `NRestarts=0`, `ActiveState=active`, `SubState=running` ; `curl 127.0.0.1:8080` → **HTTP:200** ; 17 entrées ; `MILESPY_OK`/`DATA_OK`/`ENV_OK`.
+- **Pièces CLEAN** : `logs/firstboot-screen.png` (relue : enabled, active, 501 HEAD, 17 — aucun secret), `logs/guest-exec.log` (10 blocs, mots de passe NOT-FOUND, jeton NOT-FOUND).
+- **Limites** : `HEAD /` → 501 (hors périmètre), `sendkey` AZERTY sans `{`/`}`, VirtualBox absent, KVM indisponible (TCG), aucun commit/push.
+
+## Image Live USB Debian 13 — livraison de la clé 64 Go (Agent A, DONE 2026-11-24)
+
+- **Tâche** : `TASK-DEV-071` (DONE). **Décision** : `DEC-035`. **Handoff** : `H-021`.
+- **Livrable** : `releases/miles-debian13-live-20261124.iso`, 299 892 736 o, SHA256 `e7b5ac8e85311d7886f0084a7704bec44402be2f8cd4d9fbccbc0cbed5201fc1` (inscrit dans `releases/SHA256-ISO-SUMS`). Ancienne `releases/miles-debian13-live.iso` (577 765 376 o, défaillante) supprimée.
+- **Guide** : `docs/installation/LIVE_USB.md` — vérification `Get-FileHash`, écriture **DD** (Rufus/balenaEtcher), clés de boot F12/F9/F8, persistance créée depuis la clé, premier `miles --setup`, dépannage, sécurité, intérêt du Companion.
+- **Tests QEMU 10.2 / OVMF (WSL)** : UEFI (CD) session ~63 s ; BIOS legacy ~45 s ; **clé USB** — ISO copiée sur disque et présentée en `usb-storage` via `qemu-xhci` → GRUB → session ; **persistance sur 2 démarrages** : `/dev/vda on /run/live/persistence/vda`, `upperdir=/run/live/persistence/vda/rw`, fichier `persistance-ok-…` créé avant reboot **retrouvé** après reboot ; `miles` et `miles-companion` `active`, HTTP **200/200** ; `ssh` inactif ; aucune unité en échec ; `fr_FR.UTF-8` + `XKBLAYOUT="fr"` ; MILES exécuté sur tty1 après autologin `miles`.
+- **Correctifs structurants** : `/etc/live/config.conf` porte `LIVE_USERNAME="miles"` (sinon `live-config-getty-generator` écrit `--autologin user`, compte inexistant) ; `MILES_PROVIDER=local` (la valeur `off` mettait le service en boucle) ; le bus USB manquant du `q35` impose `-device qemu-xhci`.
+- **Nettoyage** : 87 scripts one-off supprimés, 33 conservés + `.usb-iso-build/README.md` (chaîne de fabrication et tests) ; `hardware/packages/usb-installer/.usb-iso-build/` ajouté à `.gitignore` (contient une ISO de 792 Mo).
+- **Reste à faire** : écriture physique de la clé et boot sur matériel réel (utilisateur) ; revue indépendante Agent B ; exposition LAN toujours bloquée sur l'audit B.

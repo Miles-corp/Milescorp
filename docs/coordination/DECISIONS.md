@@ -327,3 +327,130 @@ tion et les règles de collaboration.
 - **Preuves d'exécution** (2026-10-28, Windows 11, Python 3.12) : `tests.test_memory_avancee` **17/17 OK** ; suite complète **995 tests, OK, 5 ignorés** ; fusion **sans conflit**.
 - **Limite assumée** : la détection de contradiction est **lexicale** (`_normaliser` + `_sans_negation`), donc heuristique — deux formulations éloignées du même fait ne seront pas reliées, et une négation complexe peut échapper. C'est un signalement à confirmer par un humain, jamais une vérité automatique.
 - **Statut** : ACCEPTEE
+
+## DEC-028 — Skill `web-site` et système de mouvement du companion
+
+- **Date** : 2026-11-07
+- **Auteur** : Buffy (mission skill/site, validation humaine)
+- **Contexte** : le skill `web-site` ne contenait qu'une description de deux lignes, sans ressource. Le companion React (`app/interface/companion/frontend`, 15 pages, React 19 + Vite) n'avait aucun système de mouvement tokenisé.
+- **Décision** :
+  1. **Source unique** du skill : `docs/skills/web-site/` (`SKILL.md` + `references/`), déclinée en copie dans le Lab (`workspaces/competences/web-design/references/web-site/`) ; la copie ne s'édite jamais seule.
+  2. **Fondements documentés** : `docs/design/RECHERCHE-UX-PSYCHOLOGIE.md`, `RECHERCHE-MOTION.md`, `RECHERCHE-DASHBOARDS.md` (NN/g, Apple HIG, MDN/Chrome, WCAG 2.2, anthropics/skills).
+  3. **Code propriétaire** : aucun CDN, dépendances bundlées, recréer plutôt qu'installer quand c'est petit, licence vérifiée.
+  4. **Mouvement tokenisé** dans le companion : `--dur-1/2/3`, `--ease`, `--ease-enter` ; entrée de page 8 px/300 ms sur trois blocs ; pulsation réservée à `.dot-warn` ; `prefers-reduced-motion` prioritaire.
+  5. **Couche 1 du cockpit** : phrase d'état en langage clair avant les chiffres sur l'accueil.
+- **Preuves d'exécution** (2026-11-07, Windows 11, Node 26.13.0) : `npm run typecheck` **statut 0** ; `npm run build` **statut 0** (66 modules, 361,94 kB JS / 35,85 kB CSS, empreinte `5c30e6c1f1129814`).
+- **Limites assumées** : aucune vérification visuelle (pas de capture demandée) ; pas d'audit Lab exécuté sur le SPA (authentification et API requises) ; sauvegarde du skill sur le compte Freebuff refusée, donc non effectuée.
+- **Statut** : ACCEPTEE
+
+## DEC-029 — Skill `web-site` v2 : workflow à portes, références routées, evals et validateur
+
+- **Date** : 2026-11-07
+- **Auteur** : Buffy (mission skill, validation humaine)
+- **Contexte** : audit du skill contre la spécification Agent Skills et les bonnes pratiques Anthropic. Le format était valide, mais il manquait un workflow exécutable, des critères mesurables, des evals et un validateur ; `references/motion.md` contredisait la règle « tokens uniquement » (`.dot-warn` en 2.4 s codé en dur) et le README donnait une commande de synchronisation fragile.
+- **Décision** :
+  1. **Corps réécrit** en workflow à portes (0 contrat → 9 erreurs fréquentes), avec un tableau de vérification mesurable et un format de compte rendu imposé. `SKILL.md` reste sous 500 lignes et ~5 000 tokens.
+  2. **Description élargie** (< 1 024 caractères) pour couvrir site, landing, dashboard, refonte, animation, audit et stack, y compris sans le mot « design ».
+  3. **Références** : `motion.md` réécrit (pipeline de rendu, FLIP, View Transitions, `@starting-style`, perf) ; `psychologie-ux.md` élargi (lois cognitives, formulaires, confiance, mesure) ; nouvelles `stack-et-dependances.md` et `sites-professionnels.md` ; `dashboards.md` complété (fraîcheur, accessibilité des graphes).
+  4. **Evals** : `evals/evals.json` (4 scénarios, assertions vérifiables) et `evals/trigger-queries.json` (14 requêtes, 7 positives / 7 négatives proches).
+  5. **Validateur** : `scripts/validate-skill.mjs`, sans dépendance, exécutable par `node` ; il contrôle frontmatter, taille, sections, références, sommaires, evals et cohérence.
+  6. **Source unique conservée** : `docs/skills/web-site/`, copie Lab synchronisée ; evals et scripts restent au dépôt.
+- **Preuves d'exécution** : voir `docs/skills/web-site/VALIDATION.md` (sortie du validateur, vérifications statiques, limites).
+- **Limites assumées** : les evals ne sont pas exécutées par un modèle dans ce dépôt ; le déclenchement réel de la description n'est pas mesuré ; la copie du Lab est une copie manuelle.
+- **Statut** : ACCEPTEE
+
+## DEC-030 — Skill `web-site` : validation officielle et evals réellement exécutées
+
+- **Date** : 2026-11-07
+- **Auteur** : Buffy (mission skill, validation humaine)
+- **Contexte** : DEC-029 laissait deux limites ouvertes — evals non exécutées et déclenchement non mesuré. La mission exigeait le passage au validateur officiel de création de skill et des preuves d'exécution réelles.
+- **Décision** :
+  1. **Scripts officiels vendoreés** dans `tools/skill-creator/` (`quick_validate.py`, `package_skill.py`, Apache-2.0, sans modification) : la validation est reproductible et cite la version exacte.
+  2. **Validateur officiel** exécuté : `Skill is valid!`, code 0. Il a d'abord révélé un YAML invalide (un ` : ` dans la description), corrigé ; le validateur maison a reçu le contrôle correspondant.
+  3. **Paquet** `dist/web-site.skill` produit par le packager officiel (code 0, 9 fichiers) et inspecté ; copie `.zip` pour vérification.
+  4. **4 evals exécutées** sur une instance OpenCode neuve, baseline vs skill injecté : **7/20 (35 %) → 20/20 (100 %)**. Sorties brutes, verdicts et itérations conservés dans `evals/results/`.
+  5. **Déclenchement mesuré** sur deux modèles (`beam-free`, `flint-40b-free`) : **7/7 positifs, 7/7 négatifs, 0 faux positif** après correction de la description (première passe 6/7).
+  6. **Cinq défauts corrigés et rejoués** : YAML, déclenchement stack, token d'attention (`--dur-pulse`), `aria-describedby`, audit commençant par job/état.
+- **Preuves d'exécution** : `docs/skills/web-site/VALIDATION.md` et `docs/skills/web-site/evals/REPORT.md` (commandes, chiffres, extraits, limites).
+- **Limites assumées** : evals sur un seul modèle gratuit (`deepseek-v4.1-flash-free`), notation manuelle non aveugle, aucun test de rendu réel ; les modèles payants sont indisponibles (`Insufficient account funds`, `Model access is disabled`). Le paquet n'est pas testé par un consommateur externe.
+- **Statut** : ACCEPTEE
+
+## DEC-031 — Validation multi-modèles de `web-site` et clôture de la copie Lab
+
+- **Date** : 2026-11-07
+- **Auteur** : Buffy (mission skill, validation humaine)
+- **Contexte** : DEC-030 laissait deux points ouverts — un seul modèle d'évaluation et une copie Lab non resynchronisée. La mission demandait un second modèle gratuit distinct et la suppression de toute action restante.
+- **Décision** :
+  1. **Deux modèles complets** : DeepSeek `7/20 → 20/20` (exécution initiale) et GLM `5/20 → 20/20` (état final), avec les quatre scénarios et 20 assertions par modèle ; sorties et verdicts conservés sous `evals/results/`.
+  2. **Flint essayé en second** : eval 2 a expiré deux fois (`EXIT=124`, `timeout 180`, JSONL réduit à `step_start`). Les traces `*.timeout*.{txt,jsonl}` sont conservées ; GLM a pris le relais comme second modèle complet, conformément à la consigne de bascule.
+  3. **Corrections issues du second modèle** : bloc `Job et statut`, brief de 5 lignes écrit, 3–5 questions avec options, direction structurelle testée par substitution, `## Limites` rédigée, `prefers-reduced-motion` avec `animation: none`, suppression de la checklist et du tableau de portes recopiés, `Exécuté`/`Non exécuté` sans faux `statut 0`.
+  4. **Copie Lab** : `SKILL.md`, `README.md`, `VALIDATION.md` et les cinq références sont identiques à la source (`cmp` et MD5).
+  5. **Paquet final** : `dist/web-site.skill` et `dist/web-site.zip`, 9 fichiers, `SKILL.md` identique à la source, MD5 des deux archives identique.
+- **Preuves d'exécution** : `docs/skills/web-site/VALIDATION.md`, `docs/skills/web-site/evals/REPORT.md`, `evals/results/verdicts-glm-5.3-flash-free.json`.
+- **Limites assumées** : notation manuelle non aveugle ; réponses en texte sans code, donc pas de mesure de rendu réelle ; Flint sans score complet (eval 2 expirée) ; modèles payants indisponibles (`Insufficient account funds`, `Model access is disabled`) ; paquet non testé par un consommateur externe.
+- **Statut** : ACCEPTEE
+
+## DEC-032 — Démarrage automatique de l'ISO Debian 13 : `ontimeout` graphique sans `speakup`
+
+- **Date** : 2026-11-08
+- **Auteur** : Agent A
+- **Contexte** : l'ISO ne démarrait pas automatiquement. La cause reproduite en QEMU BIOS était `spkgtk.cfg`, inclus en dernier, dont `timeout 1` et `ontimeout ... speakup.synth=soft` lançaient l'installateur vocal. Supprimer l'`ontimeout` laissait le menu attendre une touche ; `default installgui` dans `isolinux.cfg` échouait au prompt.
+- **Décision** :
+  1. Conserver `vesamenu.c32` et toutes les entrées manuelles, y compris l'installation vocale.
+  2. Remplacer uniquement l'`ontimeout` de `spkgtk.cfg` par le chemin direct du noyau, l'initrd graphique, `preseed/file=/preseed.cfg` et les arguments automatiques, sans `speakup`.
+  3. Vérifier dans le build et dans l'ISO finale : absence de `speakup` dans l'`ontimeout`, présence de l'initrd graphique, `default installgui` dans `gtk.cfg`, `vesamenu.c32` dans `isolinux.cfg`.
+  4. Conserver le mécanisme éprouvé de Debian (chemin noyau direct) plutôt qu'un label dans `ontimeout`, non résolu dans cette version.
+- **Preuves d'exécution** : QEMU BIOS, sans touche → installateur à 60 s ; QEMU UEFI/OVMF → installateur français à 80 s. ISO SHA256 `00f88ac52294c846c450d6fd3a063cc8d959cfc34cb94c36b9ce8b1352787290`. Suite complète 1062 OK, 5 ignorés.
+- **Limites assumées** : VirtualBox absent du poste de build ; installation complète non terminée ; délais QEMU TCG non représentatifs de VirtualBox.
+- **Statut** : ACCEPTEE
+
+## DEC-033 — ISO Debian 13 : preseed fichier, S30 neutralisé et langue fixée dans localechooser
+
+- **Date** : 2026-11-09
+- **Auteur** : Agent A
+- **Contexte** : l'ISO 20261108 atteignait l'installateur mais s'arrêtait sur « Select a language ». La question `localechooser/languagelist` est posée avant la lecture fiable du preseed ; le `S30initrd-preseed` de Debian 13 échoue (`Illegal number`) et le preseed présent dans l'initrd n'est pas appliqué de façon fiable.
+- **Décision** :
+  1. Réactiver `preseed/file=/cdrom/preseed.cfg` sur les lignes noyau BIOS et UEFI : le preseed fichier devient la source de vérité, sans dépendre du `S30`.
+  2. Neutraliser `S30initrd-preseed` dans les deux initrds (`/install.amd/initrd.gz` et `/install.amd/gtk/initrd.gz`) par un script no-op, pour supprimer l'erreur et le double traitement.
+  3. Patcher `localechooser` dans les deux initrds : remplacer `db_input critical $tpl_languagelist` par `db_set $tpl_languagelist fr` et `db_fset $tpl_languagelist seen true`, afin que la question ne soit plus posée.
+  4. Conserver `auto=true`, `language=fr`, `country=FR`, `locale=fr_FR.UTF-8` et `frontend=text` sur la ligne noyau comme secours.
+  5. Vérifier dans le build l'application du patch, la validité syntaxique de `localechooser` et la présence de `preseed/file` dans les menus BIOS et UEFI.
+- **Preuves d'exécution** : test minimal `LANG_COUNT=0`, installateur atteignant le menu principal ; build 20261109 en cours. Les preuves finales (SHA256, installation complète, premier boot) seront consignées dans `H-019` et le rapport.
+- **Limites assumées** : la validation complète QEMU UEFI/TCG est encore en cours ; aucun test VirtualBox ; build sur WSL avec un disque 9p lent.
+- **Statut** : ACCEPTEE
+
+### Addendum 2026-11-10 — cause vraie du blocage (Agent A)
+
+- **Constat** : avec l'ISO 20261109, l'installation UEFI/TCG atteignait GRUB puis restait sur `[!!] Terminer l'installation` au corps `<ERR>`. La note `finish-install/reboot_in_progress` était suspectée à tort : la base cdebconf invitée (`/var/lib/cdebconf/questions.dat`) la montre avec `Value: (vide)`, `Owners: d-i, finish-install`, `Flags: seen` — elle était déjà neutralisée.
+- **Cause vraie** : `hardware/packages/usb-installer/miles-late.sh` commençait par `#!/bin/bash`, mais l'environnement d'installation Debian ne fournit que `dash` (`/bin/sh`). L'exécution du `late_command` (`log-output sh -c "$command"` dans `/bin/preseed_command`) échouait avec `env: can't execute 'bash'` (visible dans le syslog VT4), et `preseed_command` affichait alors le dialogue `preseed/command_failed` (`Type: error`, `db_input critical` + `db_go`), qui bloque la fin d'installation.
+- **Correctif** : `miles-late.sh` passe en `#!/bin/sh` avec un corps strictement POSIX (variable `CDPATH` renommée `CANDIDAT`), vérifié `dash -n` (SYNTAX_OK) ; le `sed` grub `\1\2` est confirmé correct. Rebuild ISO 20261110 non interactif (hashes SHA-512 recalculés des mêmes mots de passe, sels `miles1`/`miles2`), ISO vérifiée : 798294016 o, SHA256 `dfa8257a4e74e1b387ca79f8b92fb25696903117cf1b9a2254bdda6603517c5f`, `/files/miles-late.sh` extrait avec `#!/bin/sh` en première ligne.
+- **Preuves** : installation UEFI/TCG n°3 sans touche → `Requesting system reboot`, zéro occurrence de `Terminer` dans le log série (107690 o) ; premier boot → session `miles`, `/var/lib/miles-late-ran` (`... OK`), `/var/lib/miles-provision.done`, service `miles` enabled, `/opt/Milescorp` 115 entrées `miles:miles`. Captures : `logs/firstboot-screen.png`, transcript `logs/guest-exec.log` (vérifiés sans identifiant).
+- **Réserve reportée** : `miles.py` n'est présent dans la payload qu'en `worktrees/<id>/miles.py` (artefact), et `data/` manque → `miles.service` enabled mais en boucle de redémarrage. Contenu de payload à traiter dans un lot ultérieur, pas dans DEC-033.
+
+## DEC-034 — ISO Debian 13 : `.env` provisionné pour `ReadWritePaths`, service `miles` actif au premier boot
+
+- **Date** : 2026-11-11
+- **Auteur** : Agent A
+- **Contexte** : avec l'ISO 20261110 (payload corrigée : `miles.py` au sommet, `data/` présent, service enabled), `miles.service` restait en boucle `auto-restart` (`NRestarts=128`) malgré `miles-provision.done`. L'application elle-même fonctionne (lancement manuel hors sandbox : jeton affiché, `Interface web MILES sur 127.0.0.1:8081`).
+- **Cause établie** : `systemctl status miles` → `code=exited, status=226/NAMESPACE` (échec du montage du sandbox systemd, avant tout `ExecStart`). L'unité porte `ReadWritePaths=/opt/Milescorp/data /opt/Milescorp/.env` mais `/opt/Milescorp/.env` n'existait pas (`ENV_MISSING`, seul `.env.example` présent) : systemd refuse un chemin `ReadWritePaths` inexistant. Le commentaire historique « échec normal si .env absent » est faux : l'échec est définitif et précède `--setup`.
+- **Décision** :
+  1. `miles-provision.sh` crée `/opt/Milescorp/.env` vide (clé API saisie plus tard via `--setup`) avant le `chown` ; le message de premier démarrage est corrigé en conséquence.
+  2. `miles-late.sh` applique `chmod 644` à l'unité `miles-provision.service` installée (avertissement systemd « marked executable » supprimé, cause : `cp` depuis l'ISO).
+  3. `build-iso.sh` : prune `*/.manus` à tout niveau (le garde-fou rejetait l'ISO à cause de `CLIP/.manus/…`) ; build sur ext4 natif (`WORK` sur `/home/stanc`, pas sur le montage 9P où l'extraction des initrds restait bloquée en `D`).
+- **Preuves d'exécution** : ISO 20261111 (812974080 o, SHA256 `a6a4653ae59a0cd2deec6fa25b126851449dc6bc9871f836c8a629416fd2299c`, 1004 fichiers, 0 `manus`, `miles.py` au sommet, `touch "$DEST/.env"` ligne 54 vérifié dans le tarball). Installation n°5 sans touche → `Requesting system reboot`, zéro `Terminer`. Premier boot : `provision.done` 10:47:36, `is-enabled` → enabled, `is-active` → **active**, `NRestarts=0`, `ActiveState=active`, `SubState=running`, `curl 127.0.0.1:8080` → **HTTP:200**, 17 entrées, `ENV_OK`. Captures `logs/firstboot-screen.png` + transcript `logs/guest-exec.log` (10 blocs) vérifiés CLEAN.
+- **Limites assumées** : `HEAD /` répond `501` (l'application ne gère pas `HEAD`, hors périmètre) ; `sendkey` sur keymap FR perd `{`/`}` (preuve HTTP chiffrée portée par la série, écran par `curl -sI`) ; VirtualBox absent, KVM indisponible, TCG ; aucun commit/push.
+- **Statut** : ACCEPTEE
+
+## DEC-035 — Image Live USB : construction manuelle, persistance par partition, console comme interface principale
+
+- **Date** : 2026-11-24
+- **Décidé par** : Agent A
+- **Contexte** : livrer une clé USB 64 Go exécutant MILES sans installation disque, en français/AZERTY, avec persistance et démarrage automatique de l'assistant.
+- **Décisions** :
+  1. **Image live construite à la main** (`debootstrap` → `mksquashfs` → `xorriso`) : `live-build` n'est pas en place sur le poste et la chaîne doit rester lisible et rejouable (`.usb-iso-build/README.md`).
+  2. **Persistance = seconde partition étiquetée `persistence`** contenant `persistence.conf` (`/ union`). Sans ce fichier, `live-boot` referme la partition après montage : les deux sont donc exigés par le guide.
+  3. **Interface principale = console MILES auto-démarrée sur tty1** : l'image ne contient ni serveur graphique ni navigateur (choix « le plus fiable, le moins lent »). `miles.service` (127.0.0.1:8080) et `miles-companion.service` (127.0.0.1:8787) restent actifs, en boucle locale uniquement.
+  4. **Défauts fail-closed** : aucun secret embarqué (`MILES_PROVIDER=local`, jeton web vide), `ssh` installé mais désactivé, exposition du LAN toujours soumise à l'audit B.
+  5. **`sudo` sans mot de passe** pour l'utilisateur `miles` : acceptable sur une clé live personnelle, **jamais** sur une machine installée.
+- **Alternatives écartées** : live-build (indisponible), session graphique (lente et fragile sur clé), fichier de persistance posé sur la partition ISO (live-boot attend une partition dédiée).
+- **Conséquences** : `docs/installation/LIVE_USB.md` fait foi pour l'écriture de la clé, la persistance et le premier `miles --setup` ; la chaîne et ses tests sont documentés dans `.usb-iso-build/README.md`.

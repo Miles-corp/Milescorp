@@ -295,3 +295,124 @@ deux PC hors du dépôt.
 **Problèmes restants :** MILES, le backend boîtier et tout fournisseur IA n'étaient pas démarrés ; les états « non configuré » / « muet » sont affichés tels quels. L'écoute LAN reste interdite sans audit indépendant. L'ancien export Readdy reste sur disque, non servi, dans l'attente d'un accord de suppression. `DEC-026` et `H-016` étaient déjà pris par Agent A bis : ce lot est `DEC-027` / `H-017`.
 
 **Prochaine action recommandée :** revue indépendante `TASK-DEV-065` (aucune ressource distante, aucun secret renvoyé au navigateur, deux administrateurs maximum, mesures honnêtes, `/setup` local), puis validation utilisateur avant tout push.
+
+## H-018 — 2026-11-08 — Agent A → Agent B — reprise ISO Debian 13 et correctifs P1/P2
+
+- **De** : Agent A (poste principal, utilisateur `DripMind`).
+- **Vers** : Agent B — revue indépendante.
+- **Référence** : `TASK-DEV-068` (DONE), `DEC-032`. Aucun commit ni push.
+- **Périmètre** : ISO Debian 13, correctifs fournisseurs/CLI, tests, documentation. Le Companion et les modifications frontend antérieures ne sont pas inclus dans ce lot.
+
+### Travail réalisé
+
+1. **Cause racine ISO** : `spkgtk.cfg` était inclus en dernier et son `ontimeout ... speakup.synth=soft` lançait la synthèse vocale. `timeout`/`ontimeout` sont maintenant remplacés par un démarrage direct du noyau graphique avec `preseed/file=/preseed.cfg`, sans `speakup`. L'entrée vocale reste disponible manuellement.
+2. **Build** : garde-fous ajoutés pour vérifier `spkgtk.cfg`, `gtk.cfg` et `isolinux.cfg` dans l'ISO finale ; correction du contrôle `grep … &&` sous `set -e`.
+3. **Code** : User-Agent `MILES/1.0` (chat et sonde Groq) ; Gemini avec `x-goog-api-key` en en-tête, plus de clé dans l'URL ; lecture CLI binaire `surrogateescape` avec repli sur `input()`.
+4. **Tests** : `test_provider_headers.py` et `test_cli_input_utf8.py` ajoutés ; `test_provider_adapters.py` mis à jour.
+
+### Résultats
+
+- ISO : `releases/miles-debian13-autoinstall-20261108.iso`, 762 Mo, SHA256 `00f88ac52294c846c450d6fd3a063cc8d959cfc34cb94c36b9ce8b1352787290`, `sha256sum -c` OK.
+- QEMU BIOS : installateur à 60 s, sans touche ; captures `logs/qemu-bios-fixed-15/35/60.png`.
+- QEMU UEFI/OVMF : installateur français à 80 s ; captures `logs/qemu-uefi-fixed-25/50/80.png`.
+- Suite complète : **1062 tests OK, 5 ignorés** (181,481 s) ; ciblés **29 OK** ; `bash -n` OK.
+
+### Points non exécutés
+
+- VirtualBox exact (absent du poste) et installation complète jusqu'au premier boot `miles`.
+- Appel Gemini réel : tests avec `urlopen` simulé uniquement.
+- Aucun commit/push : l'arbre reste sale avec le lot Companion antérieur.
+
+### Prochaine action recommandée
+
+Exécuter la checklist VirtualBox sur un poste équipé, valider le premier boot `miles` et `systemctl is-enabled miles`, puis relire `docs/reports/ISO_BOOT_FIX_20261108_AGENT_A.md` et les captures QEMU. Signaler toute régression de l'accessibilité manuelle ou du preseed.
+
+## H-019 — 2026-11-10 — Agent A → Agent B — preuve d'installation complète ISO 20261110
+
+- **De** : Agent A (poste principal, utilisateur `DripMind`).
+- **Vers** : Agent B — revue indépendante.
+- **Référence** : `TASK-DEV-069` (DONE), `DEC-033` + addendum 2026-11-10. Aucun commit ni push.
+- **Périmètre** : ISO Debian 13, installateur non assisté, premier boot, provisioning `/opt/Milescorp`. Aucun développement fonctionnel MILES.
+
+### Travail réalisé
+
+1. **Diagnostic vrai du blocage** : la note `finish-install/reboot_in_progress` était déjà neutralisée (cdebconf `Flags: seen`) ; le dialogue `[!!] Terminer l'installation` (<ERR>) venait de `preseed/command_failed`, déclenché par l'échec du `late_command` (`miles-late.sh` en `#!/bin/bash`, `env: can't execute 'bash'` dans le syslog VT4).
+2. **Correctif** : `miles-late.sh` en `#!/bin/sh` POSIX (`dash -n` OK, `CDPATH` → `CANDIDAT`) ; rebuild non interactif ISO 20261110 (798294016 o, SHA256 `dfa8257a4e74e1b387ca79f8b92fb25696903117cf1b9a2254bdda6603517c5f`, `sha256sum -c` OK, shebang vérifié dans l'ISO).
+3. **Installation UEFI/TCG sans touche** : reboot demandé par l'installateur, zéro `Terminer` dans le log série ; disque ~2,46 Go ; QEMU sorti seul.
+4. **Premier boot** : session `miles` tty1 (uid 1000, sudo) ; `miles-late-ran` OK, `miles-provision.done` OK, service `miles` enabled, `/opt/Milescorp` 115 entrées `miles:miles`. Outils : `logs/vga-login.py`, `logs/guest-exec.py` (série TCP), `logs/vga-shot.py`, `logs/ppm2png.py`. Captures et transcripts vérifiés sans identifiant.
+
+### Résultats
+
+- ISO : `releases/miles-debian13-autoinstall-20261110.iso`, SHA256 `dfa8257a4e74e1b387ca79f8b92fb25696903117cf1b9a2254bdda6603517c5f`.
+- Preuves : `logs/firstboot-screen.png` (session `miles`, `is-enabled` → enabled), `logs/guest-exec.log` (8 blocs rc=0), `install-serial.log` (107690 o, reboot installateur).
+- Fichiers modifiés : `hardware/packages/usb-installer/{build-iso.sh,miles-late.sh,preseed.cfg}` (correctifs), `logs/{guest-exec.py,vga-shot.py}` (nouveaux), `docs/coordination/*`, `docs/reports/ISO_BOOT_FIX_20261109_AGENT_A.md`, `releases/SHA256-ISO-SUMS` ; `logs/dbg-*.png` supprimés.
+
+### Points non exécutés
+
+- VirtualBox exact (absent du poste) ; KVM inaccessible (`Permission denied`), TCG utilisé.
+- `miles.service` ne reste pas démarré : `miles.py` absent au sommet de la payload (présent seulement en `worktrees/<id>/miles.py`), `data/` manquant. Contenu de payload à corriger dans un lot ultérieur.
+- Journal du service illisible par `miles` (groupes) ; syslog installateur illisible par `miles` (attendu).
+
+### Prochaine action recommandée
+
+Relire le rapport 20261109 et les preuves, vérifier l'absence d'identifiants dans les pièces jointes, puis traiter le contenu de la payload (`miles.py` au sommet, `data/`, exclusion de `worktrees/`) avant tout test VirtualBox.
+
+## H-020 — 2026-11-11 — Agent A → Agent B — service miles actif au premier boot (ISO 20261111)
+
+- **De** : Agent A (poste principal, utilisateur `DripMind`).
+- **Vers** : Agent B — revue indépendante.
+- **Référence** : `TASK-DEV-070` (DONE), `DEC-034`. Aucun commit ni push.
+- **Périmètre** : `hardware/packages/usb-installer/{build-iso.sh,miles-late.sh,miles-provision.sh}`, ISO 20261111, installation n°5 + premier boot QEMU TCG, outillage `logs/`, rapport. Aucun développement fonctionnel MILES.
+
+### Travail réalisé
+
+1. **Cause du service en boucle** : `status=226/NAMESPACE` (sandbox systemd, avant `ExecStart`) car `ReadWritePaths` cite `/opt/Milescorp/.env`, inexistant. Prouvé par `systemctl status` invité + `ENV_MISSING` + lancement manuel OK hors sandbox.
+2. **Correctifs** : `touch "$DEST/.env"` en provision (avant `chown`), message de log corrigé ; `chmod 644` de l'unité installée par `miles-late.sh` ; prune `*/.manus` dans `build-iso.sh` ; build sur ext4 natif (`WORK=/home/stanc/usb-build-11`, extraction initrds 9P bloquée en `D`). `bash -n`/`dash -n` OK.
+3. **Rebuild + vérifications ISO** : 20261111 (812974080 o, SHA `a6a4653a…2299c`, `sha256sum -c` OK), tarball 1004 fichiers / 0 `manus` / `miles.py` au sommet / `prov.sh` vérifié (lignes 50 et 54).
+4. **Installation n°5 + premier boot sans touche** : reboot installateur, zéro `Terminer` (108004 o), disque 2529361920 o, QEMU sorti seul ; `provision.done` 10:47:36, `is-enabled` → enabled, `is-active` → **active**, `NRestarts=0`/`running`, `curl 127.0.0.1:8080` → **HTTP:200**, 17 entrées, `MILESPY_OK`/`DATA_OK`/`ENV_OK`. Captures : `logs/firstboot-screen.png` (enabled + active + 501 HEAD + 17), transcript `logs/guest-exec.log` (10 blocs, 10/10 rc=0). **CLEAN** : mots de passe NOT-FOUND (2 référencés), jeton 64hex NOT-FOUND, capture relue propre.
+
+### Résultats
+
+- ISO : `releases/miles-debian13-autoinstall-20261111.iso` ; sommes : `releases/SHA256-ISO-SUMS`.
+- Rapport : `docs/reports/ISO_PAYLOAD_FIX_20261111_AGENT_A.md`.
+- Fichiers modifiés (non commités) : `hardware/packages/usb-installer/{build-iso.sh,miles-late.sh,miles-provision.sh}`, `logs/{full-install-tcg.sh,guest-exec.py,vga-shot.py,rebuild-iso11.sh}` (nouveau), `docs/coordination/*` ; `logs/rebuild-iso.sh` repointé vers l'ISO 20261111.
+
+### Points non exécutés
+
+- VirtualBox exact (absent du poste) ; KVM inaccessible (`Permission denied`), TCG utilisé.
+- `HEAD /` répond `501` (application sans support `HEAD`, hors périmètre) ; `sendkey` AZERTY perd `{`/`}` (contourné : preuve 200 par série, écran par `-I`).
+- QEMU arrêté via moniteur (`quit`), NOQEMU confirmé ; hôte WSL vérifié propre (aucun effet du pipe `tar|bash -n` accidentel : pas d'utilisateur `miles`, pas de `/opt/Milescorp`).
+- Aucun commit/push.
+
+### Prochaine action recommandée
+
+Relire le rapport 20261111 et les preuves, vérifier l'absence d'identifiants dans les pièces jointes, puis décider avec l'utilisateur : test VirtualBox de l'ISO 20261111, ou `--setup` (clé API) sur machine réelle.
+
+## H-021 — 2026-11-24 — Agent A → Agent B — image Live USB Debian 13 (clé 64 Go)
+
+- **De** : Agent A (poste principal, utilisateur `DripMind`).
+- **Vers** : Agent B — revue indépendante.
+- **Référence** : `TASK-DEV-071` (DONE), `DEC-035`.
+
+### Travail réalisé
+
+1. **Fabrication** : rootfs `debootstrap` trixie → chroot (noyau 6.12, `live-boot`, systemd, locales FR, clavier `fr` pc105) → MILES + Companion dans `/opt/Milescorp` (venv, unités `miles.service` et `miles-companion.service`, utilisateur `miles`) → `mksquashfs -comp xz -e boot` (236 953 600 o) → `xorriso` hybride BIOS/UEFI (menus ISOLINUX et GRUB, timeout 5 s, argument `persistence` présent dans les deux). Chaîne complète documentée dans `.usb-iso-build/README.md`.
+2. **Correctifs** : `LIVE_USERNAME="miles"` dans `/etc/live/config.conf` (le générateur `live-config-getty-generator` écrasait l'autologin avec un compte `user` inexistant) ; `MILES_PROVIDER=local` (la valeur `off` provoquait un crash-loop de `miles.service`) ; `MILES_WEB_AUTH_TOKEN` vide ; SSH désactivé ; `miles` en `NOPASSWD:ALL`.
+3. **Tests exécutés (QEMU 10.2, OVMF, WSL)** : UEFI ✅ ; BIOS ✅ ; **chemin clé USB** ✅ (ISO copiée, `-device qemu-xhci` + `usb-storage`) ; **persistance 2 démarrages** ✅ — partition `persistence` montée, overlay avec `upperdir` sur le disque de persistance aux deux boots, fichier créé avant reboot retrouvé après reboot, services `active` ; HTTP 200/200 sur `127.0.0.1:8080` et `:8787` ; `ssh` inactif ; aucune unité en échec ; locale FR + AZERTY ; MILES sur tty1 (vérifié par marqueur + process + capture avec redraw forcé).
+4. **Livraison** : `releases/miles-debian13-live-20261124.iso` (299 892 736 o, SHA256 `e7b5ac8e85311d7886f0084a7704bec44402be2f8cd4d9fbccbc0cbed5201fc1`), `releases/SHA256-ISO-SUMS` mis à jour, ancienne ISO défaillante supprimée, guide `docs/installation/LIVE_USB.md`.
+5. **Nettoyage** : 87 scripts one-off supprimés, 33 conservés (build + tests) avec README ; `.gitignore` complète de l'espace de build de l'installateur.
+
+### Résultats
+
+- ISO prête à être écrite sur la clé 64 Go en **mode DD** ; persistance à créer depuis la clé elle-même (guide §4) ; premier réglage IA par `miles --setup` (guide §5), conservé par la persistance.
+- `docs/installation/LIVE_USB.md`, `.usb-iso-build/README.md`, `TASK-DEV-071`, `DEC-035`.
+
+### Points non exécutés
+
+- Écriture réelle sur clé physique et boot sur matériel réel (non disponible ici) ; **Secure Boot non prouvé sur firmware réel** — `EFI/boot/bootx64.efi` (shim) et `grubx64.efi` sont signés `Debian Secure Boot CA` / `Microsoft Corporation UEFI CA 2011`, vérifié par `sbverify`/`strings`, mais la chaîne complète n'a pas été testée sur un vrai firmware.
+- Persistance validée sur disque virtuel ; la procédure `fdisk` + `partx` du guide §4 n'a pas été rejouée telle quelle depuis la session live (les outils sont présents, `check-tools.sh`).
+- Aucun appel réseau sortant, aucun secret embarqué, aucun push forcé.
+
+### Prochaine action recommandée
+
+Écrire l'ISO en mode DD, créer la partition de persistance selon le guide §4, booter sur machine réelle (F12/F9/F8), vérifier `mount | grep persistence` puis `miles --setup`. Revue Agent B de `.usb-iso-build/README.md`, du guide et des défauts fail-closed (`DEC-035`).

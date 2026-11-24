@@ -43,6 +43,9 @@ data/*.db-*
 # Archives de téléchargement générées (jamais commitées)
 releases/
 
+# Espace de build de l'installateur (contient une ISO Debian telechargee)
+hardware/packages/usb-installer/.usb-iso-build/
+
 # Boîtier : état local du backend et configuration firmware personnelle
 hardware/packages/backend-box/box_state.json
 platformio.local.ini
